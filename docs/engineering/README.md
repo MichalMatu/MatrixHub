@@ -16,6 +16,8 @@ technical references that support implementation, debugging, and validation.
 
 - [integrations/bluetooth_overview.md](integrations/bluetooth_overview.md) - scanner-only BLE model
 - [integrations/csi.md](integrations/csi.md) - Wi-Fi CSI runtime path
+- [integrations/remote_access_cloudflare.md](integrations/remote_access_cloudflare.md) - planned
+  customer remote access relay architecture
 - [integrations/telegram_integration.md](integrations/telegram_integration.md) - Telegram runtime model, delivery path, and TLS policy
 - [integrations/telegram_commands.md](integrations/telegram_commands.md) - Telegram command registry, polling rules, and extension notes
 
