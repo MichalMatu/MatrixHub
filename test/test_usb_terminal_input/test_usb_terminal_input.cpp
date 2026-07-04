@@ -37,7 +37,7 @@ void test_normal_command_keeps_existing_redirection() {
     USB_TERMINAL::TerminalInput input(&keyboard);
     const char* cmd = "ls -la";
     TEST_ASSERT_TRUE(input.sendCommand("/dev/ttyUSB0", cmd, strlen(cmd)));
-    TEST_ASSERT_EQUAL_STRING("ls -la > /dev/ttyUSB0 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+    TEST_ASSERT_EQUAL_STRING("ls -la > '/dev/ttyUSB0' 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
 }
 
 void test_pwd_command_is_not_wrapped() {
@@ -47,7 +47,7 @@ void test_pwd_command_is_not_wrapped() {
     USB_TERMINAL::TerminalInput input(&keyboard);
     const char* cmd = "pwd";
     TEST_ASSERT_TRUE(input.sendCommand("/dev/ttyUSB0", cmd, strlen(cmd)));
-    TEST_ASSERT_EQUAL_STRING("pwd > /dev/ttyUSB0 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+    TEST_ASSERT_EQUAL_STRING("pwd > '/dev/ttyUSB0' 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
 }
 
 void test_standalone_cd_command_adds_pwd_wrapper() {
@@ -57,7 +57,7 @@ void test_standalone_cd_command_adds_pwd_wrapper() {
     USB_TERMINAL::TerminalInput input(&keyboard);
     const char* cmd = "cd /tmp";
     TEST_ASSERT_TRUE(input.sendCommand("/dev/ttyUSB0", cmd, strlen(cmd)));
-    TEST_ASSERT_EQUAL_STRING("{ cd /tmp; pwd; } > /dev/ttyUSB0 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+    TEST_ASSERT_EQUAL_STRING("{ cd /tmp; pwd; } > '/dev/ttyUSB0' 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
 }
 
 void test_cd_dash_adds_pwd_wrapper() {
@@ -67,7 +67,7 @@ void test_cd_dash_adds_pwd_wrapper() {
     USB_TERMINAL::TerminalInput input(&keyboard);
     const char* cmd = "cd -";
     TEST_ASSERT_TRUE(input.sendCommand("/dev/ttyUSB0", cmd, strlen(cmd)));
-    TEST_ASSERT_EQUAL_STRING("{ cd -; pwd; } > /dev/ttyUSB0 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+    TEST_ASSERT_EQUAL_STRING("{ cd -; pwd; } > '/dev/ttyUSB0' 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
 }
 
 void test_cd_with_shell_operator_is_not_wrapped() {
@@ -77,7 +77,40 @@ void test_cd_with_shell_operator_is_not_wrapped() {
     USB_TERMINAL::TerminalInput input(&keyboard);
     const char* cmd = "cd /tmp && ls";
     TEST_ASSERT_TRUE(input.sendCommand("/dev/ttyUSB0", cmd, strlen(cmd)));
-    TEST_ASSERT_EQUAL_STRING("cd /tmp && ls > /dev/ttyUSB0 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+    TEST_ASSERT_EQUAL_STRING("cd /tmp && ls > '/dev/ttyUSB0' 2>&1\n", g_usb_hid_keyboard_last_print.c_str());
+}
+
+void test_invalid_target_port_is_rejected() {
+    KEYBOARD::KeyboardService keyboard;
+    TEST_ASSERT_TRUE(keyboard.begin());
+
+    USB_TERMINAL::TerminalInput input(&keyboard);
+    const char* cmd = "uname -a";
+    TEST_ASSERT_FALSE(input.sendCommand("/dev/ttyUSB0; echo hacked", cmd, strlen(cmd)));
+    TEST_ASSERT_TRUE(g_usb_hid_keyboard_last_print.empty());
+}
+
+void test_target_port_validation_normalizes_auto_and_accepts_device_paths() {
+    char normalized[32] = {0};
+
+    TEST_ASSERT_TRUE(USB_TERMINAL::copyNormalizedTargetPort(normalized, sizeof(normalized), "AUTO"));
+    TEST_ASSERT_EQUAL_STRING("auto", normalized);
+
+    TEST_ASSERT_TRUE(USB_TERMINAL::copyNormalizedTargetPort(
+        normalized,
+        sizeof(normalized),
+        "/dev/serial/by-id/ESP32-S3_01"));
+    TEST_ASSERT_EQUAL_STRING("/dev/serial/by-id/ESP32-S3_01", normalized);
+}
+
+void test_target_port_validation_rejects_shell_metacharacters() {
+    char normalized[32] = {0};
+
+    TEST_ASSERT_FALSE(USB_TERMINAL::copyNormalizedTargetPort(
+        normalized,
+        sizeof(normalized),
+        "/dev/ttyUSB0;echo hacked"));
+    TEST_ASSERT_FALSE(USB_TERMINAL::isValidTargetPortSetting("/dev/ttyUSB0 $(id)"));
 }
 
 void test_auto_target_port_adds_probe_before_redirection() {
@@ -126,6 +159,9 @@ int main(int argc, char **argv) {
     RUN_TEST(test_standalone_cd_command_adds_pwd_wrapper);
     RUN_TEST(test_cd_dash_adds_pwd_wrapper);
     RUN_TEST(test_cd_with_shell_operator_is_not_wrapped);
+    RUN_TEST(test_invalid_target_port_is_rejected);
+    RUN_TEST(test_target_port_validation_normalizes_auto_and_accepts_device_paths);
+    RUN_TEST(test_target_port_validation_rejects_shell_metacharacters);
     RUN_TEST(test_auto_target_port_adds_probe_before_redirection);
     RUN_TEST(test_auto_target_port_wraps_standalone_cd_with_pwd);
     return UNITY_END();

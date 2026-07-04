@@ -1,6 +1,7 @@
 #include "UsbTerminalConfigJson.h"
 #include "../App.h"
 #include "../../system/rtc/RtcConfig.h"
+#include "../../usb_terminal/UsbTerminalTargetPort.h"
 
 namespace CONFIG {
 namespace JSON {
@@ -13,7 +14,9 @@ void deserializeUsbTerminal(JsonObject& obj, RTC::UsbTerminalData& data) {
     if (const char* port = obj[Keys::kTargetPort] | (const char*)nullptr) {
         // Use temporary aligned buffer to avoid unaligned access on packed struct
         char tempPort[sizeof(data.targetPort)] = {0};
-        strlcpy(tempPort, port, sizeof(tempPort));
+        if (!USB_TERMINAL::copyNormalizedTargetPort(tempPort, sizeof(tempPort), port)) {
+            strlcpy(tempPort, RTC::Defaults::UsbTerminal::TargetPort, sizeof(tempPort));
+        }
         memcpy(data.targetPort, tempPort, sizeof(data.targetPort));
     }
     if (obj[Keys::kIdleTimeoutMs].is<uint32_t>()) {

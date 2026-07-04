@@ -36,6 +36,13 @@ public:
         uint32_t idleTimeoutMs,
         const char* bytes,
         size_t bytesLen) const;
+
+private:
+    static constexpr size_t kPendingBufferSize =
+        LIMITS::USB_TERMINAL::MAX_OUTPUT_BUFFER_SIZE;
+
+    mutable char _pendingBytes[kPendingBufferSize]{0};
+    mutable size_t _pendingLen{0};
 };
 
 }  // namespace USB_TERMINAL

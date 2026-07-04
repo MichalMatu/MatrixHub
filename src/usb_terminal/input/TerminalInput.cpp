@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdio>
 #include "../../system/logging/Logging.h"
+#include "../UsbTerminalTargetPort.h"
 
 #undef LOG_TAG
 #define LOG_TAG "TerminalIn"
@@ -12,7 +13,6 @@ namespace USB_TERMINAL {
 
 namespace {
 
-constexpr const char* kAutoTargetPort = "auto";
 constexpr const char* kAutoPortProbe =
     "p=\"$(for p in /dev/serial/by-id/*Espressif* /dev/serial/by-id/*ESP* "
     "/dev/serial/by-id/*esp* /dev/serial/by-id/*Waveshare* "
@@ -20,10 +20,6 @@ constexpr const char* kAutoPortProbe =
     "/dev/cu.usbmodem* /dev/tty.usbmodem* /dev/cu.usbserial* /dev/tty.usbserial* "
     "/dev/serial/by-id/*; do [ -e \"$p\" ] && { printf '%s\\n' \"$p\"; break; }; done)\"; "
     "[ -n \"$p\" ] && ";
-
-bool isAutoTargetPort(const char* targetPort) {
-    return targetPort && strcasecmp(targetPort, kAutoTargetPort) == 0;
-}
 
 bool isStandaloneCdCommand(const char* cmdStart, size_t cmdLen) {
     if (!cmdStart || cmdLen < 2) {
@@ -135,15 +131,21 @@ bool TerminalInput::sendCommand(const char* targetPort, const char* cmdStart, si
              targetPort,
              static_cast<unsigned>(cmdLen));
 
+        char quotedPort[USB_TERMINAL::kMaxTargetPortLength + 3] = {0};
+        if (!shellQuoteTargetPort(quotedPort, sizeof(quotedPort), targetPort)) {
+            LOGW("Rejecting invalid USB terminal target port");
+            return false;
+        }
+
         const bool wrapWithPwd = isStandaloneCdCommand(cmdStart, cmdLen);
         const char* format = wrapWithPwd
             ? "{ %.*s; pwd; } > %s 2>&1\n"
             : "%.*s > %s 2>&1\n";
-        size_t requiredSize = snprintf(nullptr, 0, format, (int)cmdLen, cmdStart, targetPort) + 1;
+        size_t requiredSize = snprintf(nullptr, 0, format, (int)cmdLen, cmdStart, quotedPort) + 1;
         typedCommand = (char*)heap_caps_malloc(requiredSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
         if (typedCommand) {
-            snprintf(typedCommand, requiredSize, format, (int)cmdLen, cmdStart, targetPort);
+            snprintf(typedCommand, requiredSize, format, (int)cmdLen, cmdStart, quotedPort);
         } else {
             LOGE("Failed to allocate typedCommand buffer in Internal RAM");
             return false;
