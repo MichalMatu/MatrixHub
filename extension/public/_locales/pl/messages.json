@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "MatrixHub"
+  },
+  "extensionDescription": {
+    "message": "Panel boczny Chrome do urządzeń MatrixHub ESP32 w sieci lokalnej."
+  },
+  "extensionActionTitle": {
+    "message": "MatrixHub"
+  }
+}

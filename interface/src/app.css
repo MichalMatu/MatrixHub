@@ -1,0 +1,507 @@
+@import 'tailwindcss';
+
+@plugin "daisyui" {
+	themes:
+		business --default,
+		corporate --preferslight,
+		night,
+		black,
+		luxury,
+		dracula,
+		forest,
+		coffee,
+		dim,
+		sunset,
+		halloween,
+		synthwave,
+		light,
+		nord,
+		retro;
+}
+
+/*
+ * MatrixHub theme tuning.
+ *
+ * The app uses base-100 for the page, base-200 for cards, and base-300 for the
+ * sticky status bar. DaisyUI defaults for several bundled themes keep those
+ * values very close together, which makes operational screens look flat. These
+ * overrides keep the theme identities, but enforce clearer surface steps,
+ * neutral text, and readable action colors across the selected theme registry.
+ */
+:root:not([data-theme]),
+[data-theme='business'] {
+	color-scheme: dark;
+	--color-base-100: oklch(18% 0.014 255);
+	--color-base-200: oklch(23.5% 0.016 255);
+	--color-base-300: oklch(29% 0.018 255);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(58% 0.12 250);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(59% 0.07 210);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(62% 0.105 40);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(34% 0.018 255);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(63% 0.11 230);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(62% 0.11 155);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(75% 0.12 84);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(59% 0.16 25);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='corporate'] {
+	color-scheme: light;
+	--color-base-100: oklch(98.5% 0.003 250);
+	--color-base-200: oklch(94% 0.006 250);
+	--color-base-300: oklch(88.5% 0.011 250);
+	--color-base-content: oklch(22% 0 0);
+	--color-primary: oklch(52% 0.12 250);
+	--color-primary-content: oklch(98% 0 0);
+	--color-secondary: oklch(49% 0.055 268);
+	--color-secondary-content: oklch(97% 0 0);
+	--color-accent: oklch(55% 0.09 185);
+	--color-accent-content: oklch(97% 0 0);
+	--color-neutral: oklch(28% 0.02 260);
+	--color-neutral-content: oklch(96% 0 0);
+	--color-info: oklch(58% 0.13 230);
+	--color-info-content: oklch(98% 0 0);
+	--color-success: oklch(58% 0.16 150);
+	--color-success-content: oklch(98% 0 0);
+	--color-warning: oklch(82% 0.17 85);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(62% 0.2 25);
+	--color-error-content: oklch(98% 0 0);
+}
+
+[data-theme='night'] {
+	color-scheme: dark;
+	--color-base-100: oklch(17% 0.024 260);
+	--color-base-200: oklch(22.5% 0.027 260);
+	--color-base-300: oklch(28.5% 0.03 260);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(62% 0.115 232);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(60% 0.09 276);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(63% 0.105 330);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(34% 0.032 265);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(64% 0.105 230);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(63% 0.105 170);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(76% 0.12 85);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(61% 0.16 25);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='black'] {
+	color-scheme: dark;
+	--color-base-100: oklch(8% 0 0);
+	--color-base-200: oklch(15% 0 0);
+	--color-base-300: oklch(23% 0 0);
+	--color-base-content: oklch(89% 0 0);
+	--color-primary: oklch(56% 0.1 250);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(58% 0.08 210);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(60% 0.08 155);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(30% 0 0);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(70% 0.15 235);
+	--color-info-content: oklch(14% 0 0);
+	--color-success: oklch(70% 0.14 150);
+	--color-success-content: oklch(14% 0 0);
+	--color-warning: oklch(82% 0.16 90);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(66% 0.22 28);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='luxury'] {
+	color-scheme: dark;
+	--color-base-100: oklch(13% 0.008 285);
+	--color-base-200: oklch(19% 0.01 285);
+	--color-base-300: oklch(25% 0.012 285);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(70% 0.1 84);
+	--color-primary-content: oklch(18% 0 0);
+	--color-secondary: oklch(54% 0.07 325);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(60% 0.08 28);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(32% 0.05 70);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(76% 0.12 235);
+	--color-info-content: oklch(18% 0 0);
+	--color-success: oklch(75% 0.16 135);
+	--color-success-content: oklch(18% 0 0);
+	--color-warning: oklch(84% 0.15 92);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(70% 0.2 24);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='dracula'] {
+	color-scheme: dark;
+	--color-base-100: oklch(20% 0.026 275);
+	--color-base-200: oklch(25.5% 0.03 275);
+	--color-base-300: oklch(31.5% 0.034 275);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(64% 0.12 330);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(62% 0.095 285);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(68% 0.1 65);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(38% 0.035 275);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(68% 0.09 215);
+	--color-info-content: oklch(18% 0 0);
+	--color-success: oklch(68% 0.11 145);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(78% 0.12 105);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(62% 0.16 25);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='forest'] {
+	color-scheme: dark;
+	--color-base-100: oklch(15% 0.01 155);
+	--color-base-200: oklch(21% 0.014 155);
+	--color-base-300: oklch(27% 0.018 155);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(60% 0.115 155);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(61% 0.08 190);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(66% 0.085 88);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(33% 0.035 160);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(65% 0.09 225);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(62% 0.11 150);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(75% 0.11 88);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(59% 0.16 26);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='coffee'] {
+	color-scheme: dark;
+	--color-base-100: oklch(16% 0.01 42);
+	--color-base-200: oklch(22% 0.013 42);
+	--color-base-300: oklch(28.5% 0.016 42);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(62% 0.075 58);
+	--color-primary-content: oklch(18% 0 0);
+	--color-secondary: oklch(58% 0.055 210);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(60% 0.065 165);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(34% 0.018 42);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(74% 0.12 205);
+	--color-info-content: oklch(18% 0 0);
+	--color-success: oklch(72% 0.12 135);
+	--color-success-content: oklch(18% 0 0);
+	--color-warning: oklch(84% 0.15 86);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(70% 0.18 28);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='dim'] {
+	color-scheme: dark;
+	--color-base-100: oklch(20% 0.018 260);
+	--color-base-200: oklch(25.5% 0.021 260);
+	--color-base-300: oklch(31.5% 0.024 260);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(64% 0.095 155);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(61% 0.085 45);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(61% 0.08 300);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(36% 0.026 260);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(65% 0.09 205);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(64% 0.095 165);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(76% 0.11 95);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(61% 0.145 30);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='sunset'] {
+	color-scheme: dark;
+	--color-base-100: oklch(17% 0.014 245);
+	--color-base-200: oklch(23% 0.018 245);
+	--color-base-300: oklch(29.5% 0.022 245);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(64% 0.12 40);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(62% 0.1 10);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(61% 0.085 300);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(34% 0.04 235);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(65% 0.09 205);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(63% 0.095 145);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(76% 0.12 78);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(61% 0.15 18);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='halloween'] {
+	color-scheme: dark;
+	--color-base-100: oklch(15% 0.008 45);
+	--color-base-200: oklch(21% 0.011 45);
+	--color-base-300: oklch(28% 0.014 45);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(66% 0.11 58);
+	--color-primary-content: oklch(18% 0 0);
+	--color-secondary: oklch(56% 0.075 305);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(60% 0.075 150);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(34% 0.018 45);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(60% 0.1 260);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(61% 0.11 150);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(74% 0.13 62);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(61% 0.16 28);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='synthwave'] {
+	color-scheme: dark;
+	--color-base-100: oklch(16% 0.022 280);
+	--color-base-200: oklch(22% 0.027 280);
+	--color-base-300: oklch(29% 0.032 280);
+	--color-base-content: oklch(90% 0 0);
+	--color-primary: oklch(61% 0.12 285);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(64% 0.085 225);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(63% 0.105 335);
+	--color-accent-content: oklch(96% 0 0);
+	--color-neutral: oklch(35% 0.045 275);
+	--color-neutral-content: oklch(92% 0 0);
+	--color-info: oklch(65% 0.1 230);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(63% 0.095 175);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(77% 0.12 95);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(61% 0.15 30);
+	--color-error-content: oklch(96% 0 0);
+}
+
+[data-theme='light'] {
+	color-scheme: light;
+	--color-base-100: oklch(99.5% 0.001 260);
+	--color-base-200: oklch(95.5% 0.004 260);
+	--color-base-300: oklch(89.5% 0.009 260);
+	--color-base-content: oklch(22% 0 0);
+	--color-primary: oklch(50% 0.13 250);
+	--color-primary-content: oklch(98% 0 0);
+	--color-secondary: oklch(52% 0.09 325);
+	--color-secondary-content: oklch(98% 0 0);
+	--color-accent: oklch(54% 0.095 180);
+	--color-accent-content: oklch(98% 0 0);
+	--color-neutral: oklch(28% 0.012 260);
+	--color-neutral-content: oklch(96% 0 0);
+	--color-info: oklch(58% 0.16 230);
+	--color-info-content: oklch(98% 0 0);
+	--color-success: oklch(58% 0.16 155);
+	--color-success-content: oklch(98% 0 0);
+	--color-warning: oklch(82% 0.17 84);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(62% 0.22 25);
+	--color-error-content: oklch(98% 0 0);
+}
+
+[data-theme='nord'] {
+	color-scheme: light;
+	--color-base-100: oklch(97% 0.008 260);
+	--color-base-200: oklch(92% 0.014 260);
+	--color-base-300: oklch(86% 0.02 260);
+	--color-base-content: oklch(22% 0 0);
+	--color-primary: oklch(52% 0.09 252);
+	--color-primary-content: oklch(98% 0 0);
+	--color-secondary: oklch(58% 0.06 220);
+	--color-secondary-content: oklch(18% 0 0);
+	--color-accent: oklch(60% 0.07 190);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(40% 0.035 265);
+	--color-neutral-content: oklch(96% 0 0);
+	--color-info: oklch(62% 0.1 220);
+	--color-info-content: oklch(98% 0 0);
+	--color-success: oklch(60% 0.12 145);
+	--color-success-content: oklch(98% 0 0);
+	--color-warning: oklch(78% 0.13 85);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(58% 0.16 18);
+	--color-error-content: oklch(98% 0 0);
+}
+
+[data-theme='retro'] {
+	color-scheme: light;
+	--color-base-100: oklch(96% 0.012 86);
+	--color-base-200: oklch(91.5% 0.018 86);
+	--color-base-300: oklch(84.5% 0.026 84);
+	--color-base-content: oklch(22% 0 0);
+	--color-primary: oklch(58% 0.095 28);
+	--color-primary-content: oklch(96% 0 0);
+	--color-secondary: oklch(55% 0.065 150);
+	--color-secondary-content: oklch(96% 0 0);
+	--color-accent: oklch(60% 0.08 74);
+	--color-accent-content: oklch(18% 0 0);
+	--color-neutral: oklch(38% 0.018 72);
+	--color-neutral-content: oklch(96% 0 0);
+	--color-info: oklch(56% 0.14 240);
+	--color-info-content: oklch(96% 0 0);
+	--color-success: oklch(52% 0.12 175);
+	--color-success-content: oklch(96% 0 0);
+	--color-warning: oklch(65% 0.18 48);
+	--color-warning-content: oklch(18% 0 0);
+	--color-error: oklch(62% 0.2 25);
+	--color-error-content: oklch(96% 0 0);
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+	html,
+	body {
+		max-width: 100%;
+		overflow-x: hidden;
+		font-family: 'Inter', sans-serif;
+		touch-action: manipulation;
+	}
+
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: 'Poppins', sans-serif;
+	}
+
+	*,
+	::after,
+	::before,
+	::backdrop,
+	::file-selector-button {
+		border-color: var(--color-gray-200, currentcolor);
+	}
+}
+
+/* Quiet card surfaces for dense operational screens */
+.card-shadow-base {
+	--shadow-color: var(--color-primary);
+	box-shadow:
+		0 1px 2px color-mix(in oklab, var(--color-base-content) 8%, transparent),
+		0 0 0 1px color-mix(in oklab, var(--shadow-color) 13%, transparent);
+	transition:
+		box-shadow 0.2s ease,
+		border-color 0.2s ease;
+}
+
+.card-shadow-base:hover {
+	box-shadow:
+		0 4px 12px color-mix(in oklab, var(--color-base-content) 11%, transparent),
+		0 0 0 1px color-mix(in oklab, var(--shadow-color) 18%, transparent);
+}
+
+.card-shadow-error {
+	--shadow-color: var(--color-error);
+}
+
+.card-shadow-info {
+	--shadow-color: var(--color-info);
+}
+
+.card-shadow-warning {
+	--shadow-color: var(--color-warning);
+}
+
+.card-shadow-success {
+	--shadow-color: var(--color-success);
+}
+
+.card-shadow-accent {
+	--shadow-color: var(--color-accent);
+}
+
+.card-shadow-primary {
+	--shadow-color: var(--color-primary);
+}
+
+.card-shadow-neutral {
+	--shadow-color: var(--color-neutral);
+}
+
+/* 
+ * DaisyUI v5 Animation Speed Override
+ * Force components to respect the CSS variables managed by ThemeStore
+ */
+:root {
+	--animation-btn: 0.2s;
+	--animation-input: 0.2s;
+}
+
+.btn,
+.file-selector-button {
+	transition-duration: var(--animation-btn);
+	animation-duration: var(--animation-btn);
+}
+
+.input,
+.select,
+.checkbox,
+.radio,
+.toggle,
+.range,
+.textarea {
+	transition-duration: var(--animation-input);
+	animation-duration: var(--animation-input);
+}
+
+/* Keep the app background calm; data and controls carry the visual weight. */
+body {
+	background-color: var(--color-base-100);
+	background-image: none;
+}
+
+.drawer,
+.drawer-content {
+	background-color: transparent;
+}

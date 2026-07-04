@@ -1,0 +1,1030 @@
+[
+	{
+		"type": "cycle",
+		"from": "src/lib/components/forms/ConfirmDialog.svelte",
+		"to": "src/lib/components/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/forms/ConfirmDialog.svelte",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/forms/InfoDialog.svelte",
+		"to": "src/lib/components/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/forms/InfoDialog.svelte",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/forms/PromptDialog.svelte",
+		"to": "src/lib/components/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/forms/PromptDialog.svelte",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/forms/RestartProgressDialog.svelte",
+		"to": "src/lib/components/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/forms/RestartProgressDialog.svelte",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/forms/TokenDialog.svelte",
+		"to": "src/lib/components/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/forms/TokenDialog.svelte",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/index.ts",
+		"to": "src/lib/components/layout/BaseWidget.svelte",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/layout/BaseWidget.svelte",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/index.ts",
+		"to": "src/lib/components/layout/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/layout/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/components/layout/LoadingCard.svelte",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/components/index.ts",
+		"to": "src/lib/components/shared/forms/FormToggle.svelte",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/components/shared/forms/FormToggle.svelte",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/components/layout/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/components/layout/LoadingCard.svelte",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/components/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/connectivity/BleApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/connectivity/BleApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/connectivity/NtpApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/connectivity/NtpApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/connectivity/WifiApApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/connectivity/WifiApApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/connectivity/WifiApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/connectivity/WifiApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/connectivity/WifiSensingApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/connectivity/WifiSensingApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/core/MatrixApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/core/MatrixApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/core/PowerApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/core/PowerApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/core/SecurityApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/core/SecurityApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/core/SystemApiService.ts",
+		"to": "src/lib/utils/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/api/core/SystemApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/integrations/AirMouseApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/integrations/AirMouseApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/integrations/CompensationApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/integrations/CompensationApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/integrations/KeyboardApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/integrations/KeyboardApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/integrations/NotificationApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/integrations/NotificationApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/integrations/ShellyApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/integrations/ShellyApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/monitoring/AlarmsApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/monitoring/AlarmsApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/api/index.ts",
+		"to": "src/lib/services/api/monitoring/LogsApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/monitoring/LogsApiService.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/api/index.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "cycle",
+		"from": "src/lib/services/core/AuthService.ts",
+		"to": "src/lib/services/api/core/SecurityApiService.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-circular"
+		},
+		"cycle": [
+			{
+				"name": "src/lib/services/api/core/SecurityApiService.ts",
+				"dependencyTypes": ["local", "import"]
+			},
+			{
+				"name": "src/lib/utils/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/utils/format/timeFormat.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/index.ts",
+				"dependencyTypes": ["undetermined", "import"]
+			},
+			{
+				"name": "src/lib/services/core/index.ts",
+				"dependencyTypes": ["local", "export"]
+			},
+			{
+				"name": "src/lib/services/core/AuthService.ts",
+				"dependencyTypes": ["local", "export"]
+			}
+		]
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/components/airmouse/components/KeyboardCard.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/components/airmouse/useAirMouseManagement.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/components/keyboard/useKeyboardManagement.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/alarms/components/fields/BleDeviceSelect.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/alarms/components/fields/useBleDeviceSelect.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/auth/useLogin.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/bluetooth/scanner/useBleScanner.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/bluetooth/useBleSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/bluetooth/useBleStatus.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/connections/ntp/NtpPage.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/logs/useLogStatistics.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/settings/integrations/udp/useUdpTest.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/settings/notifications/heartbeat/useHeartbeatTest.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/shelly/shellyModel.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/matrix/matrixModel.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/matrix/MatrixPage.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/matrix/useMatrixSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/matrix/useMatrixSettings.test.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/power/usePowerConfig.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/power/usePowerManagement.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/power/usePowerManagement.test.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/power/usePowerStatus.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/status/useLiveTailConfig.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/status/useLiveTailManagement.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/system/status/useLiveTailStream.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/usb/keyboard/useKeyboardSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifi/ap/useApSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifi/ap/useApStatus.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifi/sta/Scan.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifi/sta/useWifiStaSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifi/sta/useWifiStatus.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifisensing/useWifiSensingManagement.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifisensing/useWifiSensingSettings.svelte.ts",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/routes/(dashboard)/widgets/alarms/AlarmsWidget.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/routes/charts/+page.svelte",
+		"to": "src/lib/services/index.ts",
+		"rule": {
+			"severity": "error",
+			"name": "no-services-barrel-in-ui"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/bluetooth/useBluetoothManagement.test.svelte.ts",
+		"to": "src/lib/stores/user.ts",
+		"rule": {
+			"severity": "warn",
+			"name": "prefer-session-access-over-user-store"
+		}
+	},
+	{
+		"type": "dependency",
+		"from": "src/lib/features/wifisensing/useWifiSensingManagement.test.svelte.ts",
+		"to": "src/lib/stores/user.ts",
+		"rule": {
+			"severity": "warn",
+			"name": "prefer-session-access-over-user-store"
+		}
+	}
+]

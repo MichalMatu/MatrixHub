@@ -1,0 +1,126 @@
+{
+	"forbidden": [
+		{
+			"name": "no-circular",
+			"severity": "error",
+			"comment": "Circular dependencies cause maintenance issues",
+			"from": {},
+			"to": {
+				"circular": true
+			}
+		},
+		{
+			"name": "no-orphans",
+			"severity": "warn",
+			"comment": "Orphan modules are dead code",
+			"from": {
+				"orphan": true,
+				"pathNot": [
+					"(^|/)\\.[^/]+\\.(js|ts|svelte)$",
+					"(^|/)\\+[^/]+\\.(js|ts|svelte)$",
+					"(^|/)src/lib/types/",
+					"(^|/)src/lib/data/",
+					"(^|/)src/lib/utils/path/helpers\\.ts$",
+					"(^|/)src/lib/utils/dom/htmlId\\.ts$",
+					"(^|/)src/lib/paraglide/",
+					"(^|/)src/paraglide/",
+					"(^|/)src/lib/actions/portal\\.ts$",
+					"binaryLogParser\\.ts$",
+					"\\.d\\.ts$",
+					"(^|/)tsconfig\\.json$",
+					"(^|/)(babel|webpack)\\.config\\.(js|ts)$",
+					"^vite\\.config\\.ts$",
+					"^svelte\\.config\\.js$",
+					"(^|/)src/mocks/"
+				]
+			},
+			"to": {}
+		},
+		{
+			"name": "no-deprecated-core",
+			"severity": "warn",
+			"comment": "Using deprecated core modules",
+			"from": {},
+			"to": {
+				"dependencyTypes": ["core"],
+				"path": "^(punycode|domain|constants|sys|_linklist)$"
+			}
+		},
+		{
+			"name": "not-to-test",
+			"severity": "error",
+			"comment": "Don't import test files in production code",
+			"from": {
+				"pathNot": "\\.(spec|test)\\.(js|ts)$"
+			},
+			"to": {
+				"path": "\\.(spec|test)\\.(js|ts)$"
+			}
+		},
+		{
+			"name": "prefer-session-access-over-user-store",
+			"severity": "warn",
+			"comment": "Routes and feature/UI code should prefer useSessionAccess/useApiClient over direct user store imports.",
+			"from": {
+				"path": "^src/",
+				"pathNot": [
+					"(^|/)src/lib/features/auth/",
+					"(^|/)src/lib/stores/systemStatus\\.svelte\\.ts$",
+					"(^|/)src/lib/services/core/AuthService\\.ts$",
+					"(^|/)src/lib/stores/user(\\.svelte)?\\.ts$",
+					"\\.(spec|test)\\.(js|ts)$"
+				]
+			},
+			"to": {
+				"path": "(^|/)src/lib/stores/user(\\.svelte)?\\.ts$"
+			}
+		},
+		{
+			"name": "no-services-barrel-in-ui",
+			"severity": "error",
+			"comment": "Routes, features, and components should not import the services barrel directly.",
+			"from": {
+				"path": "^src/(lib/(features|components)|routes)/",
+				"pathNot": "\\.(spec|test)\\.(js|ts)$"
+			},
+			"to": {
+				"path": "^src/lib/services/index\\.ts$"
+			}
+		},
+		{
+			"name": "no-raw-system-status-in-features",
+			"severity": "error",
+			"comment": "UI and feature code should consume system status through adapters and read models, not the raw runtime facade.",
+			"from": {
+				"path": "^src/(lib/(features|components)|routes)/",
+				"pathNot": [
+					"^src/lib/stores/system/",
+					"^src/lib/features/system/status/useSystemStatusReadModel\\.svelte\\.ts$",
+					"^src/lib/features/system/status/useMacroStatusReadModel\\.svelte\\.ts$",
+					"^src/lib/features/system/status/useSystemTransportManagement\\.svelte\\.ts$",
+					"\\.(spec|test)\\.(js|ts)$"
+				]
+			},
+			"to": {
+				"path": "^src/lib/stores/systemStatus\\.svelte\\.ts$"
+			}
+		}
+	],
+	"options": {
+		"doNotFollow": {
+			"path": "node_modules"
+		},
+		"exclude": {
+			"path": "\\.(spec|test)\\.(js|ts)$"
+		},
+		"tsPreCompilationDeps": true,
+		"tsConfig": {
+			"fileName": "./tsconfig.dependency-cruiser.json"
+		},
+		"enhancedResolveOptions": {
+			"extensions": [".ts", ".js", ".mjs", ".cjs", ".svelte"],
+			"exportsFields": ["svelte", "exports"],
+			"conditionNames": ["svelte", "import", "require", "default"]
+		}
+	}
+}

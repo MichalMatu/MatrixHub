@@ -1,0 +1,4 @@
+interface:
+  display_name: "ESP32 Firmware Agent"
+  short_description: "ESP32-S3 firmware + SvelteKit UI specialist for this repo"
+  default_prompt: "Follow repo rules to implement ESP32-S3 firmware and SvelteKit UI changes for this project."

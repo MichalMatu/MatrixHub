@@ -1,0 +1,119 @@
+#pragma once
+
+#include <Arduino.h>
+#include "core/AlarmRuleManager.h"
+#include "core/AlarmCoordinator.h"
+#include "types/AlarmInputData.h"
+#include <utility>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+namespace BLE { class BleService; }
+namespace MATRIX_MANAGER { class MatrixManagerService; }
+namespace GPIO { class GpioService; }
+
+namespace ALARMS {
+
+/**
+ * @brief Central alarm service (Facade).
+ * 
+ * Coordinates Rule Management and Evaluation Logic.
+ * Managed by ServiceRegistry (Dependency Injection).
+ */
+class AlarmService {
+public:
+    // static AlarmService& instance(); // REMOVED: Use Dependency Injection
+    
+    /**
+     * @brief Initialize the service
+     */
+    bool begin();
+    
+    /**
+     * @brief Reload rules from storage.
+     * Use this after modifying rules via API.
+     */
+    bool reloadRules();
+    
+    /**
+     * @brief Reset runtime state (cooldowns, triggers).
+     */
+    void resetRuntimeState();
+
+    /**
+     * @brief Re-apply current latched LED/Matrix state.
+     * Useful when display settings (mode, brightness) change.
+     */
+    void reapplyLatchedState();
+    
+    /**
+     * @brief Check if an alarm LED indication is currently active.
+     */
+    bool isAlarmLatched() const;
+    
+    /**
+     * @brief Update rules with new set and persist them.
+     * Applies a new in-memory ruleset and executes required external side effects.
+     * Returns false when the manager could not apply the update.
+     */
+    bool updateRules(const AlarmRule* rules, uint8_t count);
+    
+    /**
+     * @brief Merge new input into the latest alarm snapshot.
+     * Producers call this on their hot path; it does not execute rules inline.
+     * The intent is to keep sensor/WiFi collection deterministic and let one
+     * central caller decide when the alarm pipeline should actually run.
+     */
+    bool submitInput(const AlarmInputData& input);
+    float getLastImuTamperValue() const;
+
+    /**
+     * @brief Execute one pending alarm evaluation pass, if new input arrived.
+     * Consumes the latest merged snapshot only once; older intermediate updates
+     * are intentionally coalesced instead of forming a backlog.
+     * @return Number of notifications/actions triggered
+     */
+    uint8_t processPending();
+
+    /**
+     * @brief Set callback for alarm state changes (WebSocket broadcast).
+     */
+    void setStateChangeCallback(AlarmStateCallback cb) { _coordinator.setStateChangeCallback(cb); }
+    void setShellyActionExecutor(ShellyActionExecutor executor);
+    void setNotificationBackend(AlarmNotificationBackend backend) { _coordinator.setNotificationBackend(std::move(backend)); }
+    void setGpioService(GPIO::GpioService* service) { _coordinator.setGpioService(service); }
+    
+    // Direct access to manager if needed (e.g. for locking)
+    AlarmRuleManager& getManager() { return _manager; }
+
+    // Inject Dependencies
+    AlarmService(MATRIX_MANAGER::MatrixManagerService* matrixManager, BLE::BleService* ble);
+
+private:
+    struct AggregatedAlarmInput {
+        SensorSnapshot sensors;
+        float wifiVariance = NAN;
+        float wifiCsiMotion = NAN;
+        float imuTamper = NAN;
+    };
+
+    AlarmRuleManager _manager;
+    AlarmCoordinator _coordinator;
+    ShellyActionExecutor _shellyActionExecutor = nullptr;
+
+    // Cache the last merged view from all producers. SensorTaskLoop and
+    // WifiSensingTaskRunner update different fields, so we keep one combined
+    // snapshot and evaluate alarms against that coherent state later.
+    SensorSnapshot _lastSnapshot;
+    float _lastWifiVariance = NAN;
+    float _lastWifiCsiMotion = NAN;
+    float _lastImuTamper = NAN;
+    // Dirty flag for the coalesced "latest state available" mailbox model.
+    bool _pendingEvaluation = false;
+
+    // Cross-task producers only touch this small in-memory snapshot. The
+    // expensive alarm pipeline runs outside the lock in processPending().
+    mutable portMUX_TYPE _snapshotLock;
+};
+
+} // namespace ALARMS

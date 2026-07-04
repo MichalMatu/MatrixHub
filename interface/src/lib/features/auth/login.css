@@ -1,0 +1,7 @@
+.login-hero {
+	background-color: var(--color-base-100);
+}
+
+.login-card {
+	border: 1px solid color-mix(in oklab, var(--color-base-content) 10%, transparent);
+}

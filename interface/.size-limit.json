@@ -1,0 +1,27 @@
+[
+	{
+		"name": "Client JS Total (Gzip)",
+		"path": "build/_app/immutable/**/*.js",
+		"limit": "500 KB",
+		"gzip": true
+	},
+	{
+		"name": "Largest JS Chunk (Gzip)",
+		"path": "build/_app/immutable/**/*.js",
+		"limit": "80 KB",
+		"gzip": true,
+		"mode": "largest"
+	},
+	{
+		"name": "CSS Bundle (Gzip)",
+		"path": "build/_app/immutable/**/*.css",
+		"limit": "50 KB",
+		"gzip": true
+	},
+	{
+		"name": "Total Build Size",
+		"path": "build/**/*",
+		"limit": "1.5 MB",
+		"exclude": ["build/**/*.gz"]
+	}
+]

@@ -1,0 +1,42 @@
+name: Frontend Quality
+
+on:
+  pull_request:
+    paths:
+      - "interface/**"
+      - "docs/engineering/frontend-quality.md"
+      - ".github/workflows/frontend-quality.yml"
+  workflow_dispatch:
+
+jobs:
+  frontend-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: interface
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: interface/package-lock.json
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run quality:frontend
+
+      - run: npm run quality:frontend:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-artifacts
+          path: |
+            interface/test-results
+            interface/playwright-report
+          if-no-files-found: ignore

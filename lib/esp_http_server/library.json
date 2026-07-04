@@ -1,0 +1,10 @@
+{
+  "name": "esp_http_server",
+  "version": "1.0.0",
+  "description": "Vendored and PSRAM-optimized esp_http_server",
+  "build": {
+    "libArchive": false
+  },
+  "frameworks": ["arduino", "espidf"],
+  "platforms": ["espressif32"]
+}

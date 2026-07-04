@@ -1,0 +1,21 @@
+{
+	"$schema": "./node_modules/knip/schema.json",
+	"entry": ["src/routes/**/*.{svelte,ts,js}", "tests/**/*.{svelte,ts,js}"],
+	"project": [
+		"src/**/*.{svelte,ts,js}",
+		"tests/**/*.{svelte,ts,js}",
+		"scripts/**/*.{js,mjs,ts}",
+		"*.config.{js,ts}",
+		"*.{js,ts}",
+		".dependency-cruiser.json",
+		"tsconfig*.json"
+	],
+	"ignore": [".svelte-kit/**", "build/**", "src/lib/paraglide/**", "test-connection.js"],
+	"ignoreFiles": [".svelte-kit/**", "build/**", "src/lib/paraglide/**", "test-connection.js"],
+	"ignoreDependencies": ["@iconify-json/tabler", "daisyui", "tailwindcss"],
+	"ignoreBinaries": ["dot"],
+	"ignoreIssues": {
+		"src/mocks/appEnvironment.ts": ["exports"],
+		"src/mocks/appNavigation.ts": ["exports"]
+	}
+}

@@ -1,0 +1,23 @@
+/*
+ * uPlot Chart Styles
+ * Grouped here to keep chart-specific overrides out of global app.css
+ */
+
+/* Selection (Zoom) area — uses current theme's primary color */
+.u-select {
+	background: color-mix(in srgb, var(--color-primary), transparent 85%);
+	border: 1px solid color-mix(in srgb, var(--color-primary), transparent 50%);
+}
+
+/* Responsive axis font sizes for small viewports */
+@media (max-width: 420px) {
+	.uplot-scroll .u-axis text {
+		font-size: 10px;
+	}
+}
+
+@media (max-width: 320px) {
+	.uplot-scroll .u-axis text {
+		font-size: 9px;
+	}
+}

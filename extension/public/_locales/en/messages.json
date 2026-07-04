@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "MatrixHub"
+  },
+  "extensionDescription": {
+    "message": "Chrome side panel for MatrixHub ESP32 devices on the local network."
+  },
+  "extensionActionTitle": {
+    "message": "MatrixHub"
+  }
+}

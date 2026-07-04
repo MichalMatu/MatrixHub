@@ -1,0 +1,12 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["ES2022", "DOM", "WebWorker"],
+    "paths": {
+      "@matrixhub/device-sdk": ["../packages/device-sdk/src/index.ts"],
+      "$lib/*": ["./src/lib/*"]
+    }
+  },
+  "include": ["./**/*.d.ts", "./**/*.ts", "./**/*.svelte"]
+}
