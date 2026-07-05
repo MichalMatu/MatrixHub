@@ -373,12 +373,24 @@
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_loading({ locale: i18n.languageTag })}
 									</div>
-								{:else if quickScriptsState.scripts.length === 0}
+								{:else if quickScriptsState.hostActions.length === 0 &&
+									quickScriptsState.scripts.length === 0}
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_empty({ locale: i18n.languageTag })}
 									</div>
 								{:else}
 									<div class="flex flex-wrap gap-2">
+										{#each quickScriptsState.hostActions as action (action.id)}
+											<FormButton
+												type="button"
+												size="sm"
+												variant="ghost"
+												label={action.name}
+												loading={quickScriptsState.pendingHostActionId === action.id}
+												disabled={quickScriptsState.isHostActionDisabled(consoleState.busy)}
+												onclick={() => void quickScriptsState.runHostAction(action.id)}
+											/>
+										{/each}
 										{#each quickScriptsState.scripts as script (script.name)}
 											<FormButton
 												type="button"

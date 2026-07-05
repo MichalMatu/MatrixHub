@@ -63,17 +63,21 @@ const { mockPage, mockUser, mockTerminalState, mockConsoleState, mockQuickScript
 		},
 		mockQuickScriptsState: {
 			loading: false,
+			hostActions: [{ id: 'macos-focus-terminal', name: 'Focus macOS Terminal' }],
 			scripts: [{ name: 'Detect ESP' }, { name: 'Find Port' }],
 			macrosEnabled: true,
 			error: null,
 			pendingScriptName: null,
+			pendingHostActionId: null,
 			pendingAction: null,
 			isTerminalCommandDisabled: false,
 			shouldShowSection: true,
 			init: vi.fn(),
 			destroy: vi.fn(),
+			runHostAction: vi.fn(),
 			runScript: vi.fn(),
 			stopScript: vi.fn(),
+			isHostActionDisabled: vi.fn(() => false),
 			isRunningScript: vi.fn(() => false),
 			isScriptDisabled: vi.fn(() => false)
 		}
@@ -167,13 +171,17 @@ describe('UsbTerminalPage', () => {
 		mockConsoleState.error = null;
 		mockConsoleState.notice = null;
 		mockQuickScriptsState.loading = false;
+		mockQuickScriptsState.hostActions = [{ id: 'macos-focus-terminal', name: 'Focus macOS Terminal' }];
 		mockQuickScriptsState.scripts = [{ name: 'Detect ESP' }, { name: 'Find Port' }];
 		mockQuickScriptsState.macrosEnabled = true;
 		mockQuickScriptsState.error = null;
 		mockQuickScriptsState.pendingScriptName = null;
+		mockQuickScriptsState.pendingHostActionId = null;
 		mockQuickScriptsState.pendingAction = null;
 		mockQuickScriptsState.isTerminalCommandDisabled = false;
 		mockQuickScriptsState.shouldShowSection = true;
+		mockQuickScriptsState.runHostAction = vi.fn();
+		mockQuickScriptsState.isHostActionDisabled = vi.fn(() => false);
 		mockQuickScriptsState.isRunningScript = vi.fn(() => false);
 		mockQuickScriptsState.isScriptDisabled = vi.fn(() => false);
 		Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
@@ -211,6 +219,7 @@ describe('UsbTerminalPage', () => {
 		expect(screen.getByRole('combobox', { name: 'Host System' })).toBeTruthy();
 		expect(screen.getByRole('combobox', { name: 'Prepared Command' })).toBeTruthy();
 		expect(screen.getByText('Quick Scripts')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Focus macOS Terminal' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Detect ESP' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Find Port' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
@@ -258,6 +267,16 @@ describe('UsbTerminalPage', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Run id' }));
 
 		expect(mockConsoleState.sendDiagnosticCommand).toHaveBeenCalledTimes(1);
+	});
+
+	it('runs the built-in host focus quick action', async () => {
+		const { default: UsbTerminalPage } = await import('./UsbTerminalPage.svelte');
+		render(UsbTerminalPage);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Focus macOS Terminal' }));
+
+		expect(mockQuickScriptsState.runHostAction).toHaveBeenCalledWith('macos-focus-terminal');
+		expect(mockConsoleState.sendCommand).not.toHaveBeenCalled();
 	});
 
 	it('shows macros disabled notice and disables quick scripts without blocking manual terminal input', async () => {
