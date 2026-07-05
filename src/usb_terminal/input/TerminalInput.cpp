@@ -21,6 +21,8 @@ constexpr const char* kAutoPortProbe =
     "/dev/serial/by-id/*; do [ -e \"$p\" ] && { printf '%s\\n' \"$p\"; break; }; done)\"; "
     "[ -n \"$p\" ] && ";
 
+constexpr const char* kTargetPortStatusPrefix = "[MatrixHub] target port:";
+
 bool isStandaloneCdCommand(const char* cmdStart, size_t cmdLen) {
     if (!cmdStart || cmdLen < 2) {
         return false;
@@ -114,14 +116,26 @@ bool TerminalInput::sendCommand(const char* targetPort, const char* cmdStart, si
 
         const bool wrapWithPwd = isStandaloneCdCommand(cmdStart, cmdLen);
         const char* format = wrapWithPwd
-            ? "%s{ %.*s; pwd; } > \"$p\" 2>&1\n"
-            : "%s%.*s > \"$p\" 2>&1\n";
+            ? "%s{ printf '%s %%s\\n' \"$p\";\n%.*s\npwd\n} > \"$p\" 2>&1\n"
+            : "%s{ printf '%s %%s\\n' \"$p\";\n%.*s\n} > \"$p\" 2>&1\n";
         size_t requiredSize =
-            snprintf(nullptr, 0, format, kAutoPortProbe, (int)cmdLen, cmdStart) + 1;
+            snprintf(nullptr,
+                     0,
+                     format,
+                     kAutoPortProbe,
+                     kTargetPortStatusPrefix,
+                     (int)cmdLen,
+                     cmdStart) + 1;
         typedCommand = (char*)heap_caps_malloc(requiredSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
         if (typedCommand) {
-            snprintf(typedCommand, requiredSize, format, kAutoPortProbe, (int)cmdLen, cmdStart);
+            snprintf(typedCommand,
+                     requiredSize,
+                     format,
+                     kAutoPortProbe,
+                     kTargetPortStatusPrefix,
+                     (int)cmdLen,
+                     cmdStart);
         } else {
             LOGE("Failed to allocate typedCommand buffer in Internal RAM");
             return false;
@@ -139,13 +153,27 @@ bool TerminalInput::sendCommand(const char* targetPort, const char* cmdStart, si
 
         const bool wrapWithPwd = isStandaloneCdCommand(cmdStart, cmdLen);
         const char* format = wrapWithPwd
-            ? "{ %.*s; pwd; } > %s 2>&1\n"
-            : "%.*s > %s 2>&1\n";
-        size_t requiredSize = snprintf(nullptr, 0, format, (int)cmdLen, cmdStart, quotedPort) + 1;
+            ? "{ printf '%s %%s\\n' %s;\n%.*s\npwd\n} > %s 2>&1\n"
+            : "{ printf '%s %%s\\n' %s;\n%.*s\n} > %s 2>&1\n";
+        size_t requiredSize = snprintf(nullptr,
+                                       0,
+                                       format,
+                                       kTargetPortStatusPrefix,
+                                       quotedPort,
+                                       (int)cmdLen,
+                                       cmdStart,
+                                       quotedPort) + 1;
         typedCommand = (char*)heap_caps_malloc(requiredSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
         if (typedCommand) {
-            snprintf(typedCommand, requiredSize, format, (int)cmdLen, cmdStart, quotedPort);
+            snprintf(typedCommand,
+                     requiredSize,
+                     format,
+                     kTargetPortStatusPrefix,
+                     quotedPort,
+                     (int)cmdLen,
+                     cmdStart,
+                     quotedPort);
         } else {
             LOGE("Failed to allocate typedCommand buffer in Internal RAM");
             return false;
