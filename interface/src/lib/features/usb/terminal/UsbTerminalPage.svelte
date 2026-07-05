@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import BaseCard from '$lib/components/layout/BaseCard.svelte';
-	import { FormButton, FormInput } from '$lib/components/shared/forms';
+	import { FormButton, FormInput, FormSelect } from '$lib/components/shared/forms';
 	import { AdminAccessGate } from '$lib/components/layout';
 	import LoadingCard from '$lib/components/layout/LoadingCard.svelte';
+	import Activity from '~icons/tabler/activity';
 	import Terminal from '~icons/tabler/terminal-2';
 	import Send from '~icons/tabler/send';
 	import Stop from '~icons/tabler/player-stop';
@@ -15,6 +16,11 @@
 	import { useUsbTerminalSettings } from './useUsbTerminalSettings.svelte';
 	import { useUsbTerminalConsole } from './useUsbTerminalConsole.svelte';
 	import { useUsbTerminalQuickScripts } from './useUsbTerminalQuickScripts.svelte';
+	import {
+		USB_TERMINAL_PRESET_OS_OPTIONS,
+		findUsbTerminalPreset,
+		getUsbTerminalPresetsForOs
+	} from './usbTerminalCommandPresets';
 	import { useSessionAccess } from '$lib/features/auth/useSessionAccess.svelte';
 	const session = useSessionAccess();
 	const canManage = $derived(session.canManage);
@@ -32,10 +38,34 @@
 	let consoleContainer: HTMLDivElement | undefined = $state();
 	let autoscroll = $state(true);
 	let settingsModalOpen = $state(false);
+	let selectedPresetOs = $state('generic');
+	let selectedPresetId = $state('');
+	const presetOptions = $derived(
+		getUsbTerminalPresetsForOs(selectedPresetOs).map((preset) => ({
+			value: preset.id,
+			label: preset.label
+		}))
+	);
+	const selectedPreset = $derived(findUsbTerminalPreset(selectedPresetOs, selectedPresetId));
 
 	function handleConsoleSubmit(event: Event) {
 		event.preventDefault();
 		consoleState.sendCommand();
+	}
+
+	function handlePresetOsChange(event: Event) {
+		selectedPresetOs = (event.currentTarget as HTMLSelectElement).value;
+		selectedPresetId = '';
+	}
+
+	function handlePresetChange(event: Event) {
+		const presetId = (event.currentTarget as HTMLSelectElement).value;
+		selectedPresetId = presetId;
+
+		const preset = findUsbTerminalPreset(selectedPresetOs, presetId);
+		if (preset) {
+			consoleState.updateCommand(preset.command);
+		}
 	}
 
 	function handleConsoleScroll() {
@@ -178,6 +208,10 @@
 						</div>
 					{/if}
 
+					<div class="alert alert-info text-sm" data-testid="usb-terminal-focus-warning">
+						<span>{m.usb_terminal_focus_warning({ locale: i18n.languageTag })}</span>
+					</div>
+
 					<div
 						bind:this={consoleContainer}
 						onscroll={handleConsoleScroll}
@@ -217,6 +251,51 @@
 							>
 								<span class="whitespace-nowrap">{consoleState.currentPrompt}</span>
 							</div>
+							<div class="mb-3 rounded-lg border border-base-300/70 bg-base-200/50 p-3">
+								<div
+									class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"
+								>
+									<div class="text-xs font-semibold uppercase tracking-wide opacity-60">
+										{m.usb_terminal_command_presets_title({ locale: i18n.languageTag })}
+									</div>
+									<div class="text-xs leading-5 text-base-content/60">
+										{m.usb_terminal_command_presets_hint({ locale: i18n.languageTag })}
+									</div>
+								</div>
+								<div class="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+									<FormSelect
+										id="usb-terminal-preset-os"
+										label={m.usb_terminal_preset_os_label({ locale: i18n.languageTag })}
+										value={selectedPresetOs}
+										options={USB_TERMINAL_PRESET_OS_OPTIONS}
+										onchange={handlePresetOsChange}
+										size="sm"
+									/>
+									<FormSelect
+										id="usb-terminal-preset-command"
+										label={m.usb_terminal_preset_command_label({
+											locale: i18n.languageTag
+										})}
+										value={selectedPresetId}
+										options={presetOptions}
+										placeholder={m.usb_terminal_preset_placeholder({
+											locale: i18n.languageTag
+										})}
+										onchange={handlePresetChange}
+										size="sm"
+									/>
+								</div>
+								{#if selectedPreset}
+									<div
+										class="mt-3 rounded-md bg-base-100/70 px-3 py-2 text-xs leading-5 text-base-content/70"
+										data-testid="usb-terminal-preset-description"
+									>
+										<span class="font-medium text-base-content">{selectedPreset.label}</span>
+										<span class="mx-1 opacity-50">-</span>
+										<span>{selectedPreset.description}</span>
+									</div>
+								{/if}
+							</div>
 							<FormInput
 								id="usb-terminal-command"
 								type="text"
@@ -239,6 +318,16 @@
 								variant="neutral"
 								disabled={!consoleState.canCancel}
 								onclick={() => consoleState.sendCancel()}
+							/>
+							<FormButton
+								type="button"
+								label={m.usb_terminal_run_id({ locale: i18n.languageTag })}
+								icon={Activity}
+								variant="secondary"
+								disabled={!terminalState.enabled ||
+									!consoleState.canExecute ||
+									quickScriptsState.isTerminalCommandDisabled}
+								onclick={() => consoleState.sendDiagnosticCommand()}
 							/>
 							<FormButton
 								type="submit"

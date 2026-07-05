@@ -57,6 +57,7 @@ const { mockPage, mockUser, mockTerminalState, mockConsoleState, mockQuickScript
 			destroy: vi.fn(),
 			updateCommand: vi.fn(),
 			sendCommand: vi.fn(),
+			sendDiagnosticCommand: vi.fn(),
 			sendCancel: vi.fn(),
 			clearEntries: vi.fn()
 		},
@@ -96,9 +97,16 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	usb_terminal_status_busy_web: () => 'Busy (web)',
 	usb_terminal_status_busy_telegram: () => 'Busy (Telegram)',
 	usb_terminal_empty: () => 'No terminal output yet.',
+	usb_terminal_focus_warning: () => 'Before sending, focus a real terminal window on the host.',
+	usb_terminal_command_presets_title: () => 'Command Presets',
+	usb_terminal_command_presets_hint: () => 'Selecting a preset fills Command without sending it.',
+	usb_terminal_preset_os_label: () => 'Host System',
+	usb_terminal_preset_command_label: () => 'Prepared Command',
+	usb_terminal_preset_placeholder: () => 'Choose command',
 	usb_terminal_command_label: () => 'Command',
 	usb_terminal_command_placeholder: () => 'uname -a',
 	usb_terminal_stop: () => 'Stop',
+	usb_terminal_run_id: () => 'Run id',
 	usb_terminal_quick_scripts_title: () => 'Quick Scripts',
 	usb_terminal_quick_scripts_requires_macros: () =>
 		'Running quick scripts requires enabled Macros.',
@@ -194,8 +202,14 @@ describe('UsbTerminalPage', () => {
 		expect(screen.getByText('USB Terminal')).toBeTruthy();
 		expect(screen.getByText('Online')).toBeTruthy();
 		expect(screen.getByText('Idle')).toBeTruthy();
+		expect(screen.getByTestId('usb-terminal-focus-warning').textContent).toContain(
+			'Before sending, focus a real terminal window on the host.'
+		);
 		expect(screen.getByTestId('usb-terminal-prompt').textContent).toContain('$');
 		expect(screen.queryByText('Terminal is idle.')).toBeNull();
+		expect(screen.getByText('Command Presets')).toBeTruthy();
+		expect(screen.getByRole('combobox', { name: 'Host System' })).toBeTruthy();
+		expect(screen.getByRole('combobox', { name: 'Prepared Command' })).toBeTruthy();
 		expect(screen.getByText('Quick Scripts')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Detect ESP' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Find Port' })).toBeTruthy();
@@ -203,6 +217,7 @@ describe('UsbTerminalPage', () => {
 
 		expect(screen.getAllByRole('button', { name: 'Clear' })).toHaveLength(1);
 		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Run id' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('checkbox', { name: 'Enable USB terminal' }));
@@ -215,6 +230,35 @@ describe('UsbTerminalPage', () => {
 		expect(await screen.findByLabelText('Target port', {}, { timeout: 5000 })).toBeTruthy();
 		expect(await screen.findByLabelText('Idle timeout', {}, { timeout: 5000 })).toBeTruthy();
 	}, 20000);
+
+	it('fills the command input from an OS-specific preset without sending it', async () => {
+		const { default: UsbTerminalPage } = await import('./UsbTerminalPage.svelte');
+		render(UsbTerminalPage);
+
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Host System' }), {
+			target: { value: 'linux' }
+		});
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Prepared Command' }), {
+			target: { value: 'linux-smoke' }
+		});
+
+		expect(mockConsoleState.updateCommand).toHaveBeenCalledWith(
+			"printf 'MATRIXHUB_LINUX_OK\\n'; uname -a; pwd"
+		);
+		expect(mockConsoleState.sendCommand).not.toHaveBeenCalled();
+		expect(screen.getByTestId('usb-terminal-preset-description').textContent).toContain(
+			'Prints a known marker'
+		);
+	});
+
+	it('runs the id diagnostic command from the toolbar', async () => {
+		const { default: UsbTerminalPage } = await import('./UsbTerminalPage.svelte');
+		render(UsbTerminalPage);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Run id' }));
+
+		expect(mockConsoleState.sendDiagnosticCommand).toHaveBeenCalledTimes(1);
+	});
 
 	it('shows macros disabled notice and disables quick scripts without blocking manual terminal input', async () => {
 		mockQuickScriptsState.macrosEnabled = false;

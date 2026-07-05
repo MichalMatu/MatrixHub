@@ -24,6 +24,7 @@ import {
 const RETRY_DELAY_MS = 3000;
 const CONNECT_TIMEOUT_MS = 10000;
 const TOAST_DURATION_MS = 5000;
+const DIAGNOSTIC_COMMAND = 'id';
 
 interface UsbTerminalConsoleDeps {
 	shouldInit?: () => boolean;
@@ -42,6 +43,10 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 	let currentDirectory = $state<string | null>(null);
 	let pendingDirectoryProbe = $state<DirectoryProbeKind>(null);
 	let activeOutputEntryId = $state<number | null>(null);
+	let pendingCommandOutput = $state<{
+		observedOwnedSession: boolean;
+		sawOutput: boolean;
+	} | null>(null);
 
 	function showToast(type: 'info' | 'success' | 'warning' | 'error', message: string | null) {
 		if (!message) return;
@@ -60,6 +65,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		currentDirectory = null;
 		pendingDirectoryProbe = null;
 		activeOutputEntryId = null;
+		pendingCommandOutput = null;
 	}
 
 	function appendEntry(phase: EntryPhase, text: string) {
@@ -90,11 +96,41 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		}
 	}
 
+	function noOutputMessage() {
+		return m.usb_terminal_no_output_hint({ locale: i18n.languageTag });
+	}
+
+	function markPendingCommandOutputSeen() {
+		if (!pendingCommandOutput) return;
+		pendingCommandOutput = {
+			...pendingCommandOutput,
+			sawOutput: true
+		};
+	}
+
+	function maybeAppendNoOutputNotice() {
+		if (!pendingCommandOutput?.observedOwnedSession || pendingCommandOutput.sawOutput) {
+			return;
+		}
+
+		const message = noOutputMessage();
+		appendEntry('status', message);
+		showToast('warning', message);
+		pendingCommandOutput = null;
+	}
+
 	function setSession(message: SessionMessage) {
 		const nextBusy = Boolean(message.busy);
 		const nextOwner = Boolean(message.owner);
 		const nextTransport =
 			message.transport === 'telegram' || message.transport === 'ws' ? message.transport : null;
+
+		if (pendingCommandOutput && nextBusy && nextOwner && nextTransport === 'ws') {
+			pendingCommandOutput = {
+				...pendingCommandOutput,
+				observedOwnedSession: true
+			};
+		}
 
 		busy = nextBusy;
 		owner = nextOwner;
@@ -103,6 +139,10 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		if (!nextBusy) {
 			activeOutputEntryId = null;
 			pendingDirectoryProbe = null;
+			maybeAppendNoOutputNotice();
+			if (pendingCommandOutput?.observedOwnedSession) {
+				pendingCommandOutput = null;
+			}
 		}
 		if (nextBusy && (!nextOwner || nextTransport !== 'ws')) {
 			resetPromptState();
@@ -130,6 +170,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 				if (parsed.action === 'execute') {
 					pendingDirectoryProbe = null;
 					activeOutputEntryId = null;
+					pendingCommandOutput = null;
 				}
 				showToast(
 					'error',
@@ -141,13 +182,20 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		}
 
 		if (parsed.type === 'output') {
+			if ((parsed.text ?? '').length > 0) {
+				markPendingCommandOutputSeen();
+			}
 			const mergedOutput = appendOutputEntry(parsed.phase, parsed.text ?? '');
 			if (parsed.phase === 'final') {
 				maybeUpdateCurrentDirectory(mergedOutput);
 				pendingDirectoryProbe = null;
+				if (pendingCommandOutput?.sawOutput) {
+					pendingCommandOutput = null;
+				}
 			}
 			if (parsed.phase === 'interrupted') {
 				pendingDirectoryProbe = null;
+				pendingCommandOutput = null;
 			}
 			return;
 		}
@@ -226,16 +274,26 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		command = value;
 	}
 
-	function sendCommand() {
-		const trimmed = command.trim();
+	function sendCommand(commandOverride?: string) {
+		const trimmed = (commandOverride ?? command).trim();
 		if (!trimmed.length || busy || !isConnected) return false;
 		if (!sendFrame({ type: 'execute', command: trimmed })) return false;
 
 		pendingDirectoryProbe = getDirectoryProbeKind(trimmed);
 		activeOutputEntryId = null;
+		pendingCommandOutput = {
+			observedOwnedSession: false,
+			sawOutput: false
+		};
 		appendEntry('command', formatCommandEntry(trimmed, currentDirectory));
-		command = '';
+		if (commandOverride === undefined) {
+			command = '';
+		}
 		return true;
+	}
+
+	function sendDiagnosticCommand() {
+		return sendCommand(DIAGNOSTIC_COMMAND);
 	}
 
 	function sendCancel() {
@@ -246,6 +304,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 	function clearEntries() {
 		entries = [];
 		activeOutputEntryId = null;
+		pendingCommandOutput = null;
 	}
 
 	function init() {
@@ -299,6 +358,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		},
 		updateCommand,
 		sendCommand,
+		sendDiagnosticCommand,
 		sendCancel,
 		clearEntries,
 		init,
