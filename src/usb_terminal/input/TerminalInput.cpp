@@ -14,6 +14,7 @@ namespace USB_TERMINAL {
 namespace {
 
 constexpr const char* kAutoPortProbe =
+    "setopt NULL_GLOB 2>/dev/null || true; "
     "p=\"$(for p in /dev/serial/by-id/*Espressif* /dev/serial/by-id/*ESP* "
     "/dev/serial/by-id/*esp* /dev/serial/by-id/*Waveshare* "
     "/dev/serial/by-id/*USB_JTAG* /dev/ttyACM* /dev/ttyUSB* "
