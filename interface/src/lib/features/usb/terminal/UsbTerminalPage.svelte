@@ -243,59 +243,59 @@
 						{/if}
 					</div>
 
-					<form class="flex flex-col gap-3 lg:flex-row lg:items-end" onsubmit={handleConsoleSubmit}>
-						<div class="flex-1">
-							<div
-								class="mb-2 overflow-x-auto rounded-lg border border-base-300/70 bg-base-200/60 px-3 py-2 font-mono text-[11px] text-base-content/80 sm:text-xs"
-								data-testid="usb-terminal-prompt"
-							>
-								<span class="whitespace-nowrap">{consoleState.currentPrompt}</span>
+					<form class="flex flex-col gap-3" onsubmit={handleConsoleSubmit}>
+						<div
+							class="overflow-x-auto rounded-lg border border-base-300/70 bg-base-200/60 px-3 py-2 font-mono text-[11px] text-base-content/80 sm:text-xs"
+							data-testid="usb-terminal-prompt"
+						>
+							<span class="whitespace-nowrap">{consoleState.currentPrompt}</span>
+						</div>
+
+						<div class="rounded-lg border border-base-300/70 bg-base-200/50 p-3">
+							<div class="mb-3 flex flex-col gap-1">
+								<div class="text-xs font-semibold uppercase tracking-normal opacity-60">
+									{m.usb_terminal_command_presets_title({ locale: i18n.languageTag })}
+								</div>
+								<div class="text-xs leading-5 text-base-content/60">
+									{m.usb_terminal_command_presets_hint({ locale: i18n.languageTag })}
+								</div>
 							</div>
-							<div class="mb-3 rounded-lg border border-base-300/70 bg-base-200/50 p-3">
+							<div class="grid gap-3 md:grid-cols-2">
+								<FormSelect
+									id="usb-terminal-preset-os"
+									label={m.usb_terminal_preset_os_label({ locale: i18n.languageTag })}
+									value={selectedPresetOs}
+									options={USB_TERMINAL_PRESET_OS_OPTIONS}
+									onchange={handlePresetOsChange}
+									size="sm"
+								/>
+								<FormSelect
+									id="usb-terminal-preset-command"
+									label={m.usb_terminal_preset_command_label({
+										locale: i18n.languageTag
+									})}
+									value={selectedPresetId}
+									options={presetOptions}
+									placeholder={m.usb_terminal_preset_placeholder({
+										locale: i18n.languageTag
+									})}
+									onchange={handlePresetChange}
+									size="sm"
+								/>
+							</div>
+							{#if selectedPreset}
 								<div
-									class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"
+									class="mt-3 rounded-md bg-base-100/70 px-3 py-2 text-xs leading-5 text-base-content/70"
+									data-testid="usb-terminal-preset-description"
 								>
-									<div class="text-xs font-semibold uppercase tracking-wide opacity-60">
-										{m.usb_terminal_command_presets_title({ locale: i18n.languageTag })}
-									</div>
-									<div class="text-xs leading-5 text-base-content/60">
-										{m.usb_terminal_command_presets_hint({ locale: i18n.languageTag })}
-									</div>
+									<span class="font-medium text-base-content">{selectedPreset.label}</span>
+									<span class="mx-1 opacity-50">-</span>
+									<span>{selectedPreset.description}</span>
 								</div>
-								<div class="grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-									<FormSelect
-										id="usb-terminal-preset-os"
-										label={m.usb_terminal_preset_os_label({ locale: i18n.languageTag })}
-										value={selectedPresetOs}
-										options={USB_TERMINAL_PRESET_OS_OPTIONS}
-										onchange={handlePresetOsChange}
-										size="sm"
-									/>
-									<FormSelect
-										id="usb-terminal-preset-command"
-										label={m.usb_terminal_preset_command_label({
-											locale: i18n.languageTag
-										})}
-										value={selectedPresetId}
-										options={presetOptions}
-										placeholder={m.usb_terminal_preset_placeholder({
-											locale: i18n.languageTag
-										})}
-										onchange={handlePresetChange}
-										size="sm"
-									/>
-								</div>
-								{#if selectedPreset}
-									<div
-										class="mt-3 rounded-md bg-base-100/70 px-3 py-2 text-xs leading-5 text-base-content/70"
-										data-testid="usb-terminal-preset-description"
-									>
-										<span class="font-medium text-base-content">{selectedPreset.label}</span>
-										<span class="mx-1 opacity-50">-</span>
-										<span>{selectedPreset.description}</span>
-									</div>
-								{/if}
-							</div>
+							{/if}
+						</div>
+
+						<div class="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
 							<FormInput
 								id="usb-terminal-command"
 								type="text"
@@ -308,42 +308,45 @@
 									!consoleState.canExecute ||
 									quickScriptsState.isTerminalCommandDisabled}
 							/>
-						</div>
 
-						<div class="flex items-center justify-end gap-2 lg:shrink-0">
-							<FormButton
-								type="button"
-								label={m.usb_terminal_stop({ locale: i18n.languageTag })}
-								icon={Stop}
-								variant="neutral"
-								disabled={!consoleState.canCancel}
-								onclick={() => consoleState.sendCancel()}
-							/>
-							<FormButton
-								type="button"
-								label={m.usb_terminal_run_id({ locale: i18n.languageTag })}
-								icon={Activity}
-								variant="secondary"
-								disabled={!terminalState.enabled ||
-									!consoleState.canExecute ||
-									quickScriptsState.isTerminalCommandDisabled}
-								onclick={() => consoleState.sendDiagnosticCommand()}
-							/>
-							<FormButton
-								type="submit"
-								label={m.keyboard_send({ locale: i18n.languageTag })}
-								icon={Send}
-								disabled={!terminalState.enabled ||
-									!consoleState.canExecute ||
-									quickScriptsState.isTerminalCommandDisabled}
-							/>
+							<div class="flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
+								<FormButton
+									type="button"
+									label={m.usb_terminal_stop({ locale: i18n.languageTag })}
+									icon={Stop}
+									variant="neutral"
+									class="min-w-20"
+									disabled={!consoleState.canCancel}
+									onclick={() => consoleState.sendCancel()}
+								/>
+								<FormButton
+									type="button"
+									label={m.usb_terminal_run_id({ locale: i18n.languageTag })}
+									icon={Activity}
+									variant="secondary"
+									class="min-w-24"
+									disabled={!terminalState.enabled ||
+										!consoleState.canExecute ||
+										quickScriptsState.isTerminalCommandDisabled}
+									onclick={() => consoleState.sendDiagnosticCommand()}
+								/>
+								<FormButton
+									type="submit"
+									label={m.keyboard_send({ locale: i18n.languageTag })}
+									icon={Send}
+									class="min-w-20"
+									disabled={!terminalState.enabled ||
+										!consoleState.canExecute ||
+										quickScriptsState.isTerminalCommandDisabled}
+								/>
+							</div>
 						</div>
 					</form>
 
 					{#if quickScriptsState.shouldShowSection}
 						<div class="rounded-xl border border-base-300/70 bg-base-100 p-4">
 							<div class="flex flex-col gap-3">
-								<div class="text-xs font-semibold uppercase tracking-wide opacity-60">
+								<div class="text-xs font-semibold uppercase tracking-normal opacity-60">
 									{m.usb_terminal_quick_scripts_title({ locale: i18n.languageTag })}
 								</div>
 

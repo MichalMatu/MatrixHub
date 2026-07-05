@@ -24,6 +24,7 @@ import {
 const RETRY_DELAY_MS = 3000;
 const CONNECT_TIMEOUT_MS = 10000;
 const TOAST_DURATION_MS = 5000;
+const TOAST_DEDUP_WINDOW_MS = 1500;
 const DIAGNOSTIC_COMMAND = 'id';
 
 interface UsbTerminalConsoleDeps {
@@ -43,14 +44,40 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 	let currentDirectory = $state<string | null>(null);
 	let pendingDirectoryProbe = $state<DirectoryProbeKind>(null);
 	let activeOutputEntryId = $state<number | null>(null);
+	let commandInFlight = $state(false);
 	let pendingCommandOutput = $state<{
 		observedOwnedSession: boolean;
 		sawOutput: boolean;
 	} | null>(null);
+	let lastToastKey: string | null = null;
+	let lastToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function showToast(type: 'info' | 'success' | 'warning' | 'error', message: string | null) {
 		if (!message) return;
+
+		const toastKey = `${type}:${message}`;
+		if (lastToastKey === toastKey) return;
+
+		lastToastKey = toastKey;
+		if (lastToastTimer) {
+			clearTimeout(lastToastTimer);
+		}
+		lastToastTimer = setTimeout(() => {
+			if (lastToastKey === toastKey) {
+				lastToastKey = null;
+			}
+			lastToastTimer = null;
+		}, TOAST_DEDUP_WINDOW_MS);
+
 		notifications[type](message, TOAST_DURATION_MS);
+	}
+
+	function clearToastDedupe() {
+		if (lastToastTimer) {
+			clearTimeout(lastToastTimer);
+		}
+		lastToastTimer = null;
+		lastToastKey = null;
 	}
 
 	function canConnect() {
@@ -65,6 +92,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		currentDirectory = null;
 		pendingDirectoryProbe = null;
 		activeOutputEntryId = null;
+		commandInFlight = false;
 		pendingCommandOutput = null;
 	}
 
@@ -130,6 +158,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 				...pendingCommandOutput,
 				observedOwnedSession: true
 			};
+			commandInFlight = false;
 		}
 
 		busy = nextBusy;
@@ -137,6 +166,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		transport = nextTransport;
 
 		if (!nextBusy) {
+			commandInFlight = false;
 			activeOutputEntryId = null;
 			pendingDirectoryProbe = null;
 			maybeAppendNoOutputNotice();
@@ -170,6 +200,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 				if (parsed.action === 'execute') {
 					pendingDirectoryProbe = null;
 					activeOutputEntryId = null;
+					commandInFlight = false;
 					pendingCommandOutput = null;
 				}
 				showToast(
@@ -256,6 +287,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 
 	function destroyTransport() {
 		resetConnectionState();
+		clearToastDedupe();
 		socketTransport.destroy();
 	}
 
@@ -276,9 +308,10 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 
 	function sendCommand(commandOverride?: string) {
 		const trimmed = (commandOverride ?? command).trim();
-		if (!trimmed.length || busy || !isConnected) return false;
+		if (!trimmed.length || busy || commandInFlight || !isConnected) return false;
 		if (!sendFrame({ type: 'execute', command: trimmed })) return false;
 
+		commandInFlight = true;
 		pendingDirectoryProbe = getDirectoryProbeKind(trimmed);
 		activeOutputEntryId = null;
 		pendingCommandOutput = {
@@ -351,7 +384,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 			return formatPrompt(currentDirectory);
 		},
 		get canExecute() {
-			return isConnected && !busy;
+			return isConnected && !busy && !commandInFlight;
 		},
 		get canCancel() {
 			return isConnected && busy && owner;

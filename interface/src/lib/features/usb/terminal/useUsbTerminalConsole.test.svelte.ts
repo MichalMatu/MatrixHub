@@ -196,6 +196,55 @@ describe('useUsbTerminalConsole', () => {
 		cleanup?.();
 	});
 
+	it('blocks duplicate diagnostic commands while the first command is pending', () => {
+		let cleanup: (() => void) | undefined;
+		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
+
+		cleanup = $effect.root(() => {
+			consoleState = useUsbTerminalConsole();
+			consoleState.init();
+
+			const socket = MockWebSocket.instances[0];
+			socket.emitOpen();
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			expect(consoleState.sendDiagnosticCommand()).toBe(true);
+			expect(consoleState.sendDiagnosticCommand()).toBe(false);
+			expect(socket.send).toHaveBeenCalledTimes(1);
+			expect(consoleState.canExecute).toBe(false);
+			expect(consoleState.entries.filter((entry) => entry.text === '$ id')).toHaveLength(1);
+
+			socket.emitMessage({
+				type: 'ack',
+				action: 'execute',
+				ok: false,
+				message: 'Terminal is busy processing the previous command. Use status or cancel.'
+			});
+			socket.emitMessage({
+				type: 'ack',
+				action: 'execute',
+				ok: false,
+				message: 'Terminal is busy processing the previous command. Use status or cancel.'
+			});
+
+			expect(consoleState.canExecute).toBe(true);
+			expect(mockNotifications.error).toHaveBeenCalledTimes(1);
+			expect(mockNotifications.error).toHaveBeenCalledWith(
+				'Terminal is busy processing the previous command. Use status or cancel.',
+				5000
+			);
+		});
+
+		consoleState.destroy();
+		cleanup?.();
+	});
+
 	it('updates session ownership and appends output from websocket frames', () => {
 		let cleanup: (() => void) | undefined;
 		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
