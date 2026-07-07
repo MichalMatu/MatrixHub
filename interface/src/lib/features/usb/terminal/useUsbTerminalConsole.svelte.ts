@@ -24,6 +24,8 @@ import {
 const RETRY_DELAY_MS = 3000;
 const CONNECT_TIMEOUT_MS = 10000;
 const TOAST_DURATION_MS = 5000;
+const TOAST_DEDUP_WINDOW_MS = 1500;
+const DIAGNOSTIC_COMMAND = 'id';
 
 interface UsbTerminalConsoleDeps {
 	shouldInit?: () => boolean;
@@ -42,10 +44,40 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 	let currentDirectory = $state<string | null>(null);
 	let pendingDirectoryProbe = $state<DirectoryProbeKind>(null);
 	let activeOutputEntryId = $state<number | null>(null);
+	let commandInFlight = $state(false);
+	let pendingCommandOutput = $state<{
+		observedOwnedSession: boolean;
+		sawOutput: boolean;
+	} | null>(null);
+	let lastToastKey: string | null = null;
+	let lastToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function showToast(type: 'info' | 'success' | 'warning' | 'error', message: string | null) {
 		if (!message) return;
+
+		const toastKey = `${type}:${message}`;
+		if (lastToastKey === toastKey) return;
+
+		lastToastKey = toastKey;
+		if (lastToastTimer) {
+			clearTimeout(lastToastTimer);
+		}
+		lastToastTimer = setTimeout(() => {
+			if (lastToastKey === toastKey) {
+				lastToastKey = null;
+			}
+			lastToastTimer = null;
+		}, TOAST_DEDUP_WINDOW_MS);
+
 		notifications[type](message, TOAST_DURATION_MS);
+	}
+
+	function clearToastDedupe() {
+		if (lastToastTimer) {
+			clearTimeout(lastToastTimer);
+		}
+		lastToastTimer = null;
+		lastToastKey = null;
 	}
 
 	function canConnect() {
@@ -60,6 +92,8 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		currentDirectory = null;
 		pendingDirectoryProbe = null;
 		activeOutputEntryId = null;
+		commandInFlight = false;
+		pendingCommandOutput = null;
 	}
 
 	function appendEntry(phase: EntryPhase, text: string) {
@@ -90,19 +124,55 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		}
 	}
 
+	function noOutputMessage() {
+		return m.usb_terminal_no_output_hint({ locale: i18n.languageTag });
+	}
+
+	function markPendingCommandOutputSeen() {
+		if (!pendingCommandOutput) return;
+		pendingCommandOutput = {
+			...pendingCommandOutput,
+			sawOutput: true
+		};
+	}
+
+	function maybeAppendNoOutputNotice() {
+		if (!pendingCommandOutput?.observedOwnedSession || pendingCommandOutput.sawOutput) {
+			return;
+		}
+
+		const message = noOutputMessage();
+		appendEntry('status', message);
+		showToast('warning', message);
+		pendingCommandOutput = null;
+	}
+
 	function setSession(message: SessionMessage) {
 		const nextBusy = Boolean(message.busy);
 		const nextOwner = Boolean(message.owner);
 		const nextTransport =
 			message.transport === 'telegram' || message.transport === 'ws' ? message.transport : null;
 
+		if (pendingCommandOutput && nextBusy && nextOwner && nextTransport === 'ws') {
+			pendingCommandOutput = {
+				...pendingCommandOutput,
+				observedOwnedSession: true
+			};
+			commandInFlight = false;
+		}
+
 		busy = nextBusy;
 		owner = nextOwner;
 		transport = nextTransport;
 
 		if (!nextBusy) {
+			commandInFlight = false;
 			activeOutputEntryId = null;
 			pendingDirectoryProbe = null;
+			maybeAppendNoOutputNotice();
+			if (pendingCommandOutput?.observedOwnedSession) {
+				pendingCommandOutput = null;
+			}
 		}
 		if (nextBusy && (!nextOwner || nextTransport !== 'ws')) {
 			resetPromptState();
@@ -130,6 +200,8 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 				if (parsed.action === 'execute') {
 					pendingDirectoryProbe = null;
 					activeOutputEntryId = null;
+					commandInFlight = false;
+					pendingCommandOutput = null;
 				}
 				showToast(
 					'error',
@@ -141,13 +213,20 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		}
 
 		if (parsed.type === 'output') {
+			if ((parsed.text ?? '').length > 0) {
+				markPendingCommandOutputSeen();
+			}
 			const mergedOutput = appendOutputEntry(parsed.phase, parsed.text ?? '');
 			if (parsed.phase === 'final') {
 				maybeUpdateCurrentDirectory(mergedOutput);
 				pendingDirectoryProbe = null;
+				if (pendingCommandOutput?.sawOutput) {
+					pendingCommandOutput = null;
+				}
 			}
 			if (parsed.phase === 'interrupted') {
 				pendingDirectoryProbe = null;
+				pendingCommandOutput = null;
 			}
 			return;
 		}
@@ -208,6 +287,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 
 	function destroyTransport() {
 		resetConnectionState();
+		clearToastDedupe();
 		socketTransport.destroy();
 	}
 
@@ -226,16 +306,27 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 		command = value;
 	}
 
-	function sendCommand() {
-		const trimmed = command.trim();
-		if (!trimmed.length || busy || !isConnected) return false;
+	function sendCommand(commandOverride?: string) {
+		const trimmed = (commandOverride ?? command).trim();
+		if (!trimmed.length || busy || commandInFlight || !isConnected) return false;
 		if (!sendFrame({ type: 'execute', command: trimmed })) return false;
 
+		commandInFlight = true;
 		pendingDirectoryProbe = getDirectoryProbeKind(trimmed);
 		activeOutputEntryId = null;
+		pendingCommandOutput = {
+			observedOwnedSession: false,
+			sawOutput: false
+		};
 		appendEntry('command', formatCommandEntry(trimmed, currentDirectory));
-		command = '';
+		if (commandOverride === undefined) {
+			command = '';
+		}
 		return true;
+	}
+
+	function sendDiagnosticCommand() {
+		return sendCommand(DIAGNOSTIC_COMMAND);
 	}
 
 	function sendCancel() {
@@ -246,6 +337,7 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 	function clearEntries() {
 		entries = [];
 		activeOutputEntryId = null;
+		pendingCommandOutput = null;
 	}
 
 	function init() {
@@ -292,13 +384,14 @@ export function useUsbTerminalConsole(deps: UsbTerminalConsoleDeps = {}) {
 			return formatPrompt(currentDirectory);
 		},
 		get canExecute() {
-			return isConnected && !busy;
+			return isConnected && !busy && !commandInFlight;
 		},
 		get canCancel() {
 			return isConnected && busy && owner;
 		},
 		updateCommand,
 		sendCommand,
+		sendDiagnosticCommand,
 		sendCancel,
 		clearEntries,
 		init,

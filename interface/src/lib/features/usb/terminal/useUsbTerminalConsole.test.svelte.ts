@@ -48,6 +48,8 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	usb_terminal_connection_lost_reconnecting: () => 'USB terminal connection lost. Reconnecting...',
 	usb_terminal_not_connected: () => 'USB terminal is not connected.',
 	usb_terminal_error_generic: () => 'USB terminal error.',
+	usb_terminal_no_output_hint: () =>
+		'Command sent, but no serial output captured. Check terminal focus or target port.',
 	usb_terminal_message_disabled_service: () =>
 		'USB Terminal Service is disabled. Enable it in the Web UI.',
 	usb_terminal_message_busy_other_session: () => 'Terminal is busy with another session.',
@@ -162,6 +164,87 @@ describe('useUsbTerminalConsole', () => {
 		cleanup?.();
 	});
 
+	it('sends the id diagnostic command without clearing a drafted command', () => {
+		let cleanup: (() => void) | undefined;
+		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
+
+		cleanup = $effect.root(() => {
+			consoleState = useUsbTerminalConsole();
+			consoleState.init();
+
+			const socket = MockWebSocket.instances[0];
+			socket.emitOpen();
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			consoleState.updateCommand('draft command');
+			expect(consoleState.sendDiagnosticCommand()).toBe(true);
+			expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'execute', command: 'id' }));
+			expect(consoleState.command).toBe('draft command');
+			expect(consoleState.entries.at(-1)).toMatchObject({
+				phase: 'command',
+				text: '$ id'
+			});
+		});
+
+		consoleState.destroy();
+		cleanup?.();
+	});
+
+	it('blocks duplicate diagnostic commands while the first command is pending', () => {
+		let cleanup: (() => void) | undefined;
+		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
+
+		cleanup = $effect.root(() => {
+			consoleState = useUsbTerminalConsole();
+			consoleState.init();
+
+			const socket = MockWebSocket.instances[0];
+			socket.emitOpen();
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			expect(consoleState.sendDiagnosticCommand()).toBe(true);
+			expect(consoleState.sendDiagnosticCommand()).toBe(false);
+			expect(socket.send).toHaveBeenCalledTimes(1);
+			expect(consoleState.canExecute).toBe(false);
+			expect(consoleState.entries.filter((entry) => entry.text === '$ id')).toHaveLength(1);
+
+			socket.emitMessage({
+				type: 'ack',
+				action: 'execute',
+				ok: false,
+				message: 'Terminal is busy processing the previous command. Use status or cancel.'
+			});
+			socket.emitMessage({
+				type: 'ack',
+				action: 'execute',
+				ok: false,
+				message: 'Terminal is busy processing the previous command. Use status or cancel.'
+			});
+
+			expect(consoleState.canExecute).toBe(true);
+			expect(mockNotifications.error).toHaveBeenCalledTimes(1);
+			expect(mockNotifications.error).toHaveBeenCalledWith(
+				'Terminal is busy processing the previous command. Use status or cancel.',
+				5000
+			);
+		});
+
+		consoleState.destroy();
+		cleanup?.();
+	});
+
 	it('updates session ownership and appends output from websocket frames', () => {
 		let cleanup: (() => void) | undefined;
 		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
@@ -241,6 +324,106 @@ describe('useUsbTerminalConsole', () => {
 				phase: 'final',
 				text: 'hello world'
 			});
+		});
+
+		consoleState.destroy();
+		cleanup?.();
+	});
+
+	it('adds a no-output status when an owned command finishes without output', () => {
+		let cleanup: (() => void) | undefined;
+		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
+
+		cleanup = $effect.root(() => {
+			consoleState = useUsbTerminalConsole();
+			consoleState.init();
+
+			const socket = MockWebSocket.instances[0];
+			socket.emitOpen();
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			consoleState.updateCommand('id');
+			expect(consoleState.sendCommand()).toBe(true);
+			socket.emitMessage({
+				type: 'session',
+				busy: true,
+				owner: true,
+				transport: 'ws',
+				connected: true
+			});
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			expect(consoleState.entries.at(-1)).toMatchObject({
+				phase: 'status',
+				text: 'Command sent, but no serial output captured. Check terminal focus or target port.'
+			});
+			expect(mockNotifications.warning).toHaveBeenCalledWith(
+				'Command sent, but no serial output captured. Check terminal focus or target port.',
+				5000
+			);
+		});
+
+		consoleState.destroy();
+		cleanup?.();
+	});
+
+	it('does not add a no-output status when output arrives', () => {
+		let cleanup: (() => void) | undefined;
+		let consoleState!: ReturnType<typeof useUsbTerminalConsole>;
+
+		cleanup = $effect.root(() => {
+			consoleState = useUsbTerminalConsole();
+			consoleState.init();
+
+			const socket = MockWebSocket.instances[0];
+			socket.emitOpen();
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			consoleState.updateCommand('id');
+			expect(consoleState.sendCommand()).toBe(true);
+			socket.emitMessage({
+				type: 'session',
+				busy: true,
+				owner: true,
+				transport: 'ws',
+				connected: true
+			});
+			socket.emitMessage({
+				type: 'output',
+				phase: 'final',
+				text: 'uid=1000(test)'
+			});
+			socket.emitMessage({
+				type: 'session',
+				busy: false,
+				owner: false,
+				transport: null,
+				connected: true
+			});
+
+			expect(consoleState.entries.some((entry) => entry.phase === 'status')).toBe(false);
+			expect(mockNotifications.warning).not.toHaveBeenCalledWith(
+				'Command sent, but no serial output captured. Check terminal focus or target port.',
+				5000
+			);
 		});
 
 		consoleState.destroy();

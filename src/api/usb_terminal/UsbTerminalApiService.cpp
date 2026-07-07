@@ -12,6 +12,7 @@
 #include "../../system/utils/json/JsonResponseWriter.h"
 #include "../../usb_terminal/UsbTerminalService.h"
 #include "../../usb_terminal/UsbTerminalSettingsService.h"
+#include "../../usb_terminal/UsbTerminalTargetPort.h"
 #include "core/config/ConfigManager.h"
 #include <utils/ResponseUtils.h>
 
@@ -356,6 +357,18 @@ StateHandlerResult UsbTerminalApiService::validateConfigUpdate(PsychicRequest* r
 
     RTC::UsbTerminalData nextState = currentState;
     CONFIG::JSON::deserializeUsbTerminal(jsonObject, nextState);
+
+    JsonVariant targetPortValue = jsonObject[CONFIG::Keys::kTargetPort];
+    if (!targetPortValue.isNull()) {
+        if (!targetPortValue.is<const char*>()) {
+            return StateHandlerResult::failure("input/invalid_target_port", 400);
+        }
+
+        const char* targetPort = targetPortValue.as<const char*>();
+        if (!USB_TERMINAL::isValidTargetPortSetting(targetPort)) {
+            return StateHandlerResult::failure("input/invalid_target_port", 400);
+        }
+    }
 
     const bool disablingTerminal = currentState.enabled && !nextState.enabled;
     if (disablingTerminal && _terminalService) {

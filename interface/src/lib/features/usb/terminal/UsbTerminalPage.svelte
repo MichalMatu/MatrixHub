@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import BaseCard from '$lib/components/layout/BaseCard.svelte';
-	import { FormButton, FormInput } from '$lib/components/shared/forms';
+	import { FormButton, FormInput, FormSelect } from '$lib/components/shared/forms';
 	import { AdminAccessGate } from '$lib/components/layout';
 	import LoadingCard from '$lib/components/layout/LoadingCard.svelte';
+	import Activity from '~icons/tabler/activity';
 	import Terminal from '~icons/tabler/terminal-2';
 	import Send from '~icons/tabler/send';
 	import Stop from '~icons/tabler/player-stop';
@@ -15,6 +16,11 @@
 	import { useUsbTerminalSettings } from './useUsbTerminalSettings.svelte';
 	import { useUsbTerminalConsole } from './useUsbTerminalConsole.svelte';
 	import { useUsbTerminalQuickScripts } from './useUsbTerminalQuickScripts.svelte';
+	import {
+		USB_TERMINAL_PRESET_OS_OPTIONS,
+		findUsbTerminalPreset,
+		getUsbTerminalPresetsForOs
+	} from './usbTerminalCommandPresets';
 	import { useSessionAccess } from '$lib/features/auth/useSessionAccess.svelte';
 	const session = useSessionAccess();
 	const canManage = $derived(session.canManage);
@@ -32,10 +38,34 @@
 	let consoleContainer: HTMLDivElement | undefined = $state();
 	let autoscroll = $state(true);
 	let settingsModalOpen = $state(false);
+	let selectedPresetOs = $state('generic');
+	let selectedPresetId = $state('');
+	const presetOptions = $derived(
+		getUsbTerminalPresetsForOs(selectedPresetOs).map((preset) => ({
+			value: preset.id,
+			label: preset.label
+		}))
+	);
+	const selectedPreset = $derived(findUsbTerminalPreset(selectedPresetOs, selectedPresetId));
 
 	function handleConsoleSubmit(event: Event) {
 		event.preventDefault();
 		consoleState.sendCommand();
+	}
+
+	function handlePresetOsChange(event: Event) {
+		selectedPresetOs = (event.currentTarget as HTMLSelectElement).value;
+		selectedPresetId = '';
+	}
+
+	function handlePresetChange(event: Event) {
+		const presetId = (event.currentTarget as HTMLSelectElement).value;
+		selectedPresetId = presetId;
+
+		const preset = findUsbTerminalPreset(selectedPresetOs, presetId);
+		if (preset) {
+			consoleState.updateCommand(preset.command);
+		}
 	}
 
 	function handleConsoleScroll() {
@@ -178,6 +208,10 @@
 						</div>
 					{/if}
 
+					<div class="alert alert-info text-sm" data-testid="usb-terminal-focus-warning">
+						<span>{m.usb_terminal_focus_warning({ locale: i18n.languageTag })}</span>
+					</div>
+
 					<div
 						bind:this={consoleContainer}
 						onscroll={handleConsoleScroll}
@@ -209,14 +243,59 @@
 						{/if}
 					</div>
 
-					<form class="flex flex-col gap-3 lg:flex-row lg:items-end" onsubmit={handleConsoleSubmit}>
-						<div class="flex-1">
-							<div
-								class="mb-2 overflow-x-auto rounded-lg border border-base-300/70 bg-base-200/60 px-3 py-2 font-mono text-[11px] text-base-content/80 sm:text-xs"
-								data-testid="usb-terminal-prompt"
-							>
-								<span class="whitespace-nowrap">{consoleState.currentPrompt}</span>
+					<form class="flex flex-col gap-3" onsubmit={handleConsoleSubmit}>
+						<div
+							class="overflow-x-auto rounded-lg border border-base-300/70 bg-base-200/60 px-3 py-2 font-mono text-[11px] text-base-content/80 sm:text-xs"
+							data-testid="usb-terminal-prompt"
+						>
+							<span class="whitespace-nowrap">{consoleState.currentPrompt}</span>
+						</div>
+
+						<div class="rounded-lg border border-base-300/70 bg-base-200/50 p-3">
+							<div class="mb-3 flex flex-col gap-1">
+								<div class="text-xs font-semibold uppercase tracking-normal opacity-60">
+									{m.usb_terminal_command_presets_title({ locale: i18n.languageTag })}
+								</div>
+								<div class="text-xs leading-5 text-base-content/60">
+									{m.usb_terminal_command_presets_hint({ locale: i18n.languageTag })}
+								</div>
 							</div>
+							<div class="grid gap-3 md:grid-cols-2">
+								<FormSelect
+									id="usb-terminal-preset-os"
+									label={m.usb_terminal_preset_os_label({ locale: i18n.languageTag })}
+									value={selectedPresetOs}
+									options={USB_TERMINAL_PRESET_OS_OPTIONS}
+									onchange={handlePresetOsChange}
+									size="sm"
+								/>
+								<FormSelect
+									id="usb-terminal-preset-command"
+									label={m.usb_terminal_preset_command_label({
+										locale: i18n.languageTag
+									})}
+									value={selectedPresetId}
+									options={presetOptions}
+									placeholder={m.usb_terminal_preset_placeholder({
+										locale: i18n.languageTag
+									})}
+									onchange={handlePresetChange}
+									size="sm"
+								/>
+							</div>
+							{#if selectedPreset}
+								<div
+									class="mt-3 rounded-md bg-base-100/70 px-3 py-2 text-xs leading-5 text-base-content/70"
+									data-testid="usb-terminal-preset-description"
+								>
+									<span class="font-medium text-base-content">{selectedPreset.label}</span>
+									<span class="mx-1 opacity-50">-</span>
+									<span>{selectedPreset.description}</span>
+								</div>
+							{/if}
+						</div>
+
+						<div class="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
 							<FormInput
 								id="usb-terminal-command"
 								type="text"
@@ -229,32 +308,45 @@
 									!consoleState.canExecute ||
 									quickScriptsState.isTerminalCommandDisabled}
 							/>
-						</div>
 
-						<div class="flex items-center justify-end gap-2 lg:shrink-0">
-							<FormButton
-								type="button"
-								label={m.usb_terminal_stop({ locale: i18n.languageTag })}
-								icon={Stop}
-								variant="neutral"
-								disabled={!consoleState.canCancel}
-								onclick={() => consoleState.sendCancel()}
-							/>
-							<FormButton
-								type="submit"
-								label={m.keyboard_send({ locale: i18n.languageTag })}
-								icon={Send}
-								disabled={!terminalState.enabled ||
-									!consoleState.canExecute ||
-									quickScriptsState.isTerminalCommandDisabled}
-							/>
+							<div class="flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
+								<FormButton
+									type="button"
+									label={m.usb_terminal_stop({ locale: i18n.languageTag })}
+									icon={Stop}
+									variant="neutral"
+									class="min-w-20"
+									disabled={!consoleState.canCancel}
+									onclick={() => consoleState.sendCancel()}
+								/>
+								<FormButton
+									type="button"
+									label={m.usb_terminal_run_id({ locale: i18n.languageTag })}
+									icon={Activity}
+									variant="secondary"
+									class="min-w-24"
+									disabled={!terminalState.enabled ||
+										!consoleState.canExecute ||
+										quickScriptsState.isTerminalCommandDisabled}
+									onclick={() => consoleState.sendDiagnosticCommand()}
+								/>
+								<FormButton
+									type="submit"
+									label={m.keyboard_send({ locale: i18n.languageTag })}
+									icon={Send}
+									class="min-w-20"
+									disabled={!terminalState.enabled ||
+										!consoleState.canExecute ||
+										quickScriptsState.isTerminalCommandDisabled}
+								/>
+							</div>
 						</div>
 					</form>
 
 					{#if quickScriptsState.shouldShowSection}
 						<div class="rounded-xl border border-base-300/70 bg-base-100 p-4">
 							<div class="flex flex-col gap-3">
-								<div class="text-xs font-semibold uppercase tracking-wide opacity-60">
+								<div class="text-xs font-semibold uppercase tracking-normal opacity-60">
 									{m.usb_terminal_quick_scripts_title({ locale: i18n.languageTag })}
 								</div>
 
@@ -281,12 +373,24 @@
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_loading({ locale: i18n.languageTag })}
 									</div>
-								{:else if quickScriptsState.scripts.length === 0}
+								{:else if quickScriptsState.hostActions.length === 0 &&
+									quickScriptsState.scripts.length === 0}
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_empty({ locale: i18n.languageTag })}
 									</div>
 								{:else}
 									<div class="flex flex-wrap gap-2">
+										{#each quickScriptsState.hostActions as action (action.id)}
+											<FormButton
+												type="button"
+												size="sm"
+												variant="ghost"
+												label={action.name}
+												loading={quickScriptsState.pendingHostActionId === action.id}
+												disabled={quickScriptsState.isHostActionDisabled(consoleState.busy)}
+												onclick={() => void quickScriptsState.runHostAction(action.id)}
+											/>
+										{/each}
 										{#each quickScriptsState.scripts as script (script.name)}
 											<FormButton
 												type="button"

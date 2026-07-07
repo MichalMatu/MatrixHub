@@ -1,6 +1,6 @@
 {
 	"name": "matrixhub",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"private": true,
 	"scripts": {
 		"i18n:build": "node ./scripts/ensure-paraglide.mjs",

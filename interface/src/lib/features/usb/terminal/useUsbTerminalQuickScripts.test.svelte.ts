@@ -178,4 +178,64 @@ describe('useUsbTerminalQuickScripts', () => {
 
 		cleanup?.();
 	});
+
+	it('runs the built-in macOS Terminal focus action through keyboard APIs', async () => {
+		const idleStatus: ScriptStatus = {
+			current_script: '',
+			status: 'IDLE',
+			current_line: 0,
+			uptime_ms: 0,
+			last_error: ''
+		};
+		const pressKey = vi.fn().mockResolvedValue(undefined);
+		const typeText = vi.fn().mockResolvedValue(undefined);
+		const delay = vi.fn().mockResolvedValue(undefined);
+
+		const { useUsbTerminalQuickScripts } = await import('./useUsbTerminalQuickScripts.svelte');
+
+		let cleanup: (() => void) | undefined;
+
+		await new Promise<void>((resolve) => {
+			cleanup = $effect.root(() => {
+				const quickScripts = useUsbTerminalQuickScripts({
+					channelStore: mockSystemStatus,
+					createApi: () => ({
+						listScripts: vi.fn().mockResolvedValue([]),
+						getSettings: vi.fn().mockResolvedValue({
+							enabled: true,
+							boot_script: '',
+							boot_delay: 1000
+						}),
+						getStatus: vi.fn().mockResolvedValue(idleStatus),
+						runScript: vi.fn(),
+						stopScript: vi.fn()
+					}),
+					createKeyboardApi: () => ({ pressKey, typeText }),
+					delay
+				});
+
+				void quickScripts.init().then(async () => {
+					expect(quickScripts.hostActions.map((action) => action.name)).toContain(
+						'Focus macOS Terminal'
+					);
+
+					await quickScripts.runHostAction('macos-focus-terminal');
+
+					expect(pressKey).toHaveBeenNthCalledWith(1, { key: 177 });
+					expect(pressKey).toHaveBeenNthCalledWith(2, { keys: [131, 32] });
+					expect(typeText).toHaveBeenCalledWith({ text: 'Terminal', enter: true });
+					expect(pressKey).toHaveBeenNthCalledWith(3, { keys: [128, 99] });
+					expect(delay).toHaveBeenCalledWith(400);
+					expect(delay).toHaveBeenCalledWith(1400);
+					expect(delay).toHaveBeenCalledWith(4000);
+					expect(delay).toHaveBeenCalledWith(300);
+					expect(quickScripts.pendingHostActionId).toBeNull();
+					quickScripts.destroy();
+					resolve();
+				});
+			});
+		});
+
+		cleanup?.();
+	});
 });

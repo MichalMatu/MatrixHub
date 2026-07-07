@@ -306,6 +306,45 @@ void test_registerMDNSEventHandlers_marks_sync_pending_on_wifi_events() {
     TEST_ASSERT_TRUE(framework._mdnsSyncPending.load(std::memory_order_acquire));
 }
 
+void test_spa_fallback_accepts_browser_and_neutral_deep_links() {
+    PsychicRequest browserRequest;
+    browserRequest.setUri("/usb-features/terminal");
+    browserRequest.setMethod(HTTP_GET);
+    browserRequest.setHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+
+    TEST_ASSERT_TRUE(shouldServeSpaIndex(&browserRequest));
+
+    PsychicRequest curlRequest;
+    curlRequest.setUri("/usb-features/terminal");
+    curlRequest.setMethod(HTTP_GET);
+    curlRequest.setHeader("Accept", "*/*");
+
+    TEST_ASSERT_TRUE(shouldServeSpaIndex(&curlRequest));
+}
+
+void test_spa_fallback_rejects_api_and_missing_assets() {
+    PsychicRequest apiRequest;
+    apiRequest.setUri("/api/usbterminal/config");
+    apiRequest.setMethod(HTTP_GET);
+    apiRequest.setHeader("Accept", "*/*");
+
+    TEST_ASSERT_FALSE(shouldServeSpaIndex(&apiRequest));
+
+    PsychicRequest assetRequest;
+    assetRequest.setUri("/_app/immutable/missing.js");
+    assetRequest.setMethod(HTTP_GET);
+    assetRequest.setHeader("Accept", "*/*");
+
+    TEST_ASSERT_FALSE(shouldServeSpaIndex(&assetRequest));
+
+    PsychicRequest jsonRequest;
+    jsonRequest.setUri("/unknown");
+    jsonRequest.setMethod(HTTP_GET);
+    jsonRequest.setHeader("Accept", "application/json");
+
+    TEST_ASSERT_FALSE(shouldServeSpaIndex(&jsonRequest));
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -319,5 +358,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_syncMDNS_stops_running_instance_when_hostname_becomes_empty);
     RUN_TEST(test_hostname_change_requests_immediate_mdns_resync);
     RUN_TEST(test_registerMDNSEventHandlers_marks_sync_pending_on_wifi_events);
+    RUN_TEST(test_spa_fallback_accepts_browser_and_neutral_deep_links);
+    RUN_TEST(test_spa_fallback_rejects_api_and_missing_assets);
     return UNITY_END();
 }

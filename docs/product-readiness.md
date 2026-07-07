@@ -82,12 +82,33 @@ Goal: separate development convenience from customer safety.
 - decide whether AP setup remains open or gets a per-device password/QR label
 - document factory reset behavior for support
 
+### 5. Customer Remote Access
+
+Goal: let customers reach their MatrixHub admin panel from the Internet without
+router configuration or public device IP addresses.
+
+- design remote access as an outbound ESP32 WebSocket relay, not as direct access
+  to the customer's home IP
+- use Cloudflare Pages, Worker, and Durable Objects as the target production
+  architecture
+- use Raspberry Pi 5 plus Cloudflare Tunnel only as an MVP/lab relay before
+  moving the product surface to Cloudflare
+- use pairing codes only as short-lived, single-use setup tokens
+- store long-lived `device_id` and `device_secret` only after pairing
+- add a local UI switch, status indicator, disconnect action, and revocation
+  action for remote access
+- keep full remote admin behind an explicit security review before exposing all
+  routes
+- implementation guide: [remote access Cloudflare relay][remote-access-cloudflare]
+
 ## Recommended Immediate Sequence
 
 1. Audit the current UI routes and identify the minimum product-first route set.
 2. Clean repository outputs only after classifying which files are intentional.
 3. Prototype the sensor/RF add-on on a breadboard, outside the main firmware path.
-4. Build a 5-device pilot process before changing defaults or manufacturing flow.
+4. Prototype remote access with a Raspberry Pi 5 relay behind Cloudflare Tunnel,
+   limited to read-only status APIs.
+5. Build a 5-device pilot process before changing defaults or manufacturing flow.
 
 ## Initial Audit Notes
 
@@ -112,3 +133,5 @@ Captured on 2026-06-30:
 - The frontend already has useful quality gates in `interface/package.json`,
   especially `quality:frontend`, `quality:frontend:fast`, `ui:contract`, build
   size checks, Vitest, Svelte checks, dependency-cruiser, and Knip.
+
+[remote-access-cloudflare]: engineering/integrations/remote_access_cloudflare.md

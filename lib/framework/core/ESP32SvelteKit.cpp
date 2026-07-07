@@ -62,10 +62,14 @@ bool shouldServeSpaIndex(PsychicRequest* request) {
     }
 
     const String accept = request->header("Accept");
-    // Only deep links from a browser navigation should fall back to index.html.
-    // Missing JS/CSS/assets must return 404 so the browser does not try to parse
-    // HTML as a module and raise "Failed to fetch dynamically imported module".
-    return accept.indexOf("text/html") >= 0;
+    // Deep links should fall back to index.html for browser navigations and
+    // neutral probes such as curl's default Accept: */*. Missing JS/CSS/assets
+    // still return 404 via isStaticAssetPath() above, so browsers do not parse
+    // HTML as a module.
+    if (accept.isEmpty() || accept.indexOf("text/html") >= 0) {
+        return true;
+    }
+    return accept.indexOf("*/*") >= 0 && accept.indexOf("application/json") < 0;
 }
 
 const char* resolveStaticCacheControl(const String& uri) {

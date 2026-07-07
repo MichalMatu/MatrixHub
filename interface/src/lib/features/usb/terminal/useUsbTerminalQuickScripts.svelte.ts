@@ -5,6 +5,11 @@ import {
 	type ScriptFile,
 	type ScriptStatus
 } from '$lib/services/api/integrations/MacroApiService';
+import {
+	KeyboardApiService,
+	type KeyboardPressPayload,
+	type KeyboardTypePayload
+} from '$lib/services/api/integrations/KeyboardApiService';
 import { useMacroStatusSync } from '$lib/features/system/status/useMacroStatusSync.svelte';
 import { getRequestAbortKind, toUserRequestErrorMessage } from '$lib/utils';
 import { useApiClient } from '$lib/utils/api/useApiClient.svelte';
@@ -13,32 +18,60 @@ type MacroApi = Pick<
 	MacroApiService,
 	'getSettings' | 'getStatus' | 'listScripts' | 'runScript' | 'stopScript'
 >;
+type KeyboardApi = Pick<KeyboardApiService, 'pressKey' | 'typeText'>;
 
 interface MacroChannelStore {
 	subscribeChannel(channel: string): void;
 	unsubscribeChannel(channel: string): void;
 }
 
-interface UsbTerminalQuickScriptsDeps {
-	createApi?: () => MacroApi;
-	channelStore?: MacroChannelStore;
-	shouldInit?: () => boolean;
+export interface HostQuickAction {
+	id: string;
+	name: string;
 }
 
-type PendingAction = 'run' | 'stop' | null;
+interface UsbTerminalQuickScriptsDeps {
+	createApi?: () => MacroApi;
+	createKeyboardApi?: () => KeyboardApi;
+	channelStore?: MacroChannelStore;
+	shouldInit?: () => boolean;
+	delay?: (ms: number) => Promise<void>;
+}
+
+type PendingAction = 'run' | 'stop' | 'host' | null;
+type HostActionStep =
+	| { type: 'press'; payload: KeyboardPressPayload; delayAfterMs: number }
+	| { type: 'type'; payload: KeyboardTypePayload; delayAfterMs: number };
+
+const HOST_QUICK_ACTIONS: HostQuickAction[] = [
+	{
+		id: 'macos-focus-terminal',
+		name: 'Focus macOS Terminal'
+	}
+];
+
+const HOST_ACTION_STEPS: Record<string, HostActionStep[]> = {
+	'macos-focus-terminal': [
+		{ type: 'press', payload: { key: 177 }, delayAfterMs: 400 },
+		{ type: 'press', payload: { keys: [131, 32] }, delayAfterMs: 1400 },
+		{ type: 'type', payload: { text: 'Terminal', enter: true }, delayAfterMs: 4000 },
+		{ type: 'press', payload: { keys: [128, 99] }, delayAfterMs: 300 }
+	]
+};
 
 function sortScripts(scripts: ScriptFile[]): ScriptFile[] {
 	return [...scripts].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {}) {
-	const apiClient = deps.createApi ? null : useApiClient();
+	const apiClient = deps.createApi && deps.createKeyboardApi ? null : useApiClient();
 
 	let scripts = $state<ScriptFile[]>([]);
 	let macrosEnabled = $state<boolean | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let pendingScriptName = $state<string | null>(null);
+	let pendingHostActionId = $state<string | null>(null);
 	let pendingAction = $state<PendingAction>(null);
 
 	let scriptsAbort: AbortController | null = null;
@@ -55,6 +88,22 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 		}
 
 		return apiClient!.createService(MacroApiService);
+	}
+
+	function createKeyboardApi(): KeyboardApi {
+		if (deps.createKeyboardApi) {
+			return deps.createKeyboardApi();
+		}
+
+		return apiClient!.createService(KeyboardApiService);
+	}
+
+	function wait(ms: number) {
+		if (deps.delay) {
+			return deps.delay(ms);
+		}
+
+		return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 	}
 
 	function clearAborts() {
@@ -199,6 +248,36 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 		}
 	}
 
+	async function runHostAction(id: string) {
+		const steps = HOST_ACTION_STEPS[id];
+		if (!steps || pendingAction || getStatus()?.status === 'RUNNING') return false;
+
+		error = null;
+		pendingHostActionId = id;
+		pendingAction = 'host';
+
+		try {
+			const keyboardApi = createKeyboardApi();
+			for (const step of steps) {
+				if (step.type === 'press') {
+					await keyboardApi.pressKey(step.payload);
+				} else {
+					await keyboardApi.typeText(step.payload);
+				}
+				if (step.delayAfterMs > 0) {
+					await wait(step.delayAfterMs);
+				}
+			}
+			return true;
+		} catch (err) {
+			setErrorMessage(err, m.usb_terminal_quick_scripts_run_error(localeOptions()));
+			return false;
+		} finally {
+			pendingHostActionId = null;
+			pendingAction = null;
+		}
+	}
+
 	function isRunningScript(name: string) {
 		const status = getStatus();
 		return status?.status === 'RUNNING' && status.current_script === name;
@@ -211,7 +290,14 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 		return status.current_script !== name;
 	}
 
+	function isHostActionDisabled(terminalBusy = false) {
+		return loading || terminalBusy || pendingAction !== null || getStatus()?.status === 'RUNNING';
+	}
+
 	return {
+		get hostActions() {
+			return HOST_QUICK_ACTIONS;
+		},
 		get scripts() {
 			return scripts;
 		},
@@ -230,11 +316,14 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 		get pendingScriptName() {
 			return pendingScriptName;
 		},
+		get pendingHostActionId() {
+			return pendingHostActionId;
+		},
 		get pendingAction() {
 			return pendingAction;
 		},
 		get shouldShowSection() {
-			return loading || scripts.length > 0 || macrosEnabled === false;
+			return loading || HOST_QUICK_ACTIONS.length > 0 || scripts.length > 0 || macrosEnabled === false;
 		},
 		get isTerminalCommandDisabled() {
 			return pendingAction !== null || getStatus()?.status === 'RUNNING';
@@ -242,10 +331,12 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 		get runningScriptName() {
 			return getStatus()?.status === 'RUNNING' ? (getStatus()?.current_script ?? '') : '';
 		},
+		runHostAction,
 		runScript,
 		stopScript,
 		isRunningScript,
 		isScriptDisabled,
+		isHostActionDisabled,
 		init,
 		destroy
 	};

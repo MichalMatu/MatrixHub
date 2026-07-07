@@ -263,7 +263,7 @@ else:
             # checks above say the UI or its dependencies really changed.
             if should_install_dependencies():
                 if package_manager == "npm":
-                    install_command = f"{package_manager} install --no-audit --no-fund"
+                    install_command = f"{package_manager} ci --no-audit --no-fund"
                 else:
                     install_command = f"{package_manager} install"
 
