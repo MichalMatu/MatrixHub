@@ -34,10 +34,10 @@ ESP Wi-Fi CSI callback
 
 Important ownership rules:
 
-- The Wi-Fi CSI callback copies data only. It must not allocate, block, or run
-  detector logic.
-- `CsiDataQueue` stores packet data in PSRAM; queue metadata stays in internal
-  RAM for FreeRTOS bookkeeping.
+- The Wi-Fi CSI callback runs in the Wi-Fi task and copies data only. It must not
+  allocate, block, touch PSRAM-backed handoff buffers, or run detector logic.
+- `CsiDataQueue` stores packet data and queue metadata in internal RAM so the
+  Wi-Fi RX path is not exposed to flash/PSRAM cache faults.
 - `CsiService::processingTask()` owns packet processing. Its stack and task
   control block stay in internal RAM; the transient WebSocket batch buffer is
   allocated in PSRAM.

@@ -435,7 +435,7 @@ bool CsiService::applyEnabledState(bool enabled) {
         // The queue must exist before the driver callback is registered, otherwise
         // the first CSI frame could arrive while the handoff path is still null.
         if (!_queue) {
-            _queue = new CsiDataQueue(16); // 16 packets buffer (~1.6s at 10Hz throttled)
+            _queue = new CsiDataQueue(CSI_QUEUE_CAPACITY);
             if (!_queue->begin()) {
                 LOGE("Failed to allocate CSI Queue!");
                 delete _queue;

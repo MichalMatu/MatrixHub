@@ -303,8 +303,8 @@ Passive BLE advertiser scanner powered by NimBLE.
 Uses 802.11 Channel State Information (CSI) to detect motion without a dedicated
 PIR sensor.
 
-- CSI packets arrive via an ISR callback at up to 10 Hz and are queued
-  (zero-copy) into a PSRAM-backed FreeRTOS queue.
+- CSI packets arrive via the Wi-Fi task callback at up to 10 Hz and are copied
+  into an internal-RAM FreeRTOS queue.
 - A processing task computes variance across subcarrier amplitudes; a configurable
   threshold triggers a motion event.
 - Live CSI data is streamed to the browser over a binary WebSocket.

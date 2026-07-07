@@ -115,7 +115,8 @@ public:
     // Helpers
     // Ping session now managed via _ping class
 
-    // CSI Callback (Static for C-API compatibility)
+    // CSI Callback (Static for C-API compatibility). Espressif runs this from
+    // the Wi-Fi task, so it must never block or touch PSRAM-backed handoff data.
     static void IRAM_ATTR wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info);
     
     // Internal initialization helper
@@ -189,6 +190,7 @@ public:
     
     CsiPacket* _batchBuffer = nullptr;
     static constexpr size_t BATCH_CAPACITY = MAX_CSI_BATCH_PACKETS;
+    static constexpr size_t CSI_QUEUE_CAPACITY = 8;
 
 };
 

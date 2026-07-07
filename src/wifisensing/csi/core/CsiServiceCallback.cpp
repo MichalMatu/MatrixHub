@@ -16,8 +16,9 @@ namespace CSI {
 
 void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     CsiService* self = (CsiService*)ctx;
-    // This runs on the Wi-Fi driver's hot path. Keep it copy-only: no heap
-    // allocation, no locking, no logging and no heavy signal processing here.
+    // This runs on the Wi-Fi driver's task hot path. Keep it copy-only: no heap
+    // allocation, no locking, no logging, no PSRAM handoff and no heavy signal
+    // processing here.
     if (!info || !info->buf || !self || !self->_queue) return;
     if (!self->_rxCallbackEnabled.load(std::memory_order_acquire)) return;
 
@@ -58,7 +59,7 @@ void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     packet.compensate_gain = 1.0f;
 
     // Queue tracks overflow statistics internally; the callback stays branch-light either way.
-    if (self->_queue->pushFromIsr(packet)) {
+    if (self->_queue->pushFromWifiTask(packet)) {
         self->_queuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
     }
     self->_rxCallbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
