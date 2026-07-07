@@ -258,6 +258,14 @@ CsiVisualizationSnapshot CsiService::processVisualizationPacket(const CsiPacket&
     return _visualizationReducer.process(packet, nowMs);
 }
 
+bool CsiService::hasRuntimeResources() const {
+    return (_processingTaskHandle != nullptr) ||
+           (_queue != nullptr) ||
+           (_cleanupSem != nullptr) ||
+           (_rxCallbackEnabled.load(std::memory_order_acquire)) ||
+           (_rxCallbacksInFlight.load(std::memory_order_acquire) != 0);
+}
+
 void CsiService::publishMotionSnapshot(const CsiMotionSnapshot& snapshot) {
     portENTER_CRITICAL(&_motionSnapshotMux);
     _lastMotionSnapshot = snapshot;
@@ -391,8 +399,10 @@ bool CsiService::setConsumerActive(CsiConsumer consumer, bool active) {
     }
 
     if (nextMask == previousMask) {
-        if ((nextMask != 0) != _enabled.load(std::memory_order_relaxed)) {
-            applyEnabledState(nextMask != 0);
+        const bool desiredEnabled = (nextMask != 0);
+        if (desiredEnabled != _enabled.load(std::memory_order_relaxed) ||
+            (!desiredEnabled && hasRuntimeResources())) {
+            applyEnabledState(desiredEnabled);
         }
         return _enabled.load(std::memory_order_relaxed);
     }
@@ -402,7 +412,7 @@ bool CsiService::setConsumerActive(CsiConsumer consumer, bool active) {
     // integrations cannot accidentally disable CSI for one another.
     const bool desiredEnabled = (nextMask != 0);
     const bool currentEnabled = _enabled.load(std::memory_order_relaxed);
-    if (desiredEnabled != currentEnabled) {
+    if (desiredEnabled != currentEnabled || (!desiredEnabled && hasRuntimeResources())) {
         if (!applyEnabledState(desiredEnabled)) {
             return _enabled.load(std::memory_order_relaxed);
         }
@@ -413,12 +423,7 @@ bool CsiService::setConsumerActive(CsiConsumer consumer, bool active) {
 }
 
 bool CsiService::applyEnabledState(bool enabled) {
-    const bool runtimeResourcesPresent =
-        (_processingTaskHandle != nullptr) ||
-        (_queue != nullptr) ||
-        (_cleanupSem != nullptr) ||
-        (_rxCallbackEnabled.load(std::memory_order_acquire)) ||
-        (_rxCallbacksInFlight.load(std::memory_order_acquire) != 0);
+    const bool runtimeResourcesPresent = hasRuntimeResources();
 
     if (_enabled.load(std::memory_order_relaxed) == enabled) {
         if (!enabled && runtimeResourcesPresent) {

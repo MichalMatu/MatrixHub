@@ -57,6 +57,7 @@ namespace UI {
         constexpr uint8_t DEFAULT_DATA_VISUALIZATION_SMOOTHING = 50;
         constexpr uint8_t DEFAULT_DATA_VISUALIZATION_STALE_BEHAVIOR = 0; // Dim
         constexpr uint32_t DATA_VISUALIZATION_INPUT_INTERVAL_MS = 250;
+        constexpr uint32_t DATA_VISUALIZATION_CSI_INPUT_INTERVAL_MS = 100;
         constexpr uint32_t DATA_VISUALIZATION_BLE_STALE_MS = 5UL * 60UL * 1000UL;
 
         constexpr uint32_t AUTO_ROTATE_INTERVAL_MS = 500;

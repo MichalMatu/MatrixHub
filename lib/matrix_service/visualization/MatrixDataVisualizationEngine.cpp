@@ -313,9 +313,7 @@ void MatrixDataVisualizationEngine::renderHeatmap(
         for (uint8_t i = 0; i < kPixels; ++i) {
             const uint8_t srcIndex = static_cast<uint8_t>((static_cast<uint16_t>(i) * _input.binCount) / kPixels);
             const uint8_t bin = _input.bins[srcIndex < _input.binCount ? srcIndex : (_input.binCount - 1u)];
-            const uint8_t effective = static_cast<uint8_t>(
-                (static_cast<uint16_t>(bin) * 3u + static_cast<uint16_t>(normalized)) / 4u);
-            outFrame[i] = colorFor(effective, effectiveBrightness(effective, stale));
+            outFrame[i] = colorFor(bin, effectiveBrightness(bin, stale));
         }
         return;
     }

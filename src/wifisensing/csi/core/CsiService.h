@@ -122,6 +122,7 @@ public:
     // Internal initialization helper
     bool initCsiConfig();
     bool applyEnabledState(bool enabled);
+    bool hasRuntimeResources() const;
     static uint32_t consumerBit(CsiConsumer consumer);
     bool waitForRxCallbacksToDrain(uint32_t timeoutMs);
     void rollbackFailedEnable(bool csiConfigured);

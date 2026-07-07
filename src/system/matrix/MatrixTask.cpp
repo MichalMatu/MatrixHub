@@ -132,22 +132,45 @@ MATRIX::MatrixDataVisualizationConfig buildDataVisualizationConfig(const RTC::Ma
     return config;
 }
 
-void fillRssiBins(WIFISENSING::WifiSensingService* wifiSensingService, MATRIX::MatrixDataVisualizationInput& input) {
+struct RssiBinsResult {
+    uint16_t count = 0;
+    uint32_t newestTimestampMs = 0;
+};
+
+uint32_t dataVisualizationInputIntervalMs(const MATRIX::MatrixDataVisualizationConfig& config) {
+    if (config.source == static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi)) {
+        return UI::MATRIX::DATA_VISUALIZATION_CSI_INPUT_INTERVAL_MS;
+    }
+    return UI::MATRIX::DATA_VISUALIZATION_INPUT_INTERVAL_MS;
+}
+
+uint32_t wifiRssiStaleTimeoutMs(uint32_t sampleIntervalMs) {
+    const uint32_t intervalBased = sampleIntervalMs * 3u + UI::MATRIX::DATA_VISUALIZATION_INPUT_INTERVAL_MS;
+    return intervalBased > API::SENSOR_DATA_WAIT_MS ? intervalBased : API::SENSOR_DATA_WAIT_MS;
+}
+
+RssiBinsResult fillRssiBins(WIFISENSING::WifiSensingService* wifiSensingService,
+                            MATRIX::MatrixDataVisualizationInput& input) {
+    RssiBinsResult result;
     if (!wifiSensingService) {
-        return;
+        return result;
     }
     WIFISENSING::RssiSample samples[MATRIX::kMatrixDataVizPixelCount];
     const uint16_t count = wifiSensingService->getSamples(samples, MATRIX::kMatrixDataVizPixelCount);
     if (count == 0) {
-        return;
+        return result;
     }
 
     input.binCount = static_cast<uint8_t>(count > MATRIX::kMatrixDataVizPixelCount
         ? MATRIX::kMatrixDataVizPixelCount
         : count);
+    result.count = input.binCount;
+    result.newestTimestampMs = samples[0].timestampMs;
     for (uint8_t i = 0; i < input.binCount; ++i) {
-        input.bins[i] = normalizedByte(rssiQuality(samples[i].rssi), 0.0f, 100.0f);
+        const uint8_t sourceIndex = static_cast<uint8_t>(input.binCount - 1u - i);
+        input.bins[i] = normalizedByte(rssiQuality(samples[sourceIndex].rssi), 0.0f, 100.0f);
     }
+    return result;
 }
 
 void fillCsiBins(const WIFISENSING::CSI::CsiVisualizationSnapshot& snapshot,
@@ -464,10 +487,12 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
         LOGI("Matrix data visualization CSI input %s", wantsCsi ? "ON" : "OFF");
         if (csiService) {
             csiService->setConsumerActive(WIFISENSING::CSI::CsiConsumer::MatrixVisualization, wantsCsi);
+            _lastMatrixDataVizCsiEnabled =
+                csiService->isConsumerActive(WIFISENSING::CSI::CsiConsumer::MatrixVisualization);
         } else {
             LOGW("CSI service missing - matrix data visualization consumer not updated");
+            _lastMatrixDataVizCsiEnabled = wantsCsi;
         }
-        _lastMatrixDataVizCsiEnabled = wantsCsi;
     }
 
     if (!matrixService || !wantsDataVisualization) {
@@ -475,8 +500,9 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
     }
 
     const uint32_t now = millis();
+    const uint32_t inputIntervalMs = dataVisualizationInputIntervalMs(vizConfig);
     if (_lastDataVisualizationInputMs != 0 &&
-        (now - _lastDataVisualizationInputMs) < UI::MATRIX::DATA_VISUALIZATION_INPUT_INTERVAL_MS) {
+        (now - _lastDataVisualizationInputMs) < inputIntervalMs) {
         return;
     }
     _lastDataVisualizationInputMs = now;
@@ -546,15 +572,22 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
         case MATRIX::MatrixDataSource::WifiRssi: {
             if (wifiSensingService) {
                 const WIFISENSING::RssiStats stats = wifiSensingService->getStats();
-                input.valid = stats.sampleCount > 0;
-                input.stale = !input.valid;
+                const RssiBinsResult bins = fillRssiBins(wifiSensingService, input);
+                input.valid = stats.sampleCount > 0 && bins.count > 0;
+                const uint32_t sampleAgeMs = bins.newestTimestampMs == 0
+                    ? UINT32_MAX
+                    : (now - bins.newestTimestampMs);
+                const uint32_t staleTimeoutMs =
+                    wifiRssiStaleTimeoutMs(RTC::getConfig().wifiSensing.sampleIntervalMs);
+                input.stale = !input.valid ||
+                    !wifiSensingService->isActive() ||
+                    sampleAgeMs > staleTimeoutMs;
                 if (metric == MATRIX::MatrixDataMetric::SignalQuality) {
                     input.value = rssiQuality(stats.current);
                 } else {
                     input.value = static_cast<float>(stats.current);
                 }
                 input.secondary = stats.variance;
-                fillRssiBins(wifiSensingService, input);
             }
             break;
         }

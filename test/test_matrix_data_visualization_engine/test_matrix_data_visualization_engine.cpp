@@ -117,6 +117,36 @@ void test_heatmap_is_deterministic_for_same_bins() {
     }
 }
 
+void test_heatmap_with_bins_uses_bin_values_not_scalar_motion() {
+    auto config = baseConfig();
+    config.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
+
+    MATRIX::MatrixDataVisualizationInput input;
+    input.valid = true;
+    input.value = 0.0f;
+    input.timestampMs = 1;
+    input.binCount = 64;
+    for (uint8_t i = 0; i < 64; ++i) {
+        input.bins[i] = static_cast<uint8_t>(i * 4);
+    }
+
+    MATRIX_VIZ::MatrixDataVisualizationEngine lowScalarEngine;
+    lowScalarEngine.configure(config);
+    lowScalarEngine.setInput(input);
+    uint32_t lowScalarFrame[64] = {};
+    TEST_ASSERT_TRUE(lowScalarEngine.render(100, lowScalarFrame, 64));
+
+    input.value = 100.0f;
+    input.timestampMs = 2;
+    MATRIX_VIZ::MatrixDataVisualizationEngine highScalarEngine;
+    highScalarEngine.configure(config);
+    highScalarEngine.setInput(input);
+    uint32_t highScalarFrame[64] = {};
+    TEST_ASSERT_TRUE(highScalarEngine.render(100, highScalarFrame, 64));
+
+    assertFramesEqual(lowScalarFrame, highScalarFrame);
+}
+
 void test_spectrum_bars_scalar_fallback_is_deterministic() {
     MATRIX_VIZ::MatrixDataVisualizationEngine engine;
     auto config = baseConfig();
@@ -222,6 +252,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_gauge_renders_expected_number_of_pixels);
     RUN_TEST(test_stale_blank_behavior_turns_frame_off);
     RUN_TEST(test_heatmap_is_deterministic_for_same_bins);
+    RUN_TEST(test_heatmap_with_bins_uses_bin_values_not_scalar_motion);
     RUN_TEST(test_spectrum_bars_scalar_fallback_is_deterministic);
     RUN_TEST(test_perimeter_meter_is_deterministic_for_same_value);
     RUN_TEST(test_each_visualization_mode_renders_non_empty_frame);

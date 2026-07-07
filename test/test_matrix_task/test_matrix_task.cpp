@@ -109,6 +109,8 @@ WIFISENSING::CSI::CsiVisualizationSnapshot g_csiVisualization{};
 uint32_t g_csiConsumerCalls = 0;
 bool g_lastCsiConsumerActive = false;
 WIFISENSING::CSI::CsiConsumer g_lastCsiConsumer = WIFISENSING::CSI::CsiConsumer::Frontend;
+bool g_csiConsumerActualActive = false;
+bool g_csiConsumerApplySticks = true;
 char g_lastBleRequestedMac[18] = {};
 uint32_t g_bleSelectedLookupCalls = 0;
 uint32_t g_bleSlotLookupCalls = 0;
@@ -212,6 +214,10 @@ RssiStats WifiSensingService::getStats() const {
     return g_rssiStats;
 }
 
+bool WifiSensingService::isActive() const {
+    return true;
+}
+
 uint16_t WifiSensingService::getSamples(RssiSample* outBuffer, uint16_t maxCount) const {
     if (!outBuffer || maxCount == 0) {
         return 0;
@@ -229,8 +235,15 @@ namespace CSI {
 bool CsiService::setConsumerActive(CsiConsumer consumer, bool active) {
     g_lastCsiConsumer = consumer;
     g_lastCsiConsumerActive = active;
+    if (g_csiConsumerApplySticks) {
+        g_csiConsumerActualActive = active;
+    }
     g_csiConsumerCalls++;
     return active;
+}
+
+bool CsiService::isConsumerActive(CsiConsumer consumer) const {
+    return consumer == CsiConsumer::MatrixVisualization && g_csiConsumerActualActive;
 }
 
 CsiVisualizationSnapshot CsiService::getVisualizationSnapshot() const {
@@ -274,6 +287,8 @@ void resetState() {
     g_csiConsumerCalls = 0;
     g_lastCsiConsumerActive = false;
     g_lastCsiConsumer = WIFISENSING::CSI::CsiConsumer::Frontend;
+    g_csiConsumerActualActive = false;
+    g_csiConsumerApplySticks = true;
     std::memset(g_lastBleRequestedMac, 0, sizeof(g_lastBleRequestedMac));
     g_bleSelectedLookupCalls = 0;
     g_bleSlotLookupCalls = 0;
@@ -512,6 +527,36 @@ void test_data_visualization_csi_enables_consumer_and_forwards_bins() {
     TEST_ASSERT_FALSE(g_lastCsiConsumerActive);
 }
 
+void test_data_visualization_csi_retries_when_consumer_state_does_not_change() {
+    MatrixService matrix;
+    auto* csi = reinterpret_cast<WIFISENSING::CSI::CsiService*>(0x1);
+
+    RTC::mockStore.matrix.backgroundMode =
+        static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::DataVisualization);
+    RTC::mockStore.matrix.dataVisualizationEnabled = true;
+    RTC::mockStore.matrix.dataVisualizationSource =
+        static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
+    RTC::mockStore.matrix.dataVisualizationMetric =
+        static_cast<uint8_t>(MATRIX::MatrixDataMetric::CsiMotion);
+    g_csiVisualization.valid = true;
+    g_csiVisualization.timestampMs = 1000;
+    TEST_STUBS::ARDUINO::millisValue = 1100;
+
+    g_csiConsumerApplySticks = false;
+    g_csiConsumerActualActive = false;
+    MATRIX::MatrixTask::evaluateDataVisualizationInput(nullptr, nullptr, csi, &matrix);
+
+    TEST_ASSERT_EQUAL_UINT32(1, g_csiConsumerCalls);
+    TEST_ASSERT_TRUE(g_lastCsiConsumerActive);
+
+    g_csiConsumerActualActive = false;
+    TEST_STUBS::ARDUINO::millisValue = 1230;
+    MATRIX::MatrixTask::evaluateDataVisualizationInput(nullptr, nullptr, csi, &matrix);
+
+    TEST_ASSERT_EQUAL_UINT32(2, g_csiConsumerCalls);
+    TEST_ASSERT_TRUE(g_lastCsiConsumerActive);
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -524,6 +569,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_data_visualization_scd4x_keeps_stale_retained_value);
     RUN_TEST(test_data_visualization_ble_uses_selected_device_as_single_source);
     RUN_TEST(test_data_visualization_csi_enables_consumer_and_forwards_bins);
+    RUN_TEST(test_data_visualization_csi_retries_when_consumer_state_does_not_change);
     return UNITY_END();
 }
 
