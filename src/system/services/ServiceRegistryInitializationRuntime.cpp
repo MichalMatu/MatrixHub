@@ -117,10 +117,13 @@ API::MatrixApiService* initMatrixApi(
     SecurityManager* securityManager,
     POWER::PowerManager* powerManager,
     MATRIX::MatrixSettingsService* matrixSettings,
+    MatrixService* matrixService,
     WIFISENSING::CSI::CsiService* csiService) {
     // Matrix API still lives inside ApiServices storage, but routing init
     // through here keeps the init/begin hand-off visible in tests and logs.
-    return api ? api->matrixApi.init(server, securityManager, powerManager, matrixSettings, csiService) : nullptr;
+    return api
+        ? api->matrixApi.init(server, securityManager, powerManager, matrixSettings, matrixService, csiService)
+        : nullptr;
 }
 
 void beginMatrixApi(API::MatrixApiService* api) {

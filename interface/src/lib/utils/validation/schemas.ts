@@ -96,41 +96,132 @@ const MatrixCustomIconSchema = z
 		message: 'Matrix custom icon slots must be empty or contain 64 pixels'
 	});
 
-export const MatrixSettingsSchema = z.object({
-	brightness: z.number().int().min(2).max(255),
-	alarm_mode: z.number().int().min(0).max(2),
-	rotation: z.number().int().min(0).max(3),
-	auto_rotate: z.boolean(),
-	effect_enabled: z.boolean(),
-	effect_engine: z.number().int().min(0).max(1),
-	effect_mode: z.number().int().min(0).max(69),
-	effect_speed: z
-		.number()
-		.int()
-		.min(50)
-		.max(24 * 60 * 60 * 1000),
-	effect_color: MatrixColorSchema,
-	effect_color_2: MatrixColorSchema,
-	effect_color_3: MatrixColorSchema,
-	effect_reactivity_provider: z.number().int().min(0).max(1),
-	effect_reactivity_gain: z.number().int().min(0).max(200),
-	background_mode: z.number().int().min(0).max(1),
-	data_visualization_enabled: z.boolean(),
-	data_visualization_source: z.number().int().min(0).max(3),
-	data_visualization_metric: z.number().int().min(0).max(5),
-	data_visualization_mode: z.number().int().min(0).max(6),
-	data_visualization_min: z.number(),
-	data_visualization_max: z.number(),
-	data_visualization_color_min: MatrixColorSchema,
-	data_visualization_color_mid: MatrixColorSchema,
-	data_visualization_color_max: MatrixColorSchema,
-	data_visualization_brightness_min: z.number().int().min(0).max(255),
-	data_visualization_brightness_max: z.number().int().min(0).max(255),
-	data_visualization_smoothing: z.number().int().min(0).max(100),
-	data_visualization_stale_behavior: z.number().int().min(0).max(2),
-	data_visualization_device_id: z.string().max(17),
-	custom_icons: z.array(MatrixCustomIconSchema).length(3).optional(),
-	menu_enabled: z.boolean(),
-	menu_text_color: MatrixColorSchema,
-	menu_scroll_speed: z.number().int().min(20).max(120)
-});
+function isMatrixMetricValidForSource(source: number, metric: number): boolean {
+	switch (source) {
+		case 0:
+			return metric === 0 || metric === 1 || metric === 2;
+		case 1:
+			return metric === 1 || metric === 2 || metric === 3;
+		case 2:
+			return metric === 3 || metric === 4;
+		case 3:
+			return metric === 5;
+		default:
+			return false;
+	}
+}
+
+function isMatrixModeValidForSource(source: number, mode: number): boolean {
+	if (source === 3) {
+		return mode === 2 || mode === 4 || mode === 6;
+	}
+	return mode === 0 || mode === 3 || mode === 5 || mode === 6;
+}
+
+export const MatrixSettingsSchema = z
+	.object({
+		brightness: z.number().int().min(2).max(255),
+		alarm_mode: z.number().int().min(0).max(2),
+		rotation: z.number().int().min(0).max(3),
+		auto_rotate: z.boolean(),
+		effect_enabled: z.boolean(),
+		effect_engine: z.number().int().min(0).max(1),
+		effect_mode: z.number().int().min(0).max(69),
+		effect_speed: z
+			.number()
+			.int()
+			.min(50)
+			.max(24 * 60 * 60 * 1000),
+		effect_color: MatrixColorSchema,
+		effect_color_2: MatrixColorSchema,
+		effect_color_3: MatrixColorSchema,
+		effect_reactivity_provider: z.number().int().min(0).max(1),
+		effect_reactivity_gain: z.number().int().min(0).max(200),
+		background_mode: z.number().int().min(0).max(2),
+		data_visualization_enabled: z.boolean(),
+		data_visualization_source: z.number().int().min(0).max(3),
+		data_visualization_metric: z.number().int().min(0).max(5),
+		data_visualization_mode: z.number().int().min(0).max(6),
+		data_visualization_min: z.number(),
+		data_visualization_max: z.number(),
+		data_visualization_color_min: MatrixColorSchema,
+		data_visualization_color_mid: MatrixColorSchema,
+		data_visualization_color_max: MatrixColorSchema,
+		data_visualization_brightness_min: z.number().int().min(0).max(255),
+		data_visualization_brightness_max: z.number().int().min(1).max(255),
+		data_visualization_smoothing: z.number().int().min(0).max(100),
+		data_visualization_stale_behavior: z.number().int().min(0).max(2),
+		data_visualization_device_id: z.string().max(17),
+		custom_icons: z.array(MatrixCustomIconSchema).length(3).optional(),
+		menu_enabled: z.boolean(),
+		menu_text_color: MatrixColorSchema,
+		menu_scroll_speed: z.number().int().min(20).max(120)
+	})
+	.superRefine((settings, ctx) => {
+		if (settings.effect_engine === 1 && settings.effect_mode > 14) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['effect_mode'],
+				message: 'Native 3D effect mode must be 0..14'
+			});
+		}
+
+		if (settings.data_visualization_max <= settings.data_visualization_min) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['data_visualization_max'],
+				message: 'Maximum must be greater than minimum'
+			});
+		}
+
+		if (
+			!isMatrixMetricValidForSource(
+				settings.data_visualization_source,
+				settings.data_visualization_metric
+			)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['data_visualization_metric'],
+				message: 'Metric is not valid for the selected source'
+			});
+		}
+
+		if (
+			!isMatrixModeValidForSource(
+				settings.data_visualization_source,
+				settings.data_visualization_mode
+			)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['data_visualization_mode'],
+				message: 'Visualization mode is not valid for the selected source'
+			});
+		}
+
+		if (settings.background_mode === 0 && !settings.effect_enabled) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['effect_enabled'],
+				message: 'Effect background requires effects to be enabled'
+			});
+		}
+		if (settings.background_mode === 1 && !settings.data_visualization_enabled) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['data_visualization_enabled'],
+				message: 'Live data background requires data visualization to be enabled'
+			});
+		}
+		if (
+			settings.background_mode === 2 &&
+			(settings.effect_enabled || settings.data_visualization_enabled)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['background_mode'],
+				message: 'Off background cannot keep effects or live data enabled'
+			});
+		}
+	});

@@ -155,6 +155,9 @@ void deserializeMatrix(JsonObject& obj, RTC::MatrixData& data) {
     if (data.dataVisualizationBrightnessMax < data.dataVisualizationBrightnessMin) {
         std::swap(data.dataVisualizationBrightnessMax, data.dataVisualizationBrightnessMin);
     }
+    if (data.dataVisualizationBrightnessMax == 0) {
+        data.dataVisualizationBrightnessMax = 1;
+    }
     if (obj[Keys::kDataVisualizationSmoothing].is<uint8_t>()) {
         data.dataVisualizationSmoothing = obj[Keys::kDataVisualizationSmoothing].as<uint8_t>();
     }
@@ -167,6 +170,16 @@ void deserializeMatrix(JsonObject& obj, RTC::MatrixData& data) {
             data.dataVisualizationDeviceId,
             sizeof(data.dataVisualizationDeviceId),
             obj[Keys::kDataVisualizationDeviceId].as<const char*>());
+    }
+    if (!MATRIX::isMatrixMetricValidForSource(data.dataVisualizationSource, data.dataVisualizationMetric)) {
+        data.dataVisualizationMetric = MATRIX::defaultMetricForSource(data.dataVisualizationSource);
+    }
+    if (!MATRIX::isMatrixModeValidForSource(data.dataVisualizationSource, data.dataVisualizationMode)) {
+        data.dataVisualizationMode = MATRIX::defaultModeForSource(data.dataVisualizationSource);
+    }
+    if (data.dataVisualizationSource == static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi)) {
+        data.dataVisualizationMin = 0.0f;
+        data.dataVisualizationMax = 100.0f;
     }
     MATRIX::normalizeMatrixBackgroundSelection(data);
 

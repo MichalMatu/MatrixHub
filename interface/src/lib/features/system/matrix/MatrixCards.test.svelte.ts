@@ -150,6 +150,7 @@ vi.mock('$lib/paraglide/messages.js', () => {
 		matrix_effect_reactivity_provider: () => 'Reactivity Provider',
 		matrix_effect_reactivity_provider_none: () => 'Off',
 		matrix_effect_reactivity_provider_imu: () => 'IMU Motion',
+		matrix_effect_reactivity_provider_help: () => 'IMU works with Reactive 3D',
 		matrix_effect_reactivity_gain: () => 'Reactivity Gain',
 		matrix_effect_palettes: () => 'Palettes',
 		matrix_effect_palettes_desc: () => 'Preset colors',
@@ -164,6 +165,10 @@ vi.mock('$lib/paraglide/messages.js', () => {
 		matrix_effect_color_primary: () => 'Primary color',
 		matrix_effect_color_secondary: () => 'Secondary color',
 		matrix_effect_color_tertiary: () => 'Tertiary color',
+		matrix_background_mode: () => 'Matrix background',
+		matrix_background_mode_off: () => 'Off',
+		matrix_background_mode_effects: () => 'Effects',
+		matrix_background_mode_live_data: () => 'Live data',
 		matrix_eff_3d_gyro_cube: () => 'Iridescent Ripple',
 		matrix_eff_3d_gravity_particles: () => 'Gravity Particles',
 		matrix_eff_3d_depth_tunnel: () => 'Depth Tunnel',
@@ -267,9 +272,16 @@ describe('Matrix cards', () => {
 	});
 
 	it('stages the native 3D engine and IMU reactivity as effect drafts', async () => {
-		const store = createMatrixStore({ effect_mode: 69 });
+		const store = createMatrixStore({
+			background_mode: 2,
+			effect_enabled: false,
+			effect_mode: 69
+		});
 		render(MatrixEffects, { props: { store, canManage: true } });
 
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Matrix background' }), {
+			target: { value: '0' }
+		});
 		await fireEvent.change(screen.getByRole('combobox', { name: 'Effect Engine' }), {
 			target: { value: '1' }
 		});
@@ -282,6 +294,9 @@ describe('Matrix cards', () => {
 
 		expect(store.settings.effect_engine).toBe(1);
 		expect(store.settings.effect_mode).toBe(14);
+		expect(store.settings.background_mode).toBe(0);
+		expect(store.settings.effect_enabled).toBe(true);
+		expect(store.settings.data_visualization_enabled).toBe(false);
 		expect(store.settings.effect_reactivity_provider).toBe(1);
 		expect(store.settings.effect_reactivity_gain).toBe(125);
 		expect((screen.getByRole('combobox', { name: 'Effect Mode' }) as HTMLSelectElement).value).toBe(

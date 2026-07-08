@@ -5,7 +5,7 @@ export type MatrixEffectEngine = 0 | 1;
 export type MatrixEffectReactivityProvider = 0 | 1;
 export type MatrixEffectSpeedScale = 'ms' | 's' | 'm' | 'h';
 export type MatrixEffectCategoryId = 'recommended' | 'calm' | 'dynamic' | 'seasonal' | 'all';
-export type MatrixBackgroundMode = 0 | 1;
+export type MatrixBackgroundMode = 0 | 1 | 2;
 export type MatrixDataVisualizationSource = 0 | 1 | 2 | 3;
 export type MatrixDataVisualizationMetric = 0 | 1 | 2 | 3 | 4 | 5;
 export type MatrixDataVisualizationMode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -22,6 +22,7 @@ export type MatrixDataVisualizationPreset = Pick<
 	| 'data_visualization_brightness_min'
 	| 'data_visualization_brightness_max'
 	| 'data_visualization_smoothing'
+	| 'data_visualization_stale_behavior'
 >;
 
 export type MatrixEffectCategoryDefinition = {
@@ -48,7 +49,7 @@ export const DEFAULT_MATRIX_SETTINGS: MatrixSettings = {
 	effect_color_3: 0x0000ff,
 	effect_reactivity_provider: 0,
 	effect_reactivity_gain: 80,
-	background_mode: 0,
+	background_mode: 2,
 	data_visualization_enabled: false,
 	data_visualization_source: 0,
 	data_visualization_metric: 0,
@@ -129,7 +130,7 @@ export const MATRIX_EFFECT_SPEED_SCALE_CONFIG = {
 	{ min: number; max: number; step: number; unitMs: number; suffix: string }
 >;
 
-export const MATRIX_EFFECT_SPEED_SCALES: MatrixEffectSpeedScale[] = ['ms', 's', 'm', 'h'];
+export const MATRIX_EFFECT_SPEED_SCALES: MatrixEffectSpeedScale[] = ['ms', 's'];
 const MATRIX_COLOR_MAX = 0xffffff;
 const MATRIX_CUSTOM_ICON_SLOTS = 3;
 export const MATRIX_CUSTOM_ICON_PIXELS = 64;
@@ -146,6 +147,7 @@ export const MATRIX_EFFECT_REACTIVITY_GAIN_MIN = 0;
 export const MATRIX_EFFECT_REACTIVITY_GAIN_MAX = 200;
 export const MATRIX_BACKGROUND_MODE_EFFECTS = 0 satisfies MatrixBackgroundMode;
 export const MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION = 1 satisfies MatrixBackgroundMode;
+export const MATRIX_BACKGROUND_MODE_OFF = 2 satisfies MatrixBackgroundMode;
 export const MATRIX_DATA_SOURCE_SCD4X = 0 satisfies MatrixDataVisualizationSource;
 export const MATRIX_DATA_SOURCE_BLE = 1 satisfies MatrixDataVisualizationSource;
 export const MATRIX_DATA_SOURCE_WIFI_RSSI = 2 satisfies MatrixDataVisualizationSource;
@@ -176,7 +178,8 @@ const MATRIX_DATA_PRESET_CO2 = {
 	data_visualization_color_max: 0xff3000,
 	data_visualization_brightness_min: 12,
 	data_visualization_brightness_max: 180,
-	data_visualization_smoothing: 50
+	data_visualization_smoothing: 50,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_DIM
 } as const satisfies MatrixDataVisualizationPreset;
 
 const MATRIX_DATA_PRESET_TEMPERATURE = {
@@ -188,7 +191,8 @@ const MATRIX_DATA_PRESET_TEMPERATURE = {
 	data_visualization_color_max: 0xff3000,
 	data_visualization_brightness_min: 12,
 	data_visualization_brightness_max: 180,
-	data_visualization_smoothing: 50
+	data_visualization_smoothing: 50,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_DIM
 } as const satisfies MatrixDataVisualizationPreset;
 
 const MATRIX_DATA_PRESET_HUMIDITY = {
@@ -200,7 +204,8 @@ const MATRIX_DATA_PRESET_HUMIDITY = {
 	data_visualization_color_max: 0x00b7ff,
 	data_visualization_brightness_min: 12,
 	data_visualization_brightness_max: 180,
-	data_visualization_smoothing: 50
+	data_visualization_smoothing: 50,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_DIM
 } as const satisfies MatrixDataVisualizationPreset;
 
 const MATRIX_DATA_PRESET_RSSI_TREND = {
@@ -212,7 +217,8 @@ const MATRIX_DATA_PRESET_RSSI_TREND = {
 	data_visualization_color_max: 0x00ff80,
 	data_visualization_brightness_min: 10,
 	data_visualization_brightness_max: 180,
-	data_visualization_smoothing: 60
+	data_visualization_smoothing: 60,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_DIM
 } as const satisfies MatrixDataVisualizationPreset;
 
 const MATRIX_DATA_PRESET_SIGNAL_QUALITY = {
@@ -224,7 +230,8 @@ const MATRIX_DATA_PRESET_SIGNAL_QUALITY = {
 	data_visualization_color_max: 0x00ff80,
 	data_visualization_brightness_min: 10,
 	data_visualization_brightness_max: 180,
-	data_visualization_smoothing: 55
+	data_visualization_smoothing: 55,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_DIM
 } as const satisfies MatrixDataVisualizationPreset;
 
 const MATRIX_DATA_PRESET_CSI = {
@@ -236,8 +243,35 @@ const MATRIX_DATA_PRESET_CSI = {
 	data_visualization_color_max: 0xff3000,
 	data_visualization_brightness_min: 8,
 	data_visualization_brightness_max: 220,
-	data_visualization_smoothing: 45
+	data_visualization_smoothing: 45,
+	data_visualization_stale_behavior: MATRIX_DATA_STALE_BLANK
 } as const satisfies MatrixDataVisualizationPreset;
+
+export function getAllowedMatrixDataVisualizationModes(
+	source: MatrixDataVisualizationSource
+): MatrixDataVisualizationMode[] {
+	return source === MATRIX_DATA_SOURCE_WIFI_CSI
+		? [MATRIX_DATA_VIZ_MODE_HEATMAP, MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS, MATRIX_DATA_VIZ_MODE_PULSE]
+		: [
+				MATRIX_DATA_VIZ_MODE_GAUGE,
+				MATRIX_DATA_VIZ_MODE_TREND,
+				MATRIX_DATA_VIZ_MODE_PERIMETER_METER,
+				MATRIX_DATA_VIZ_MODE_PULSE
+			];
+}
+
+export function getDefaultMatrixDataVisualizationMode(
+	source: MatrixDataVisualizationSource
+): MatrixDataVisualizationMode {
+	return getAllowedMatrixDataVisualizationModes(source)[0];
+}
+
+export function isMatrixDataVisualizationModeValidForSource(
+	source: MatrixDataVisualizationSource,
+	mode: MatrixDataVisualizationMode
+): boolean {
+	return getAllowedMatrixDataVisualizationModes(source).includes(mode);
+}
 
 export function getDefaultMatrixDataVisualizationMetric(
 	source: MatrixDataVisualizationSource

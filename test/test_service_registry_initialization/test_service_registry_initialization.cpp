@@ -124,6 +124,7 @@ inline PsychicHttpServer* lastMatrixApiServer = nullptr;
 inline SecurityManager* lastMatrixApiSecurity = nullptr;
 inline POWER::PowerManager* lastMatrixApiPowerManager = nullptr;
 inline MATRIX::MatrixSettingsService* lastMatrixApiSettings = nullptr;
+inline MatrixService* lastMatrixApiMatrixService = nullptr;
 inline WIFISENSING::CSI::CsiService* lastMatrixApiCsiService = nullptr;
 inline int beginMatrixApiCalls = 0;
 inline API::MatrixApiService* fakeMatrixApiPtr = reinterpret_cast<API::MatrixApiService*>(0x42424242);
@@ -282,6 +283,7 @@ void reset() {
     lastMatrixApiSecurity = nullptr;
     lastMatrixApiPowerManager = nullptr;
     lastMatrixApiSettings = nullptr;
+    lastMatrixApiMatrixService = nullptr;
     lastMatrixApiCsiService = nullptr;
     beginMatrixApiCalls = 0;
     fakeMatrixApiPtr = reinterpret_cast<API::MatrixApiService*>(0x42424242);
@@ -542,6 +544,7 @@ API::MatrixApiService* initMatrixApi(
     SecurityManager* securityManager,
     POWER::PowerManager* powerManager,
     MATRIX::MatrixSettingsService* matrixSettings,
+    MatrixService* matrixService,
     WIFISENSING::CSI::CsiService* csiService) {
     TEST_SERVICE_REGISTRY_INIT::calls.push("initMatrixApi");
     TEST_SERVICE_REGISTRY_INIT::initMatrixApiCalls++;
@@ -550,6 +553,7 @@ API::MatrixApiService* initMatrixApi(
     TEST_SERVICE_REGISTRY_INIT::lastMatrixApiSecurity = securityManager;
     TEST_SERVICE_REGISTRY_INIT::lastMatrixApiPowerManager = powerManager;
     TEST_SERVICE_REGISTRY_INIT::lastMatrixApiSettings = matrixSettings;
+    TEST_SERVICE_REGISTRY_INIT::lastMatrixApiMatrixService = matrixService;
     TEST_SERVICE_REGISTRY_INIT::lastMatrixApiCsiService = csiService;
     return TEST_SERVICE_REGISTRY_INIT::fakeMatrixApiPtr;
 }
@@ -1036,6 +1040,8 @@ void test_initializeMatrixServices_wires_menu_settings_and_api_in_order() {
                           TEST_SERVICE_REGISTRY_INIT::lastMatrixApiPowerManager);
     TEST_ASSERT_EQUAL_PTR(registry._matrixSettings.get(),
                           TEST_SERVICE_REGISTRY_INIT::lastMatrixApiSettings);
+    TEST_ASSERT_EQUAL_PTR(registry._matrixService.get(),
+                          TEST_SERVICE_REGISTRY_INIT::lastMatrixApiMatrixService);
     TEST_ASSERT_EQUAL_PTR(registry._csiService.get(),
                           TEST_SERVICE_REGISTRY_INIT::lastMatrixApiCsiService);
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::beginMatrixApiCalls);

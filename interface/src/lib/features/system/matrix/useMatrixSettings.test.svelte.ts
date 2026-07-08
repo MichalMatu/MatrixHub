@@ -55,7 +55,7 @@ function createMatrixSettings(overrides: Partial<MatrixSettings> = {}): MatrixSe
 		effect_color_3: 0x0000ff,
 		effect_reactivity_provider: 0,
 		effect_reactivity_gain: 80,
-		background_mode: 0,
+		background_mode: 2,
 		data_visualization_enabled: false,
 		data_visualization_source: 0,
 		data_visualization_metric: 0,
@@ -223,6 +223,7 @@ describe('useMatrixSettings', () => {
 	it('tracks and saves only the requested matrix settings section', async () => {
 		const { useMatrixSettings } = await import('./useMatrixSettings.svelte');
 		const updatedSettings = createMatrixSettings({
+			background_mode: 0,
 			effect_mode: 11,
 			effect_enabled: true
 		});
@@ -243,6 +244,7 @@ describe('useMatrixSettings', () => {
 					matrix.updateSetting('brightness', 77);
 					expect(matrix.hasChanges).toBe(false);
 
+					matrix.updateSetting('background_mode', 0);
 					matrix.updateSetting('effect_enabled', true);
 					matrix.updateSetting('effect_mode', 11);
 					expect(matrix.hasChanges).toBe(true);

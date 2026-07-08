@@ -6,11 +6,14 @@
 		FormColorInput,
 		FormInput,
 		FormRange,
-		FormSelect,
-		FormToggle
+		FormSelect
 	} from '$lib/components/shared/forms';
 	import { Spinner } from '$lib/components/common';
 	import { BleApiService } from '$lib/services/api/connectivity/BleApiService';
+	import {
+		MatrixApiService,
+		type MatrixDataVisualizationStatus
+	} from '$lib/services/api/core/MatrixApiService';
 	import { useSessionAccess } from '$lib/features/auth/useSessionAccess.svelte';
 	import { i18n } from '$lib/i18n.svelte';
 	import type { BleStatus } from '$lib/types/connectivity/ble';
@@ -20,6 +23,8 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION,
+		MATRIX_BACKGROUND_MODE_EFFECTS,
+		MATRIX_BACKGROUND_MODE_OFF,
 		MATRIX_DATA_METRIC_CO2,
 		MATRIX_DATA_METRIC_CSI_MOTION,
 		MATRIX_DATA_METRIC_HUMIDITY,
@@ -33,7 +38,6 @@
 		MATRIX_DATA_STALE_BLANK,
 		MATRIX_DATA_STALE_DIM,
 		MATRIX_DATA_STALE_GRAY,
-		MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE,
 		MATRIX_DATA_VIZ_MODE_GAUGE,
 		MATRIX_DATA_VIZ_MODE_HEATMAP,
 		MATRIX_DATA_VIZ_MODE_PERIMETER_METER,
@@ -41,14 +45,22 @@
 		MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS,
 		MATRIX_DATA_VIZ_MODE_TREND,
 		fromMatrixHexColor,
+		getAllowedMatrixDataVisualizationModes,
 		getDefaultMatrixDataVisualizationMetric,
 		getMatrixDataVisualizationPreset,
+		isMatrixDataVisualizationModeValidForSource,
 		toMatrixHexColor,
+		type MatrixBackgroundMode,
 		type MatrixDataVisualizationMetric,
 		type MatrixDataVisualizationMode,
 		type MatrixDataVisualizationSource,
 		type MatrixDataVisualizationStaleBehavior
 	} from './matrixModel';
+
+	type SelectOption<T extends number | string = number> = {
+		value: T;
+		label: string;
+	};
 
 	let {
 		store,
@@ -61,11 +73,17 @@
 	const session = useSessionAccess();
 	let bleStatus = $state<BleStatus | null>(null);
 	let bleLoadError = $state('');
+	let dataStatus = $state<MatrixDataVisualizationStatus | null>(null);
+	let dataStatusError = $state('');
 	let minHex = $state('#00ff80');
 	let midHex = $state('#ffd166');
 	let maxHex = $state('#ff3000');
 
-	const controlsDisabled = $derived(!canManage || !store.settings.data_visualization_enabled);
+	const dataVisualizationActive = $derived(
+		store.settings.background_mode === MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION &&
+			store.settings.data_visualization_enabled
+	);
+	const controlsDisabled = $derived(!canManage || !dataVisualizationActive);
 	const selectedSource = $derived(
 		store.settings.data_visualization_source as MatrixDataVisualizationSource
 	);
@@ -80,9 +98,24 @@
 	});
 
 	$effect(() => {
-		if (session.canRead) {
-			void loadBleStatus();
+		if (!session.canRead || !dataVisualizationActive) {
+			dataStatus = null;
+			return;
 		}
+
+		void loadDataVisualizationStatus();
+		const interval = window.setInterval(() => void loadDataVisualizationStatus(), 2500);
+		return () => window.clearInterval(interval);
+	});
+
+	$effect(() => {
+		if (!session.canRead || !dataVisualizationActive || selectedSource !== MATRIX_DATA_SOURCE_BLE) {
+			return;
+		}
+
+		void loadBleStatus();
+		const interval = window.setInterval(() => void loadBleStatus(), 15000);
+		return () => window.clearInterval(interval);
 	});
 
 	const sourceOptions = $derived([
@@ -92,9 +125,17 @@
 		{ value: MATRIX_DATA_SOURCE_WIFI_CSI, label: m.matrix_data_viz_source_wifi_csi() }
 	]);
 
-	const modeOptions = $derived([
+	const backgroundModeOptions = $derived([
+		{ value: MATRIX_BACKGROUND_MODE_OFF, label: m.matrix_background_mode_off() },
+		{ value: MATRIX_BACKGROUND_MODE_EFFECTS, label: m.matrix_background_mode_effects() },
+		{
+			value: MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION,
+			label: m.matrix_background_mode_live_data()
+		}
+	]);
+
+	const allModeOptions: SelectOption<MatrixDataVisualizationMode>[] = $derived([
 		{ value: MATRIX_DATA_VIZ_MODE_GAUGE, label: m.matrix_data_viz_mode_gauge() },
-		{ value: MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE, label: m.matrix_data_viz_mode_center_ripple() },
 		{ value: MATRIX_DATA_VIZ_MODE_HEATMAP, label: m.matrix_data_viz_mode_heatmap() },
 		{ value: MATRIX_DATA_VIZ_MODE_TREND, label: m.matrix_data_viz_mode_trend() },
 		{ value: MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS, label: m.matrix_data_viz_mode_spectrum_bars() },
@@ -104,6 +145,11 @@
 		},
 		{ value: MATRIX_DATA_VIZ_MODE_PULSE, label: m.matrix_data_viz_mode_pulse() }
 	]);
+
+	const modeOptions = $derived.by(() => {
+		const allowed = getAllowedMatrixDataVisualizationModes(selectedSource);
+		return allModeOptions.filter((option) => allowed.includes(option.value));
+	});
 
 	const staleOptions = $derived([
 		{ value: MATRIX_DATA_STALE_DIM, label: m.matrix_data_viz_stale_dim() },
@@ -141,11 +187,20 @@
 		}
 	});
 
+	$effect(() => {
+		if (store.loading) return;
+		const currentMode = store.settings.data_visualization_mode as MatrixDataVisualizationMode;
+		if (!isMatrixDataVisualizationModeValidForSource(selectedSource, currentMode)) {
+			store.settings.data_visualization_mode =
+				getAllowedMatrixDataVisualizationModes(selectedSource)[0];
+		}
+	});
+
 	const bleDeviceOptions = $derived.by(() => [
 		{ value: '', label: m.matrix_data_viz_ble_device_placeholder() },
 		...(bleStatus?.devices ?? []).map((device) => ({
 			value: device.mac,
-			label: `${device.mac} - ${device.temp.toFixed(1)}C - ${device.humid.toFixed(0)}%`
+			label: `${device.mac} - ${device.temp.toFixed(1)}C - ${device.humid.toFixed(0)}% - ${device.rssi} dBm - ${device.batt}% - ${formatBleLastSeen(device.last_seen)}`
 		}))
 	]);
 
@@ -166,13 +221,20 @@
 		applyPreset(source, metric);
 	}
 
-	function handleEnabledChange(e: Event) {
+	function handleBackgroundModeChange(e: Event) {
 		if (!canManage) return;
-		const enabled = (e.currentTarget as HTMLInputElement).checked;
-		store.settings.data_visualization_enabled = enabled;
-		if (enabled) {
-			store.settings.background_mode = MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION;
+		const mode = Number((e.currentTarget as HTMLSelectElement).value) as MatrixBackgroundMode;
+		store.settings.background_mode = mode;
+
+		if (mode === MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION) {
+			store.settings.data_visualization_enabled = true;
 			store.settings.effect_enabled = false;
+		} else if (mode === MATRIX_BACKGROUND_MODE_EFFECTS) {
+			store.settings.effect_enabled = true;
+			store.settings.data_visualization_enabled = false;
+		} else {
+			store.settings.effect_enabled = false;
+			store.settings.data_visualization_enabled = false;
 		}
 	}
 
@@ -237,6 +299,50 @@
 			bleLoadError = m.matrix_data_viz_ble_load_error({ locale: i18n.languageTag });
 		}
 	}
+
+	async function loadDataVisualizationStatus() {
+		try {
+			dataStatusError = '';
+			dataStatus = await new MatrixApiService(session.apiOptions).getDataVisualizationStatus();
+		} catch {
+			dataStatusError = m.matrix_data_viz_status_load_error({ locale: i18n.languageTag });
+		}
+	}
+
+	function formatBleLastSeen(lastSeen: number): string {
+		if (!lastSeen) return m.matrix_data_viz_ble_last_seen_unknown({ locale: i18n.languageTag });
+		const ageMs = Math.max(0, Date.now() - lastSeen);
+		const ageSeconds = Math.round(ageMs / 1000);
+		return m.matrix_data_viz_ble_last_seen_age(
+			{ seconds: ageSeconds },
+			{ locale: i18n.languageTag }
+		);
+	}
+
+	function formatStatusValue(status: MatrixDataVisualizationStatus | null): string {
+		if (!status || !status.valid) return '-';
+		return Number.isFinite(status.value) ? status.value.toFixed(1) : '-';
+	}
+
+	function formatStatusAge(status: MatrixDataVisualizationStatus | null): string {
+		if (!status || status.last_update_ms === 0) return '-';
+		return `${status.age_ms} ms`;
+	}
+
+	function getStatusReasonLabel(reason: string): string {
+		const labels: Record<string, string> = {
+			ok: m.matrix_data_viz_reason_ok({ locale: i18n.languageTag }),
+			disabled: m.matrix_data_viz_reason_disabled({ locale: i18n.languageTag }),
+			no_service: m.matrix_data_viz_reason_no_service({ locale: i18n.languageTag }),
+			no_sample: m.matrix_data_viz_reason_no_sample({ locale: i18n.languageTag }),
+			stale: m.matrix_data_viz_reason_stale({ locale: i18n.languageTag }),
+			wifi_inactive: m.matrix_data_viz_reason_wifi_inactive({ locale: i18n.languageTag }),
+			no_ble_device: m.matrix_data_viz_reason_no_ble_device({ locale: i18n.languageTag }),
+			no_scd4x_reading: m.matrix_data_viz_reason_no_scd4x_reading({ locale: i18n.languageTag }),
+			no_csi_packet: m.matrix_data_viz_reason_no_csi_packet({ locale: i18n.languageTag })
+		};
+		return labels[reason] ?? reason;
+	}
 </script>
 
 <SettingsCard
@@ -261,30 +367,44 @@
 				{store.error}
 			</div>
 		{:else}
-			<ContentBox class="flex items-center justify-between">
-				<div>
-					<div class="flex flex-wrap items-center gap-2">
-						<span class="font-bold text-sm">{m.matrix_data_viz_enable()}</span>
-						<span
-							class="badge badge-sm {store.settings.data_visualization_enabled
-								? 'badge-success'
-								: 'badge-ghost'}"
-						>
-							{store.settings.data_visualization_enabled
-								? m.imu_state_enabled({ locale: i18n.languageTag })
-								: m.imu_state_disabled({ locale: i18n.languageTag })}
-						</span>
-					</div>
-					<p class="text-xs text-base-content/70">{m.matrix_data_viz_desc()}</p>
-				</div>
-				<FormToggle
-					label=""
-					bind:checked={store.settings.data_visualization_enabled}
+			<ContentBox>
+				<FormSelect
+					label={m.matrix_background_mode()}
+					value={store.settings.background_mode}
+					options={backgroundModeOptions}
 					disabled={!canManage}
-					ariaLabel={m.matrix_data_viz_enable({ locale: i18n.languageTag })}
-					plain={true}
-					onchange={handleEnabledChange}
+					onchange={handleBackgroundModeChange}
 				/>
+				<p class="mt-2 text-xs text-base-content/70">{m.matrix_data_viz_desc()}</p>
+			</ContentBox>
+
+			<ContentBox>
+				<div class="flex items-center justify-between gap-3">
+					<span class="font-bold text-sm">{m.matrix_data_viz_status_title()}</span>
+					<span
+						class="badge badge-sm {dataStatus?.valid && !dataStatus?.stale
+							? 'badge-success'
+							: 'badge-warning'}"
+					>
+						{dataStatus?.valid && !dataStatus?.stale
+							? m.matrix_data_viz_status_live({ locale: i18n.languageTag })
+							: m.matrix_data_viz_status_no_fresh_data({ locale: i18n.languageTag })}
+					</span>
+				</div>
+				<p class="mt-2 text-xs text-base-content/70">
+					{m.matrix_data_viz_status_summary(
+						{
+							value: formatStatusValue(dataStatus),
+							age: formatStatusAge(dataStatus),
+							bins: dataStatus?.bin_count ?? 0,
+							reason: getStatusReasonLabel(dataStatus?.reason ?? 'disabled')
+						},
+						{ locale: i18n.languageTag }
+					)}
+				</p>
+				{#if dataStatusError}
+					<p class="mt-2 text-xs text-warning">{dataStatusError}</p>
+				{/if}
 			</ContentBox>
 
 			<div class="flex flex-col gap-1" aria-disabled={controlsDisabled}>

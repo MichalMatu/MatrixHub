@@ -95,6 +95,7 @@ void test_stale_blank_behavior_turns_frame_off() {
 void test_heatmap_is_deterministic_for_same_bins() {
     MATRIX_VIZ::MatrixDataVisualizationEngine engine;
     auto config = baseConfig();
+    config.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
     config.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
     engine.configure(config);
 
@@ -119,6 +120,7 @@ void test_heatmap_is_deterministic_for_same_bins() {
 
 void test_heatmap_with_bins_uses_bin_values_not_scalar_motion() {
     auto config = baseConfig();
+    config.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
     config.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
 
     MATRIX::MatrixDataVisualizationInput input;
@@ -147,23 +149,51 @@ void test_heatmap_with_bins_uses_bin_values_not_scalar_motion() {
     assertFramesEqual(lowScalarFrame, highScalarFrame);
 }
 
-void test_spectrum_bars_scalar_fallback_is_deterministic() {
+void test_scalar_spectrum_mode_normalizes_to_gauge() {
+    auto spectrumConfig = baseConfig();
+    spectrumConfig.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::Scd4x);
+    spectrumConfig.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::SpectrumBars);
+
+    MATRIX::MatrixDataVisualizationInput input;
+    input.valid = true;
+    input.value = 62.0f;
+    input.timestampMs = 1;
+
+    MATRIX_VIZ::MatrixDataVisualizationEngine spectrumEngine;
+    spectrumEngine.configure(spectrumConfig);
+    spectrumEngine.setInput(input);
+    uint32_t spectrumFrame[64] = {};
+    TEST_ASSERT_TRUE(spectrumEngine.render(100, spectrumFrame, 64));
+
+    auto gaugeConfig = baseConfig();
+    gaugeConfig.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Gauge);
+    MATRIX_VIZ::MatrixDataVisualizationEngine gaugeEngine;
+    gaugeEngine.configure(gaugeConfig);
+    gaugeEngine.setInput(input);
+    uint32_t gaugeFrame[64] = {};
+    TEST_ASSERT_TRUE(gaugeEngine.render(100, gaugeFrame, 64));
+
+    assertFramesEqual(gaugeFrame, spectrumFrame);
+}
+
+void test_csi_heatmap_without_bins_blanks_instead_of_synthetic_gradient() {
     MATRIX_VIZ::MatrixDataVisualizationEngine engine;
     auto config = baseConfig();
-    config.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::SpectrumBars);
+    config.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
+    config.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
+    config.staleBehavior = static_cast<uint8_t>(MATRIX::MatrixDataStaleBehavior::Dim);
     engine.configure(config);
 
     MATRIX::MatrixDataVisualizationInput input;
     input.valid = true;
     input.value = 62.0f;
     input.timestampMs = 1;
+    input.binCount = 0;
     engine.setInput(input);
 
-    uint32_t frameA[64] = {};
-    uint32_t frameB[64] = {};
-    TEST_ASSERT_TRUE(engine.render(100, frameA, 64));
-    TEST_ASSERT_TRUE(engine.render(2400, frameB, 64));
-    assertFramesEqual(frameA, frameB);
+    uint32_t frame[64] = {};
+    TEST_ASSERT_TRUE(engine.render(100, frame, 64));
+    TEST_ASSERT_EQUAL_UINT8(0, countLit(frame));
 }
 
 void test_perimeter_meter_is_deterministic_for_same_value() {
@@ -221,6 +251,7 @@ void test_stale_dim_behavior_dims_heatmap_bins() {
 
     MATRIX_VIZ::MatrixDataVisualizationEngine staleEngine;
     auto staleConfig = baseConfig();
+    staleConfig.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
     staleConfig.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
     staleConfig.staleBehavior = static_cast<uint8_t>(MATRIX::MatrixDataStaleBehavior::Dim);
     staleEngine.configure(staleConfig);
@@ -232,6 +263,7 @@ void test_stale_dim_behavior_dims_heatmap_bins() {
     input.stale = false;
     MATRIX_VIZ::MatrixDataVisualizationEngine freshEngine;
     auto freshConfig = baseConfig();
+    freshConfig.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
     freshConfig.mode = static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap);
     freshEngine.configure(freshConfig);
     freshEngine.setInput(input);
@@ -253,7 +285,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_stale_blank_behavior_turns_frame_off);
     RUN_TEST(test_heatmap_is_deterministic_for_same_bins);
     RUN_TEST(test_heatmap_with_bins_uses_bin_values_not_scalar_motion);
-    RUN_TEST(test_spectrum_bars_scalar_fallback_is_deterministic);
+    RUN_TEST(test_scalar_spectrum_mode_normalizes_to_gauge);
+    RUN_TEST(test_csi_heatmap_without_bins_blanks_instead_of_synthetic_gradient);
     RUN_TEST(test_perimeter_meter_is_deterministic_for_same_value);
     RUN_TEST(test_each_visualization_mode_renders_non_empty_frame);
     RUN_TEST(test_stale_dim_behavior_dims_heatmap_bins);

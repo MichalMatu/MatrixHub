@@ -38,6 +38,27 @@ export interface MatrixSettings {
 	menu_scroll_speed: number;
 }
 
+export interface MatrixDataVisualizationStatus {
+	active: boolean;
+	source: number;
+	metric: number;
+	mode: number;
+	valid: boolean;
+	stale: boolean;
+	reason: string;
+	value: number;
+	secondary: number;
+	last_update_ms: number;
+	age_ms: number;
+	bin_count: number;
+	csi?: {
+		available: boolean;
+		matrix_visualization_consumer_active: boolean;
+		packets_per_sec: number;
+		last_packet_ms: number;
+	};
+}
+
 export class MatrixApiService {
 	private client;
 	private static readonly SETTINGS_TIMEOUT_MS = 20000;
@@ -58,6 +79,12 @@ export class MatrixApiService {
 		return this.client.post<MatrixSettings>('/api/matrix/settings', settings, {
 			signal: AbortSignal.timeout(MatrixApiService.SAVE_TIMEOUT_MS),
 			schema: MatrixSettingsSchema
+		});
+	}
+
+	async getDataVisualizationStatus(): Promise<MatrixDataVisualizationStatus> {
+		return this.client.get<MatrixDataVisualizationStatus>('/api/matrix/data-visualization/status', {
+			signal: AbortSignal.timeout(MatrixApiService.SETTINGS_TIMEOUT_MS)
 		});
 	}
 

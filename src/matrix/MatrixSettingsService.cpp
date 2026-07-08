@@ -343,6 +343,24 @@ bool MatrixSettingsService::syncCachedStateLocked() {
         std::swap(snapshot->config.dataVisualizationBrightnessMax,
                   snapshot->config.dataVisualizationBrightnessMin);
     }
+    if (snapshot->config.dataVisualizationBrightnessMax == 0) {
+        snapshot->config.dataVisualizationBrightnessMax = 1;
+    }
+    if (!isMatrixMetricValidForSource(snapshot->config.dataVisualizationSource,
+                                      snapshot->config.dataVisualizationMetric)) {
+        snapshot->config.dataVisualizationMetric =
+            defaultMetricForSource(snapshot->config.dataVisualizationSource);
+    }
+    if (!isMatrixModeValidForSource(snapshot->config.dataVisualizationSource,
+                                    snapshot->config.dataVisualizationMode)) {
+        snapshot->config.dataVisualizationMode =
+            defaultModeForSource(snapshot->config.dataVisualizationSource);
+    }
+    if (snapshot->config.dataVisualizationSource ==
+        static_cast<uint8_t>(MatrixDataSource::WifiCsi)) {
+        snapshot->config.dataVisualizationMin = 0.0f;
+        snapshot->config.dataVisualizationMax = 100.0f;
+    }
     normalizeMatrixBackgroundSelection(snapshot->config);
     _state = *snapshot;
     return true;

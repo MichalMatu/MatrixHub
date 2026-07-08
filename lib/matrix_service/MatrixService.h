@@ -2,6 +2,8 @@
 #define MatrixService_h
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "types/MatrixTypes.h"
 #include "renderer/MatrixRenderer.h"
 #include "core/MatrixState.h"
@@ -11,6 +13,7 @@
 class MatrixService {
 public:
     MatrixService();
+    ~MatrixService();
 
     void init(uint8_t pin);
     void loop();
@@ -51,6 +54,7 @@ public:
     void setScrollSpeed(uint16_t ms);
     void setEffectInput(const MATRIX_FX::MatrixFxInput& input);
     void setDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input);
+    MATRIX::MatrixDataVisualizationStatusSnapshot getDataVisualizationStatusSnapshot() const;
 
     // Forces a solid color (Active Mode - blocks passive updates)
     void showSolidColor(uint32_t color);
@@ -84,6 +88,9 @@ public:
 
 
 private:
+    void cacheDataVisualizationConfig(const MATRIX::MatrixDataVisualizationConfig& config, bool active);
+    void cacheDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input);
+    void cacheDataVisualizationDisabled();
 
     // Renderer (Handles hardware & logic)
     MatrixRenderer _renderer;
@@ -98,6 +105,8 @@ private:
     uint32_t _displayStartMs = 0;
     uint32_t _displayDurationMs = 0;
     bool _autoClearing = false;
+    mutable SemaphoreHandle_t _dataVisualizationStatusMutex = nullptr;
+    MATRIX::MatrixDataVisualizationStatusSnapshot _dataVisualizationStatus{};
 };
 
 #endif

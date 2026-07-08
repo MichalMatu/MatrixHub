@@ -42,7 +42,7 @@ namespace UI {
         constexpr uint32_t DEFAULT_EFFECT_COLOR_TERTIARY = 0x0000FF;  // Blue
         constexpr uint8_t DEFAULT_EFFECT_REACTIVITY_PROVIDER = 0;     // None
         constexpr uint8_t DEFAULT_EFFECT_REACTIVITY_GAIN = 80;
-        constexpr uint8_t DEFAULT_BACKGROUND_MODE = 0;                // Effects
+        constexpr uint8_t DEFAULT_BACKGROUND_MODE = 2;                // Off
         constexpr bool DEFAULT_DATA_VISUALIZATION_ENABLED = false;
         constexpr uint8_t DEFAULT_DATA_VISUALIZATION_SOURCE = 0;      // SCD4x
         constexpr uint8_t DEFAULT_DATA_VISUALIZATION_METRIC = 0;      // CO2

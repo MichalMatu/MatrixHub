@@ -83,6 +83,7 @@ public:
     void setMotionCallback(MotionCallback cb);
     void setMotionConfig(const CsiMotionConfig& config);
     void requestMotionCalibration();
+    void resetVisualizationState();
     CsiMotionSnapshot getMotionSnapshot() const;
     CsiVisualizationSnapshot getVisualizationSnapshot() const;
 
@@ -136,7 +137,6 @@ public:
     void maybePublishMotion(const CsiMotionSnapshot& snapshot, uint32_t nowMs);
     void publishMotionBoolean(bool motion, uint32_t nowMs);
     void refreshMotionConfigFromConsumers();
-    void resetVisualizationState();
     bool reapStoppedProcessingTask(TickType_t waitTicks);
     void destroyProcessingTaskResources();
     void resetRuntimeMetrics();

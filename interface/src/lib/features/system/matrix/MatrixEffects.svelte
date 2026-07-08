@@ -1,7 +1,7 @@
 <script lang="ts">
 	import SettingsCard from '$lib/components/layout/SettingsCard.svelte';
 	import ContentBox from '$lib/components/layout/ContentBox.svelte';
-	import { FormColorInput, FormRange, FormSelect, FormToggle } from '$lib/components/shared/forms';
+	import { FormColorInput, FormRange, FormSelect } from '$lib/components/shared/forms';
 	import { Spinner } from '$lib/components/common';
 	import IconWand from '~icons/tabler/wand';
 	import { type useMatrixSettings } from './useMatrixSettings.svelte';
@@ -14,7 +14,9 @@
 		MATRIX_EFFECT_ENGINE_NATIVE_3D,
 		MATRIX_REACTIVITY_PROVIDER_IMU,
 		MATRIX_REACTIVITY_PROVIDER_NONE,
+		MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION,
 		MATRIX_BACKGROUND_MODE_EFFECTS,
+		MATRIX_BACKGROUND_MODE_OFF,
 		MATRIX_EFFECT_REACTIVITY_GAIN_MAX,
 		MATRIX_EFFECT_REACTIVITY_GAIN_MIN,
 		type MatrixEffectSpeedScale,
@@ -37,6 +39,7 @@
 		normalizeMatrixEffectSpeedForScale,
 		toMatrixHexColor
 	} from './matrixModel';
+	import type { MatrixBackgroundMode } from './matrixModel';
 
 	type MatrixEffectCategory = {
 		value: MatrixEffectCategoryId;
@@ -233,18 +236,40 @@
 		}
 	}
 
-	function handleEffectEnabledChange(e: Event) {
+	function handleBackgroundModeChange(e: Event) {
 		if (!canManage) return;
-		const enabled = (e.currentTarget as HTMLInputElement).checked;
-		store.settings.effect_enabled = enabled;
-		if (enabled) {
-			store.settings.background_mode = MATRIX_BACKGROUND_MODE_EFFECTS;
+		const mode = Number((e.currentTarget as HTMLSelectElement).value) as MatrixBackgroundMode;
+		store.settings.background_mode = mode;
+
+		if (mode === MATRIX_BACKGROUND_MODE_EFFECTS) {
+			store.settings.effect_enabled = true;
+			store.settings.data_visualization_enabled = false;
+		} else if (mode === MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION) {
+			store.settings.data_visualization_enabled = true;
+			store.settings.effect_enabled = false;
+		} else {
+			store.settings.effect_enabled = false;
 			store.settings.data_visualization_enabled = false;
 		}
 	}
 
 	function selectReactivityProvider(nextProvider: MatrixEffectReactivityProvider) {
 		if (!canManage) return;
+		if (nextProvider === MATRIX_REACTIVITY_PROVIDER_IMU) {
+			store.settings.effect_engine = MATRIX_EFFECT_ENGINE_NATIVE_3D;
+			store.settings.effect_mode = normalizeMatrixEffectModeForEngine(
+				store.settings.effect_mode,
+				MATRIX_EFFECT_ENGINE_NATIVE_3D
+			);
+			store.settings.effect_enabled = true;
+			store.settings.background_mode = MATRIX_BACKGROUND_MODE_EFFECTS;
+			store.settings.data_visualization_enabled = false;
+			effectCategory = getPreferredMatrixEffectCategory(
+				store.settings.effect_mode,
+				MATRIX_EFFECT_ENGINE_NATIVE_3D
+			);
+			effectCategoryInitialized = true;
+		}
 		store.settings.effect_reactivity_provider = nextProvider;
 	}
 
@@ -292,6 +317,15 @@
 		}
 	]);
 
+	const backgroundModeOptions = $derived.by(() => [
+		{ value: MATRIX_BACKGROUND_MODE_OFF, label: m.matrix_background_mode_off() },
+		{ value: MATRIX_BACKGROUND_MODE_EFFECTS, label: m.matrix_background_mode_effects() },
+		{
+			value: MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION,
+			label: m.matrix_background_mode_live_data()
+		}
+	]);
+
 	const reactivityProviderOptions = $derived.by(() => [
 		{
 			value: MATRIX_REACTIVITY_PROVIDER_NONE,
@@ -304,7 +338,11 @@
 	]);
 
 	const speedScaleConfig = $derived.by(() => MATRIX_EFFECT_SPEED_SCALE_CONFIG[speedScale]);
-	const effectControlsDisabled = $derived(!canManage || !store.settings.effect_enabled);
+	const effectsActive = $derived(
+		store.settings.background_mode === MATRIX_BACKGROUND_MODE_EFFECTS &&
+			store.settings.effect_enabled
+	);
+	const effectControlsDisabled = $derived(!canManage || !effectsActive);
 	const normalizedEffectEngine = $derived(
 		normalizeMatrixEffectEngine(store.settings.effect_engine)
 	);
@@ -350,38 +388,23 @@
 				{store.error}
 			</div>
 		{:else}
-			<ContentBox class="flex items-center justify-between">
-				<div>
-					<div class="flex flex-wrap items-center gap-2">
-						<span class="font-bold text-sm">{m.matrix_effects_enable()}</span>
-						<span
-							class="badge badge-sm {store.settings.effect_enabled
-								? 'badge-success'
-								: 'badge-ghost'}"
-						>
-							{store.settings.effect_enabled
-								? m.imu_state_enabled({ locale: i18n.languageTag })
-								: m.imu_state_disabled({ locale: i18n.languageTag })}
-						</span>
-					</div>
-					<p class="text-xs text-base-content/70">{m.matrix_effects_desc()}</p>
-					{#if !store.settings.effect_enabled}
-						<p class="mt-1 text-xs text-base-content/60">
-							{m.matrix_effects_disabled_hint()}
-						</p>
-					{/if}
-				</div>
-				<FormToggle
-					label=""
-					bind:checked={store.settings.effect_enabled}
+			<ContentBox>
+				<FormSelect
+					label={m.matrix_background_mode()}
+					value={store.settings.background_mode}
+					options={backgroundModeOptions}
 					disabled={!canManage}
-					ariaLabel={m.matrix_effects_enable({ locale: i18n.languageTag })}
-					plain={true}
-					onchange={handleEffectEnabledChange}
+					onchange={handleBackgroundModeChange}
 				/>
+				<p class="mt-2 text-xs text-base-content/70">{m.matrix_effects_desc()}</p>
+				{#if !effectsActive}
+					<p class="mt-1 text-xs text-base-content/60">
+						{m.matrix_effects_disabled_hint()}
+					</p>
+				{/if}
 			</ContentBox>
 
-			<div class="flex flex-col gap-1" aria-disabled={!store.settings.effect_enabled}>
+			<div class="flex flex-col gap-1" aria-disabled={!effectsActive}>
 				<ContentBox>
 					<FormSelect
 						label={m.matrix_effect_engine()}
@@ -453,6 +476,7 @@
 							label={m.matrix_effect_reactivity_provider()}
 							value={store.settings.effect_reactivity_provider}
 							options={reactivityProviderOptions}
+							help={m.matrix_effect_reactivity_provider_help({ locale: i18n.languageTag })}
 							disabled={effectControlsDisabled}
 							onchange={(e) =>
 								selectReactivityProvider(

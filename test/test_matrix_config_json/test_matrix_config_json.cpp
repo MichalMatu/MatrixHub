@@ -162,7 +162,7 @@ void test_deserialize_matrix_normalizes_data_visualization_fields() {
     JsonObject obj = doc.as<JsonObject>();
     CONFIG::JSON::deserializeMatrix(obj, data);
 
-    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Effects), data.backgroundMode);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Off), data.backgroundMode);
     TEST_ASSERT_FALSE(data.dataVisualizationEnabled);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataSource::Scd4x), data.dataVisualizationSource);
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataMetric::Co2), data.dataVisualizationMetric);
@@ -177,6 +177,49 @@ void test_deserialize_matrix_normalizes_data_visualization_fields() {
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataStaleBehavior::Dim),
                             data.dataVisualizationStaleBehavior);
     TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FF", data.dataVisualizationDeviceId);
+}
+
+void test_deserialize_matrix_false_background_flags_become_off() {
+    JsonDocument doc;
+    doc[CONFIG::Keys::kBackgroundMode] = static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Effects);
+    doc[CONFIG::Keys::kEffectEnabled] = false;
+    doc[CONFIG::Keys::kDataVisualizationEnabled] = false;
+
+    RTC::MatrixData data{};
+    JsonObject obj = doc.as<JsonObject>();
+    CONFIG::JSON::deserializeMatrix(obj, data);
+
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Off),
+                            data.backgroundMode);
+    TEST_ASSERT_FALSE(data.effectEnabled);
+    TEST_ASSERT_FALSE(data.dataVisualizationEnabled);
+}
+
+void test_deserialize_matrix_normalizes_data_visualization_source_combinations() {
+    JsonDocument doc;
+    doc[CONFIG::Keys::kBackgroundMode] =
+        static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::DataVisualization);
+    doc[CONFIG::Keys::kDataVisualizationEnabled] = true;
+    doc[CONFIG::Keys::kDataVisualizationSource] =
+        static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
+    doc[CONFIG::Keys::kDataVisualizationMetric] =
+        static_cast<uint8_t>(MATRIX::MatrixDataMetric::Temperature);
+    doc[CONFIG::Keys::kDataVisualizationMode] =
+        static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Gauge);
+    doc[CONFIG::Keys::kDataVisualizationBrightnessMin] = 0;
+    doc[CONFIG::Keys::kDataVisualizationBrightnessMax] = 0;
+
+    RTC::MatrixData data{};
+    JsonObject obj = doc.as<JsonObject>();
+    CONFIG::JSON::deserializeMatrix(obj, data);
+
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataMetric::CsiMotion),
+                            data.dataVisualizationMetric);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap),
+                            data.dataVisualizationMode);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, data.dataVisualizationMin);
+    TEST_ASSERT_EQUAL_FLOAT(100.0f, data.dataVisualizationMax);
+    TEST_ASSERT_EQUAL_UINT8(1, data.dataVisualizationBrightnessMax);
 }
 
 void test_deserialize_matrix_data_visualization_background_disables_effects() {
@@ -283,6 +326,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_deserialize_matrix_normalizes_native_3d_effect_fields);
     RUN_TEST(test_serialize_matrix_writes_effect_engine_and_reactivity_fields);
     RUN_TEST(test_deserialize_matrix_normalizes_data_visualization_fields);
+    RUN_TEST(test_deserialize_matrix_false_background_flags_become_off);
+    RUN_TEST(test_deserialize_matrix_normalizes_data_visualization_source_combinations);
     RUN_TEST(test_deserialize_matrix_data_visualization_background_disables_effects);
     RUN_TEST(test_deserialize_matrix_effect_background_disables_data_visualization);
     RUN_TEST(test_serialize_matrix_writes_data_visualization_fields);

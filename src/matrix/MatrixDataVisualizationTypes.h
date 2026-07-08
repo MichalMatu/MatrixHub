@@ -14,6 +14,7 @@ constexpr size_t kMatrixDataVizDeviceIdCapacity = 18;  // BLE MAC including term
 enum class MatrixBackgroundMode : uint8_t {
     Effects = 0,
     DataVisualization = 1,
+    Off = 2,
 };
 
 enum class MatrixDataSource : uint8_t {
@@ -48,6 +49,18 @@ enum class MatrixDataStaleBehavior : uint8_t {
     Blank = 2,
 };
 
+enum class MatrixDataVisualizationReason : uint8_t {
+    Ok = 0,
+    Disabled = 1,
+    NoService = 2,
+    NoSample = 3,
+    Stale = 4,
+    WifiInactive = 5,
+    NoBleDevice = 6,
+    NoScd4xReading = 7,
+    NoCsiPacket = 8,
+};
+
 struct MatrixDataVisualizationConfig {
     bool enabled = false;
     uint8_t source = static_cast<uint8_t>(MatrixDataSource::Scd4x);
@@ -70,6 +83,7 @@ struct MatrixDataVisualizationInput {
     bool stale = false;
     bool calibrationReady = false;
     bool needsCalibration = false;
+    uint8_t reason = static_cast<uint8_t>(MatrixDataVisualizationReason::Disabled);
     float value = 0.0f;
     float secondary = 0.0f;
     uint32_t timestampMs = 0;
@@ -77,8 +91,15 @@ struct MatrixDataVisualizationInput {
     uint8_t binCount = 0;
 };
 
+struct MatrixDataVisualizationStatusSnapshot {
+    bool active = false;
+    MatrixDataVisualizationConfig config{};
+    MatrixDataVisualizationInput input{};
+    uint32_t updatedAtMs = 0;
+};
+
 constexpr uint8_t kMatrixBackgroundModeMax =
-    static_cast<uint8_t>(MatrixBackgroundMode::DataVisualization);
+    static_cast<uint8_t>(MatrixBackgroundMode::Off);
 constexpr uint8_t kMatrixDataSourceMax =
     static_cast<uint8_t>(MatrixDataSource::WifiCsi);
 constexpr uint8_t kMatrixDataMetricMax =
@@ -91,7 +112,7 @@ constexpr uint8_t kMatrixDataStaleBehaviorMax =
 inline uint8_t normalizeMatrixBackgroundMode(uint8_t value) {
     return value <= kMatrixBackgroundModeMax
         ? value
-        : static_cast<uint8_t>(MatrixBackgroundMode::Effects);
+        : static_cast<uint8_t>(MatrixBackgroundMode::Off);
 }
 
 inline uint8_t normalizeMatrixDataSource(uint8_t value) {
@@ -118,6 +139,90 @@ inline uint8_t normalizeMatrixDataStaleBehavior(uint8_t value) {
         : static_cast<uint8_t>(MatrixDataStaleBehavior::Dim);
 }
 
+inline const char* matrixDataVisualizationReasonToString(uint8_t value) {
+    switch (static_cast<MatrixDataVisualizationReason>(value)) {
+        case MatrixDataVisualizationReason::Ok:
+            return "ok";
+        case MatrixDataVisualizationReason::Disabled:
+            return "disabled";
+        case MatrixDataVisualizationReason::NoService:
+            return "no_service";
+        case MatrixDataVisualizationReason::NoSample:
+            return "no_sample";
+        case MatrixDataVisualizationReason::Stale:
+            return "stale";
+        case MatrixDataVisualizationReason::WifiInactive:
+            return "wifi_inactive";
+        case MatrixDataVisualizationReason::NoBleDevice:
+            return "no_ble_device";
+        case MatrixDataVisualizationReason::NoScd4xReading:
+            return "no_scd4x_reading";
+        case MatrixDataVisualizationReason::NoCsiPacket:
+            return "no_csi_packet";
+        default:
+            return "disabled";
+    }
+}
+
+inline bool isMatrixMetricValidForSource(uint8_t source, uint8_t metric) {
+    const auto normalizedSource = static_cast<MatrixDataSource>(normalizeMatrixDataSource(source));
+    const auto normalizedMetric = static_cast<MatrixDataMetric>(normalizeMatrixDataMetric(metric));
+
+    switch (normalizedSource) {
+        case MatrixDataSource::Scd4x:
+            return normalizedMetric == MatrixDataMetric::Co2 ||
+                   normalizedMetric == MatrixDataMetric::Temperature ||
+                   normalizedMetric == MatrixDataMetric::Humidity;
+        case MatrixDataSource::BleThermometer:
+            return normalizedMetric == MatrixDataMetric::Temperature ||
+                   normalizedMetric == MatrixDataMetric::Humidity ||
+                   normalizedMetric == MatrixDataMetric::Rssi;
+        case MatrixDataSource::WifiRssi:
+            return normalizedMetric == MatrixDataMetric::Rssi ||
+                   normalizedMetric == MatrixDataMetric::SignalQuality;
+        case MatrixDataSource::WifiCsi:
+            return normalizedMetric == MatrixDataMetric::CsiMotion;
+        default:
+            return false;
+    }
+}
+
+inline uint8_t defaultMetricForSource(uint8_t source) {
+    switch (static_cast<MatrixDataSource>(normalizeMatrixDataSource(source))) {
+        case MatrixDataSource::BleThermometer:
+            return static_cast<uint8_t>(MatrixDataMetric::Temperature);
+        case MatrixDataSource::WifiRssi:
+            return static_cast<uint8_t>(MatrixDataMetric::SignalQuality);
+        case MatrixDataSource::WifiCsi:
+            return static_cast<uint8_t>(MatrixDataMetric::CsiMotion);
+        case MatrixDataSource::Scd4x:
+        default:
+            return static_cast<uint8_t>(MatrixDataMetric::Co2);
+    }
+}
+
+inline bool isMatrixModeValidForSource(uint8_t source, uint8_t mode) {
+    const auto normalizedSource = static_cast<MatrixDataSource>(normalizeMatrixDataSource(source));
+    const auto normalizedMode = static_cast<MatrixDataVizMode>(normalizeMatrixDataVizMode(mode));
+
+    if (normalizedSource == MatrixDataSource::WifiCsi) {
+        return normalizedMode == MatrixDataVizMode::Heatmap ||
+               normalizedMode == MatrixDataVizMode::SpectrumBars ||
+               normalizedMode == MatrixDataVizMode::Pulse;
+    }
+
+    return normalizedMode == MatrixDataVizMode::Gauge ||
+           normalizedMode == MatrixDataVizMode::Trend ||
+           normalizedMode == MatrixDataVizMode::PerimeterMeter ||
+           normalizedMode == MatrixDataVizMode::Pulse;
+}
+
+inline uint8_t defaultModeForSource(uint8_t source) {
+    return static_cast<MatrixDataSource>(normalizeMatrixDataSource(source)) == MatrixDataSource::WifiCsi
+        ? static_cast<uint8_t>(MatrixDataVizMode::Heatmap)
+        : static_cast<uint8_t>(MatrixDataVizMode::Gauge);
+}
+
 inline uint32_t normalizeMatrixDataColor(uint32_t value) {
     return value & 0x00FFFFFFu;
 }
@@ -131,6 +236,13 @@ inline void normalizeMatrixDataVisualizationConfig(MatrixDataVisualizationConfig
     config.colorMid = normalizeMatrixDataColor(config.colorMid);
     config.colorMax = normalizeMatrixDataColor(config.colorMax);
 
+    if (!isMatrixMetricValidForSource(config.source, config.metric)) {
+        config.metric = defaultMetricForSource(config.source);
+    }
+    if (!isMatrixModeValidForSource(config.source, config.mode)) {
+        config.mode = defaultModeForSource(config.source);
+    }
+
     if (config.source == static_cast<uint8_t>(MatrixDataSource::WifiCsi)) {
         config.minValue = 0.0f;
         config.maxValue = 100.0f;
@@ -142,6 +254,9 @@ inline void normalizeMatrixDataVisualizationConfig(MatrixDataVisualizationConfig
         const uint8_t tmp = config.brightnessMax;
         config.brightnessMax = config.brightnessMin;
         config.brightnessMin = tmp;
+    }
+    if (config.brightnessMax == 0) {
+        config.brightnessMax = 1;
     }
 }
 

@@ -63,7 +63,9 @@ inline bool sleep = false;
 inline wifi_power_t txPower = WIFI_POWER_19_5dBm;
 inline uint8_t channel = 1;
 inline uint8_t bssid[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+inline int8_t stationRssi = -60;
 inline int softApStations = 0;
+inline int8_t apStationRssi = -67;
 inline int disconnectCalls = 0;
 inline int beginCalls = 0;
 inline int modeCalls = 0;
@@ -94,7 +96,9 @@ inline void reset() {
     bssid[3] = 0x00;
     bssid[4] = 0x00;
     bssid[5] = 0x01;
+    stationRssi = -60;
     softApStations = 0;
+    apStationRssi = -67;
     disconnectCalls = 0;
     beginCalls = 0;
     modeCalls = 0;
@@ -117,7 +121,7 @@ inline void fireEvent(WiFiEvent_t event, WiFiEventInfo_t info = {}) {
 // Minimal WiFi mock
 class WiFiClass {
 public:
-    int32_t RSSI() { return -60; }
+    int32_t RSSI() { return TEST_STUBS::WIFI::stationRssi; }
     bool isConnected() { return TEST_STUBS::WIFI::connected; }
     wifi_power_t getTxPower() { return TEST_STUBS::WIFI::txPower; }
     bool setTxPower(wifi_power_t power) {

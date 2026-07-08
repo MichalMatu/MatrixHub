@@ -92,6 +92,20 @@ bool MatrixDataVisualizationEngine::render(uint32_t nowMs, uint32_t* outFrame, s
         return true;
     }
 
+    const bool csiBinModeWithoutBins =
+        _config.source == static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi) &&
+        _input.binCount == 0 &&
+        (_config.mode == static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap) ||
+         _config.mode == static_cast<uint8_t>(MATRIX::MatrixDataVizMode::SpectrumBars));
+    if (csiBinModeWithoutBins) {
+        if (_config.staleBehavior == static_cast<uint8_t>(MATRIX::MatrixDataStaleBehavior::Gray)) {
+            fillStaleGray(outFrame);
+        } else {
+            clear(outFrame);
+        }
+        return true;
+    }
+
     const uint8_t normalized = currentValueNorm();
     const uint8_t brightness = effectiveBrightness(normalized, stale);
 

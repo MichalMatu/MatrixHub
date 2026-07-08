@@ -8,7 +8,16 @@ static const char* TAG = "MatrixService";
 
 MatrixService::MatrixService()
     : _renderer(), _state(), 
-      _displayStartMs(0), _displayDurationMs(0), _autoClearing(false) {
+      _displayStartMs(0), _displayDurationMs(0), _autoClearing(false),
+      _dataVisualizationStatusMutex(xSemaphoreCreateMutex()) {
+    cacheDataVisualizationDisabled();
+}
+
+MatrixService::~MatrixService() {
+    if (_dataVisualizationStatusMutex) {
+        vSemaphoreDelete(_dataVisualizationStatusMutex);
+        _dataVisualizationStatusMutex = nullptr;
+    }
 }
 
 void MatrixService::init(uint8_t pin) {
@@ -208,6 +217,9 @@ void MatrixService::showIcon(IconType icon, uint32_t durationMs) {
 }
 
 void MatrixService::clear(bool stopBackground) {
+    if (stopBackground) {
+        cacheDataVisualizationDisabled();
+    }
     _state.requestClear(stopBackground);
 }
 
@@ -218,6 +230,7 @@ void MatrixService::clearBackgroundEffect() {
 }
 
 void MatrixService::clearBackgroundDataVisualization() {
+    cacheDataVisualizationDisabled();
     _state.clearBackgroundDataVisualization();
 }
 
@@ -245,7 +258,21 @@ void MatrixService::setEffectInput(const MATRIX_FX::MatrixFxInput& input) {
 }
 
 void MatrixService::setDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input) {
+    cacheDataVisualizationInput(input);
     _renderer.setDataVisualizationInput(input);
+}
+
+MATRIX::MatrixDataVisualizationStatusSnapshot MatrixService::getDataVisualizationStatusSnapshot() const {
+    if (!_dataVisualizationStatusMutex) {
+        return _dataVisualizationStatus;
+    }
+
+    if (xSemaphoreTake(_dataVisualizationStatusMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return _dataVisualizationStatus;
+    }
+    const auto snapshot = _dataVisualizationStatus;
+    xSemaphoreGive(_dataVisualizationStatusMutex);
+    return snapshot;
 }
 
 void MatrixService::showEffect(uint8_t mode,
@@ -279,6 +306,7 @@ void MatrixService::showDataVisualization(const MATRIX::MatrixDataVisualizationC
              config.metric,
              config.mode,
              static_cast<unsigned long>(durationMs));
+    cacheDataVisualizationConfig(config, config.enabled);
     _state.requestDataVisualization(config, durationMs);
 }
 
@@ -288,4 +316,62 @@ void MatrixService::showSolidColor(uint32_t color) {
 
 bool MatrixService::isActive() const {
     return _renderer.isActive();
+}
+
+void MatrixService::cacheDataVisualizationConfig(const MATRIX::MatrixDataVisualizationConfig& config, bool active) {
+    MATRIX::MatrixDataVisualizationConfig normalized = config;
+    MATRIX::normalizeMatrixDataVisualizationConfig(normalized);
+
+    if (_dataVisualizationStatusMutex &&
+        xSemaphoreTake(_dataVisualizationStatusMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return;
+    }
+
+    _dataVisualizationStatus.active = active;
+    _dataVisualizationStatus.config = normalized;
+    _dataVisualizationStatus.updatedAtMs = millis();
+    if (!active) {
+        _dataVisualizationStatus.input = MATRIX::MatrixDataVisualizationInput{};
+        _dataVisualizationStatus.input.reason =
+            static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Disabled);
+    } else if (_dataVisualizationStatus.input.reason ==
+               static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Disabled)) {
+        _dataVisualizationStatus.input.reason =
+            static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoSample);
+    }
+
+    if (_dataVisualizationStatusMutex) {
+        xSemaphoreGive(_dataVisualizationStatusMutex);
+    }
+}
+
+void MatrixService::cacheDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input) {
+    if (_dataVisualizationStatusMutex &&
+        xSemaphoreTake(_dataVisualizationStatusMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return;
+    }
+
+    _dataVisualizationStatus.input = input;
+    _dataVisualizationStatus.updatedAtMs = millis();
+
+    if (_dataVisualizationStatusMutex) {
+        xSemaphoreGive(_dataVisualizationStatusMutex);
+    }
+}
+
+void MatrixService::cacheDataVisualizationDisabled() {
+    if (_dataVisualizationStatusMutex &&
+        xSemaphoreTake(_dataVisualizationStatusMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return;
+    }
+
+    _dataVisualizationStatus.active = false;
+    _dataVisualizationStatus.input = MATRIX::MatrixDataVisualizationInput{};
+    _dataVisualizationStatus.input.reason =
+        static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Disabled);
+    _dataVisualizationStatus.updatedAtMs = millis();
+
+    if (_dataVisualizationStatusMutex) {
+        xSemaphoreGive(_dataVisualizationStatusMutex);
+    }
 }

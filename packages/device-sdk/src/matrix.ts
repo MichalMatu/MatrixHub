@@ -38,17 +38,38 @@ export interface MatrixSettings {
   menu_scroll_speed: number;
 }
 
+export interface MatrixDataVisualizationStatus {
+  active: boolean;
+  source: number;
+  metric: number;
+  mode: number;
+  valid: boolean;
+  stale: boolean;
+  reason: string;
+  value: number;
+  secondary: number;
+  last_update_ms: number;
+  age_ms: number;
+  bin_count: number;
+  csi?: {
+    available: boolean;
+    matrix_visualization_consumer_active: boolean;
+    packets_per_sec: number;
+    last_packet_ms: number;
+  };
+}
+
 const MATRIX_COLOR_MASK = 0xffffff;
 const MATRIX_CUSTOM_ICON_SLOTS = 3;
 const MATRIX_CUSTOM_ICON_PIXELS = 64;
 const MATRIX_EFFECT_ENGINE_MAX = 1;
 const MATRIX_EFFECT_MODE_MAX = 69;
-const MATRIX_NATIVE_3D_EFFECT_MODE_MAX = 3;
+const MATRIX_NATIVE_3D_EFFECT_MODE_MAX = 14;
 const MATRIX_EFFECT_REACTIVITY_PROVIDER_MAX = 1;
 const MATRIX_EFFECT_REACTIVITY_GAIN_MAX = 200;
 const MATRIX_EFFECT_SPEED_MIN = 50;
 const MATRIX_EFFECT_SPEED_MAX = 24 * 60 * 60 * 1000;
-const MATRIX_BACKGROUND_MODE_MAX = 1;
+const MATRIX_BACKGROUND_MODE_MAX = 2;
 const MATRIX_DATA_VISUALIZATION_SOURCE_MAX = 3;
 const MATRIX_DATA_VISUALIZATION_METRIC_MAX = 5;
 const MATRIX_DATA_VISUALIZATION_MODE_MAX = 6;
@@ -56,7 +77,7 @@ const MATRIX_DATA_VISUALIZATION_STALE_BEHAVIOR_MAX = 2;
 const MATRIX_DATA_VISUALIZATION_DEVICE_ID_MAX = 17;
 
 const DEFAULT_DATA_VISUALIZATION = {
-  background_mode: 0,
+  background_mode: 2,
   data_visualization_enabled: false,
   data_visualization_source: 0,
   data_visualization_metric: 0,
@@ -116,6 +137,59 @@ function normalizeColor(value: number) {
   return Math.max(0, Math.round(value)) & MATRIX_COLOR_MASK;
 }
 
+function normalizeEnumValue(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  const normalized = Math.round(value);
+  return normalized >= min && normalized <= max ? normalized : fallback;
+}
+
+function isMatrixMetricValidForSource(source: number, metric: number) {
+  switch (source) {
+    case 0:
+      return metric === 0 || metric === 1 || metric === 2;
+    case 1:
+      return metric === 1 || metric === 2 || metric === 3;
+    case 2:
+      return metric === 3 || metric === 4;
+    case 3:
+      return metric === 5;
+    default:
+      return false;
+  }
+}
+
+function defaultMetricForSource(source: number) {
+  switch (source) {
+    case 1:
+      return 1;
+    case 2:
+      return 4;
+    case 3:
+      return 5;
+    case 0:
+    default:
+      return 0;
+  }
+}
+
+function isMatrixModeValidForSource(source: number, mode: number) {
+  if (source === 3) {
+    return mode === 2 || mode === 4 || mode === 6;
+  }
+  return mode === 0 || mode === 3 || mode === 5 || mode === 6;
+}
+
+function defaultModeForSource(source: number) {
+  return source === 3 ? 2 : 0;
+}
+
 function sanitizeCustomIcons(value: unknown): number[][] | null | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -169,7 +243,9 @@ export function parseMatrixSettings(value: unknown): MatrixSettings | null {
   const effectColor = optionalNumber(value.effect_color);
   const effectColor2 = optionalNumber(value.effect_color_2);
   const effectColor3 = optionalNumber(value.effect_color_3);
-  const effectReactivityProvider = optionalNumber(value.effect_reactivity_provider);
+  const effectReactivityProvider = optionalNumber(
+    value.effect_reactivity_provider,
+  );
   const effectReactivityGain = optionalNumber(value.effect_reactivity_gain);
   const backgroundMode =
     optionalNumber(value.background_mode) ??
@@ -268,13 +344,94 @@ export function parseMatrixSettings(value: unknown): MatrixSettings | null {
     0,
     255,
   );
+  const normalizedBackgroundMode = normalizeEnumValue(
+    backgroundMode,
+    0,
+    MATRIX_BACKGROUND_MODE_MAX,
+    DEFAULT_DATA_VISUALIZATION.background_mode,
+  );
+  const normalizedDataVisualizationSource = normalizeEnumValue(
+    dataVisualizationSource,
+    0,
+    MATRIX_DATA_VISUALIZATION_SOURCE_MAX,
+    DEFAULT_DATA_VISUALIZATION.data_visualization_source,
+  );
+  const normalizedDataVisualizationMetric = normalizeEnumValue(
+    dataVisualizationMetric,
+    0,
+    MATRIX_DATA_VISUALIZATION_METRIC_MAX,
+    defaultMetricForSource(normalizedDataVisualizationSource),
+  );
+  const normalizedDataVisualizationMode = normalizeEnumValue(
+    dataVisualizationMode,
+    0,
+    MATRIX_DATA_VISUALIZATION_MODE_MAX,
+    defaultModeForSource(normalizedDataVisualizationSource),
+  );
+  const finalDataVisualizationMetric = isMatrixMetricValidForSource(
+    normalizedDataVisualizationSource,
+    normalizedDataVisualizationMetric,
+  )
+    ? normalizedDataVisualizationMetric
+    : defaultMetricForSource(normalizedDataVisualizationSource);
+  const finalDataVisualizationMode = isMatrixModeValidForSource(
+    normalizedDataVisualizationSource,
+    normalizedDataVisualizationMode,
+  )
+    ? normalizedDataVisualizationMode
+    : defaultModeForSource(normalizedDataVisualizationSource);
+  const finalDataVisualizationMin =
+    normalizedDataVisualizationSource === 3
+      ? 0
+      : normalizedDataVisualizationMin;
+  const finalDataVisualizationMax =
+    normalizedDataVisualizationSource === 3
+      ? 100
+      : normalizedDataVisualizationMax;
+  let finalEffectEnabled = effectEnabled;
+  let finalDataVisualizationEnabled = dataVisualizationEnabled;
+  let finalBackgroundMode = normalizedBackgroundMode;
+
+  if (!finalEffectEnabled && !finalDataVisualizationEnabled) {
+    finalBackgroundMode = 2;
+  } else if (finalBackgroundMode === 0) {
+    if (finalEffectEnabled) {
+      finalDataVisualizationEnabled = false;
+    } else if (finalDataVisualizationEnabled) {
+      finalBackgroundMode = 1;
+    } else {
+      finalBackgroundMode = 2;
+    }
+  } else if (finalBackgroundMode === 1) {
+    if (finalDataVisualizationEnabled) {
+      finalEffectEnabled = false;
+    } else if (finalEffectEnabled) {
+      finalBackgroundMode = 0;
+    } else {
+      finalBackgroundMode = 2;
+    }
+  } else {
+    finalEffectEnabled = false;
+    finalDataVisualizationEnabled = false;
+  }
+  let finalBrightnessMin = Math.min(
+    normalizedBrightnessMin,
+    normalizedBrightnessMax,
+  );
+  let finalBrightnessMax = Math.max(
+    normalizedBrightnessMin,
+    normalizedBrightnessMax,
+  );
+  if (finalBrightnessMax === 0) {
+    finalBrightnessMax = 1;
+  }
 
   const settings: MatrixSettings = {
     brightness: clampInteger(brightness, 0, 255),
     alarm_mode: clampInteger(alarmMode, 0, 2),
     rotation: clampInteger(rotation, 0, 3),
     auto_rotate: autoRotate,
-    effect_enabled: effectEnabled,
+    effect_enabled: finalEffectEnabled,
     effect_engine: normalizedEffectEngine,
     effect_mode: clampInteger(effectMode, 0, effectModeMax),
     effect_speed: clampInteger(
@@ -295,40 +452,18 @@ export function parseMatrixSettings(value: unknown): MatrixSettings | null {
       0,
       MATRIX_EFFECT_REACTIVITY_GAIN_MAX,
     ),
-    background_mode: clampInteger(
-      backgroundMode,
-      0,
-      MATRIX_BACKGROUND_MODE_MAX,
-    ),
-    data_visualization_enabled: dataVisualizationEnabled,
-    data_visualization_source: clampInteger(
-      dataVisualizationSource,
-      0,
-      MATRIX_DATA_VISUALIZATION_SOURCE_MAX,
-    ),
-    data_visualization_metric: clampInteger(
-      dataVisualizationMetric,
-      0,
-      MATRIX_DATA_VISUALIZATION_METRIC_MAX,
-    ),
-    data_visualization_mode: clampInteger(
-      dataVisualizationMode,
-      0,
-      MATRIX_DATA_VISUALIZATION_MODE_MAX,
-    ),
-    data_visualization_min: normalizedDataVisualizationMin,
-    data_visualization_max: normalizedDataVisualizationMax,
+    background_mode: finalBackgroundMode,
+    data_visualization_enabled: finalDataVisualizationEnabled,
+    data_visualization_source: normalizedDataVisualizationSource,
+    data_visualization_metric: finalDataVisualizationMetric,
+    data_visualization_mode: finalDataVisualizationMode,
+    data_visualization_min: finalDataVisualizationMin,
+    data_visualization_max: finalDataVisualizationMax,
     data_visualization_color_min: normalizeColor(dataVisualizationColorMin),
     data_visualization_color_mid: normalizeColor(dataVisualizationColorMid),
     data_visualization_color_max: normalizeColor(dataVisualizationColorMax),
-    data_visualization_brightness_min: Math.min(
-      normalizedBrightnessMin,
-      normalizedBrightnessMax,
-    ),
-    data_visualization_brightness_max: Math.max(
-      normalizedBrightnessMin,
-      normalizedBrightnessMax,
-    ),
+    data_visualization_brightness_min: finalBrightnessMin,
+    data_visualization_brightness_max: finalBrightnessMax,
     data_visualization_smoothing: clampInteger(
       dataVisualizationSmoothing,
       0,
@@ -395,7 +530,16 @@ export class DeviceMatrixApi {
     );
   }
 
-  async calibrateCsiDataVisualization(): Promise<{ ok: boolean; status?: string }> {
+  async getDataVisualizationStatus(): Promise<MatrixDataVisualizationStatus> {
+    return this.client.get<MatrixDataVisualizationStatus>(
+      "/api/matrix/data-visualization/status",
+    );
+  }
+
+  async calibrateCsiDataVisualization(): Promise<{
+    ok: boolean;
+    status?: string;
+  }> {
     const response = await this.client.post<unknown>(
       "/api/matrix/data-visualization/csi/calibrate",
       {},

@@ -21,7 +21,11 @@ import {
 	MATRIX_DATA_SOURCE_WIFI_RSSI,
 	MATRIX_DATA_VIZ_MODE_GAUGE,
 	MATRIX_DATA_VIZ_MODE_HEATMAP,
+	MATRIX_DATA_VIZ_MODE_PERIMETER_METER,
+	MATRIX_DATA_VIZ_MODE_PULSE,
+	MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS,
 	MATRIX_DATA_VIZ_MODE_TREND,
+	MATRIX_DATA_STALE_BLANK,
 	MATRIX_EFFECT_IDS,
 	MATRIX_EFFECT_MODE_MAX,
 	MATRIX_NATIVE_3D_EFFECT_IDS,
@@ -36,7 +40,10 @@ import {
 	getPreferredMatrixEffectSpeedScale,
 	getMatrixCustomIcons,
 	getDefaultMatrixDataVisualizationMetric,
+	getAllowedMatrixDataVisualizationModes,
+	getDefaultMatrixDataVisualizationMode,
 	getMatrixDataVisualizationPreset,
+	isMatrixDataVisualizationModeValidForSource,
 	matrixEffectCategoryContainsEffect,
 	normalizeMatrixColor,
 	normalizeMatrixCustomIcons,
@@ -155,14 +162,38 @@ describe('matrixModel', () => {
 			data_visualization_min: 0,
 			data_visualization_max: 100,
 			data_visualization_brightness_max: 220,
-			data_visualization_smoothing: 45
+			data_visualization_smoothing: 45,
+			data_visualization_stale_behavior: MATRIX_DATA_STALE_BLANK
 		});
+	});
+
+	it('filters visualization modes by source shape', () => {
+		expect(getAllowedMatrixDataVisualizationModes(MATRIX_DATA_SOURCE_SCD4X)).toEqual([
+			MATRIX_DATA_VIZ_MODE_GAUGE,
+			MATRIX_DATA_VIZ_MODE_TREND,
+			MATRIX_DATA_VIZ_MODE_PERIMETER_METER,
+			MATRIX_DATA_VIZ_MODE_PULSE
+		]);
+		expect(getAllowedMatrixDataVisualizationModes(MATRIX_DATA_SOURCE_WIFI_CSI)).toEqual([
+			MATRIX_DATA_VIZ_MODE_HEATMAP,
+			MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS,
+			MATRIX_DATA_VIZ_MODE_PULSE
+		]);
+		expect(getDefaultMatrixDataVisualizationMode(MATRIX_DATA_SOURCE_WIFI_CSI)).toBe(
+			MATRIX_DATA_VIZ_MODE_HEATMAP
+		);
+		expect(
+			isMatrixDataVisualizationModeValidForSource(
+				MATRIX_DATA_SOURCE_WIFI_RSSI,
+				MATRIX_DATA_VIZ_MODE_HEATMAP
+			)
+		).toBe(false);
 	});
 
 	it('keeps the matrix effect speed range aligned with firmware', () => {
 		expect(MATRIX_EFFECT_SPEED_MIN).toBe(50);
 		expect(MATRIX_EFFECT_SPEED_MAX).toBe(24 * 60 * 60 * 1000);
-		expect(MATRIX_EFFECT_SPEED_SCALES).toEqual(['ms', 's', 'm', 'h']);
+		expect(MATRIX_EFFECT_SPEED_SCALES).toEqual(['ms', 's']);
 		expect(MATRIX_EFFECT_SPEED_SCALE_CONFIG.ms).toEqual({
 			min: 50,
 			max: 5000,

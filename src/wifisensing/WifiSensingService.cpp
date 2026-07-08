@@ -96,7 +96,10 @@ bool WifiSensingService::isRunning() const {
 }
 
 bool WifiSensingService::isActive() const {
-    return _taskRunner.isRunning() && WiFi.isConnected();
+    const wifi_mode_t mode = WiFi.getMode();
+    const bool apHasClient =
+        (mode == WIFI_AP || mode == WIFI_AP_STA) && WiFi.softAPgetStationNum() > 0;
+    return _taskRunner.isRunning() && (WiFi.isConnected() || apHasClient);
 }
 
 bool WifiSensingService::isMotionDetected() const {

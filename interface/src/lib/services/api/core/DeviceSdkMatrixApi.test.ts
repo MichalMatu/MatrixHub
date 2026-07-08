@@ -17,7 +17,7 @@ function createMatrixPayload(overrides: Record<string, unknown> = {}) {
 		effect_color_3: 0x0000ff,
 		effect_reactivity_provider: 0,
 		effect_reactivity_gain: 80,
-		background_mode: 0,
+		background_mode: 2,
 		data_visualization_enabled: false,
 		data_visualization_source: 0,
 		data_visualization_metric: 0,
@@ -73,7 +73,7 @@ describe('device SDK matrix parser', () => {
 		const parsed = parseMatrixSettings(createMatrixPayload({ effect_engine: 1, effect_mode: 69 }));
 
 		expect(parsed?.effect_engine).toBe(1);
-		expect(parsed?.effect_mode).toBe(3);
+		expect(parsed?.effect_mode).toBe(14);
 	});
 
 	it('normalizes matrix data visualization settings', () => {
@@ -97,11 +97,11 @@ describe('device SDK matrix parser', () => {
 			})
 		);
 
-		expect(parsed?.background_mode).toBe(1);
-		expect(parsed?.data_visualization_enabled).toBe(true);
-		expect(parsed?.data_visualization_source).toBe(3);
-		expect(parsed?.data_visualization_metric).toBe(5);
-		expect(parsed?.data_visualization_mode).toBe(6);
+		expect(parsed?.background_mode).toBe(2);
+		expect(parsed?.data_visualization_enabled).toBe(false);
+		expect(parsed?.data_visualization_source).toBe(0);
+		expect(parsed?.data_visualization_metric).toBe(0);
+		expect(parsed?.data_visualization_mode).toBe(0);
 		expect(parsed?.data_visualization_max).toBe(31);
 		expect(parsed?.data_visualization_color_min).toBe(0xabcdef);
 		expect(parsed?.data_visualization_color_mid).toBe(0x000000);

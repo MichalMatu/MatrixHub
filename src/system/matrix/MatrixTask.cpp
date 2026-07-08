@@ -22,6 +22,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <esp_wifi.h>
+#include <WiFi.h>
 #undef LOG_TAG
 #define LOG_TAG "MatrixTask"
 
@@ -137,6 +139,12 @@ struct RssiBinsResult {
     uint32_t newestTimestampMs = 0;
 };
 
+struct DirectRssiResult {
+    bool wifiActive = false;
+    bool valid = false;
+    int8_t rssi = 0;
+};
+
 uint32_t dataVisualizationInputIntervalMs(const MATRIX::MatrixDataVisualizationConfig& config) {
     if (config.source == static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi)) {
         return UI::MATRIX::DATA_VISUALIZATION_CSI_INPUT_INTERVAL_MS;
@@ -169,6 +177,36 @@ RssiBinsResult fillRssiBins(WIFISENSING::WifiSensingService* wifiSensingService,
     for (uint8_t i = 0; i < input.binCount; ++i) {
         const uint8_t sourceIndex = static_cast<uint8_t>(input.binCount - 1u - i);
         input.bins[i] = normalizedByte(rssiQuality(samples[sourceIndex].rssi), 0.0f, 100.0f);
+    }
+    return result;
+}
+
+DirectRssiResult readDirectRssi() {
+    DirectRssiResult result;
+    const wifi_mode_t mode = WiFi.getMode();
+
+    if (WiFi.isConnected()) {
+        result.wifiActive = true;
+        result.valid = true;
+        result.rssi = WiFi.RSSI();
+        return result;
+    }
+
+    const bool apMode = mode == WIFI_AP || mode == WIFI_AP_STA;
+    if (!apMode) {
+        return result;
+    }
+
+    const int stationCount = WiFi.softAPgetStationNum();
+    if (stationCount <= 0) {
+        return result;
+    }
+
+    result.wifiActive = true;
+    wifi_sta_list_t stations{};
+    if (esp_wifi_ap_get_sta_list(&stations) == ESP_OK && stations.num > 0) {
+        result.valid = true;
+        result.rssi = stations.sta[0].rssi;
     }
     return result;
 }
@@ -509,6 +547,7 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
 
     MATRIX::MatrixDataVisualizationInput input;
     input.timestampMs = now;
+    input.reason = static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoSample);
 
     const auto source = static_cast<MATRIX::MatrixDataSource>(vizConfig.source);
     const auto metric = static_cast<MATRIX::MatrixDataMetric>(vizConfig.metric);
@@ -519,6 +558,11 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
             input.valid = hasScd4xReading(snapshot);
             input.stale = !input.valid ||
                 !SENSORS::isSnapshotFresh(snapshot.timestamp_ms, now, SENSOR::SNAPSHOT_TIMEOUT_MS);
+            input.reason = !input.valid
+                ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoScd4xReading)
+                : (input.stale
+                    ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Stale)
+                    : static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok));
             switch (metric) {
                 case MATRIX::MatrixDataMetric::Temperature:
                     input.value = snapshot.temp;
@@ -550,6 +594,13 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
             }
             input.valid = ok;
             input.stale = !ok || lastSeen == 0 || (now - lastSeen) > UI::MATRIX::DATA_VISUALIZATION_BLE_STALE_MS;
+            input.reason = !bleService
+                ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoService)
+                : (!ok
+                    ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoBleDevice)
+                    : (input.stale
+                        ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Stale)
+                        : static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok)));
             switch (metric) {
                 case MATRIX::MatrixDataMetric::Humidity:
                     input.value = humid;
@@ -589,6 +640,26 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
                 }
                 input.secondary = stats.variance;
             }
+
+            if (!input.valid || input.stale) {
+                const DirectRssiResult direct = readDirectRssi();
+                if (direct.valid) {
+                    input.valid = true;
+                    input.stale = false;
+                    input.value = metric == MATRIX::MatrixDataMetric::SignalQuality
+                        ? rssiQuality(direct.rssi)
+                        : static_cast<float>(direct.rssi);
+                    input.secondary = 0.0f;
+                    input.binCount = 0;
+                    input.reason = static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok);
+                } else {
+                    input.reason = !direct.wifiActive
+                        ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::WifiInactive)
+                        : static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoSample);
+                }
+            } else {
+                input.reason = static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok);
+            }
             break;
         }
 
@@ -603,6 +674,13 @@ void MatrixTask::evaluateDataVisualizationInput(BLE::BleService* bleService,
                 input.value = clampf(visualization.value, 0.0f, 100.0f);
                 input.secondary = static_cast<float>(visualization.width);
                 fillCsiBins(visualization, input);
+                input.reason = !input.valid
+                    ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoCsiPacket)
+                    : (input.stale
+                        ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Stale)
+                        : static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok));
+            } else {
+                input.reason = static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoService);
             }
             break;
         }

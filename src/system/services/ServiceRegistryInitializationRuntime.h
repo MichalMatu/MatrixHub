@@ -206,6 +206,7 @@ API::MatrixApiService* initMatrixApi(
     SecurityManager* securityManager,
     POWER::PowerManager* powerManager,
     MATRIX::MatrixSettingsService* matrixSettings,
+    MatrixService* matrixService,
     WIFISENSING::CSI::CsiService* csiService);
 void beginMatrixApi(API::MatrixApiService* api);
 // Kept separate from ApiServicesInitializer because macro/airmouse regressions

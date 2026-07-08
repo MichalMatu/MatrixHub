@@ -27,7 +27,7 @@ function createMatrixSettings(overrides: Partial<MatrixSettings> = {}): MatrixSe
 		effect_color_3: 0x0000ff,
 		effect_reactivity_provider: 0,
 		effect_reactivity_gain: 80,
-		background_mode: 0,
+		background_mode: 2,
 		data_visualization_enabled: false,
 		data_visualization_source: 0,
 		data_visualization_metric: 0,
@@ -85,8 +85,40 @@ describe('MatrixApiService', () => {
 		expect(result).toBe(payload);
 	});
 
-	it('keeps the legacy CSI data visualization calibration endpoint harmless', async () => {
-		mockClient.post.mockResolvedValue({ ok: true, status: 'baseline_not_required' });
+	it('loads matrix data visualization status', async () => {
+		const status = {
+			active: true,
+			source: 2,
+			metric: 4,
+			mode: 3,
+			valid: true,
+			stale: false,
+			reason: 'ok',
+			value: 80,
+			secondary: 0,
+			last_update_ms: 1000,
+			age_ms: 20,
+			bin_count: 0,
+			csi: {
+				available: true,
+				matrix_visualization_consumer_active: false,
+				packets_per_sec: 0,
+				last_packet_ms: 0
+			}
+		};
+		mockClient.get.mockResolvedValue(status);
+
+		const result = await service.getDataVisualizationStatus();
+
+		expect(mockClient.get).toHaveBeenCalledWith(
+			'/api/matrix/data-visualization/status',
+			expect.objectContaining({ signal: expect.any(AbortSignal) })
+		);
+		expect(result).toBe(status);
+	});
+
+	it('requests legacy CSI data visualization reset through the compatibility endpoint', async () => {
+		mockClient.post.mockResolvedValue({ ok: true, status: 'visualization_reset_requested' });
 
 		const result = await service.calibrateCsiDataVisualization();
 
@@ -95,6 +127,6 @@ describe('MatrixApiService', () => {
 			{},
 			expect.objectContaining({ signal: expect.any(AbortSignal) })
 		);
-		expect(result).toEqual({ ok: true, status: 'baseline_not_required' });
+		expect(result).toEqual({ ok: true, status: 'visualization_reset_requested' });
 	});
 });

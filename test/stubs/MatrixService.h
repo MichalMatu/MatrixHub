@@ -24,6 +24,7 @@ public:
     }
     void setDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input) {
         lastDataVisualizationInput = input;
+        dataVisualizationStatus.input = input;
         setDataVisualizationInputCalls++;
     }
     void showEffect(uint8_t mode,
@@ -50,14 +51,22 @@ public:
     void showDataVisualization(const MATRIX::MatrixDataVisualizationConfig& config, uint32_t duration = 0) {
         (void)duration;
         lastDataVisualizationConfig = config;
+        dataVisualizationStatus.active = config.enabled;
+        dataVisualizationStatus.config = config;
         showDataVisualizationCalls++;
     }
     void clear(bool stopBackground = true) {
         lastClearStopBackground = stopBackground;
+        if (stopBackground) {
+            dataVisualizationStatus.active = false;
+        }
         clearCalls++;
     }
     void clearBackgroundEffect() { clearBackgroundEffectCalls++; }
-    void clearBackgroundDataVisualization() { clearBackgroundDataVisualizationCalls++; }
+    void clearBackgroundDataVisualization() {
+        dataVisualizationStatus.active = false;
+        clearBackgroundDataVisualizationCalls++;
+    }
     void setBrightness(uint8_t brightness) {}
     void setScrollSpeed(uint16_t speed) { lastScrollSpeed = speed; }
     uint8_t lastLimit = 255;
@@ -73,6 +82,9 @@ public:
         }
     }
     bool isActive() const { return false; }
+    MATRIX::MatrixDataVisualizationStatusSnapshot getDataVisualizationStatusSnapshot() const {
+        return dataVisualizationStatus;
+    }
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b) { return 0; }
 
     const char* lastText = nullptr;
@@ -100,5 +112,6 @@ public:
     MATRIX_FX::MatrixFxInput lastEffectInput{};
     MATRIX::MatrixDataVisualizationConfig lastDataVisualizationConfig{};
     MATRIX::MatrixDataVisualizationInput lastDataVisualizationInput{};
+    MATRIX::MatrixDataVisualizationStatusSnapshot dataVisualizationStatus{};
     bool customIconAssigned[4] = {false, false, false, false};
 };

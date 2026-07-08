@@ -255,6 +255,8 @@ CsiVisualizationSnapshot CsiService::getVisualizationSnapshot() const {
 
 #include "../../src/system/matrix/MatrixTask.cpp"
 
+WiFiClass WiFi;
+
 namespace MATRIX {
 
 void MatrixMenuService::update() {}
@@ -292,7 +294,10 @@ void resetState() {
     std::memset(g_lastBleRequestedMac, 0, sizeof(g_lastBleRequestedMac));
     g_bleSelectedLookupCalls = 0;
     g_bleSlotLookupCalls = 0;
+    TEST_STUBS::WIFI::reset();
     MATRIX::MatrixTask::resetAutoRotationState();
+    MATRIX::MatrixTask::_lastDataVisualizationInputMs = 0;
+    MATRIX::MatrixTask::_lastMatrixDataVizCsiEnabled = false;
 }
 
 }  // namespace
@@ -483,6 +488,61 @@ void test_data_visualization_ble_uses_selected_device_as_single_source() {
     TEST_ASSERT_EQUAL_FLOAT(90.0f, matrix.lastDataVisualizationInput.secondary);
 }
 
+void test_data_visualization_wifi_rssi_uses_direct_sta_fallback_without_sensing_service() {
+    MatrixService matrix;
+
+    RTC::mockStore.matrix.backgroundMode =
+        static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::DataVisualization);
+    RTC::mockStore.matrix.dataVisualizationEnabled = true;
+    RTC::mockStore.matrix.dataVisualizationSource =
+        static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiRssi);
+    RTC::mockStore.matrix.dataVisualizationMetric =
+        static_cast<uint8_t>(MATRIX::MatrixDataMetric::SignalQuality);
+    RTC::mockStore.matrix.dataVisualizationMin = 0.0f;
+    RTC::mockStore.matrix.dataVisualizationMax = 100.0f;
+    TEST_STUBS::WIFI::connected = true;
+    TEST_STUBS::WIFI::mode = WIFI_MODE_STA;
+    TEST_STUBS::ARDUINO::millisValue = 3000;
+
+    MATRIX::MatrixTask::evaluateDataVisualizationInput(nullptr, nullptr, nullptr, &matrix);
+
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.setDataVisualizationInputCalls);
+    TEST_ASSERT_TRUE(matrix.lastDataVisualizationInput.valid);
+    TEST_ASSERT_FALSE(matrix.lastDataVisualizationInput.stale);
+    TEST_ASSERT_EQUAL_FLOAT(80.0f, matrix.lastDataVisualizationInput.value);
+    TEST_ASSERT_EQUAL_UINT8(0, matrix.lastDataVisualizationInput.binCount);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok),
+                            matrix.lastDataVisualizationInput.reason);
+}
+
+void test_data_visualization_wifi_rssi_uses_direct_ap_client_fallback() {
+    MatrixService matrix;
+
+    RTC::mockStore.matrix.backgroundMode =
+        static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::DataVisualization);
+    RTC::mockStore.matrix.dataVisualizationEnabled = true;
+    RTC::mockStore.matrix.dataVisualizationSource =
+        static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiRssi);
+    RTC::mockStore.matrix.dataVisualizationMetric =
+        static_cast<uint8_t>(MATRIX::MatrixDataMetric::Rssi);
+    RTC::mockStore.matrix.dataVisualizationMin = -90.0f;
+    RTC::mockStore.matrix.dataVisualizationMax = -35.0f;
+    TEST_STUBS::WIFI::connected = false;
+    TEST_STUBS::WIFI::mode = WIFI_AP;
+    TEST_STUBS::WIFI::softApStations = 1;
+    TEST_STUBS::WIFI::apStationRssi = -72;
+    TEST_STUBS::ARDUINO::millisValue = 3000;
+
+    MATRIX::MatrixTask::evaluateDataVisualizationInput(nullptr, nullptr, nullptr, &matrix);
+
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.setDataVisualizationInputCalls);
+    TEST_ASSERT_TRUE(matrix.lastDataVisualizationInput.valid);
+    TEST_ASSERT_FALSE(matrix.lastDataVisualizationInput.stale);
+    TEST_ASSERT_EQUAL_FLOAT(-72.0f, matrix.lastDataVisualizationInput.value);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Ok),
+                            matrix.lastDataVisualizationInput.reason);
+}
+
 void test_data_visualization_csi_enables_consumer_and_forwards_bins() {
     MatrixService matrix;
     auto* csi = reinterpret_cast<WIFISENSING::CSI::CsiService*>(0x1);
@@ -568,6 +628,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_data_visualization_scd4x_sets_sensor_input);
     RUN_TEST(test_data_visualization_scd4x_keeps_stale_retained_value);
     RUN_TEST(test_data_visualization_ble_uses_selected_device_as_single_source);
+    RUN_TEST(test_data_visualization_wifi_rssi_uses_direct_sta_fallback_without_sensing_service);
+    RUN_TEST(test_data_visualization_wifi_rssi_uses_direct_ap_client_fallback);
     RUN_TEST(test_data_visualization_csi_enables_consumer_and_forwards_bins);
     RUN_TEST(test_data_visualization_csi_retries_when_consumer_state_does_not_change);
     return UNITY_END();

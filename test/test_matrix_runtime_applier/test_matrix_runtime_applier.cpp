@@ -130,6 +130,9 @@ MATRIX::MatrixSettingsState makeState(bool effectEnabled) {
     state.config.brightness = 42;
     state.config.menu.scrollSpeed = 33;
     state.config.effectEnabled = effectEnabled;
+    state.config.backgroundMode = effectEnabled
+        ? static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Effects)
+        : static_cast<uint8_t>(MATRIX::MatrixBackgroundMode::Off);
     state.config.effectEngine = 1;
     state.config.effectMode = 3;
     state.config.effectSpeed = 900;
@@ -246,7 +249,7 @@ void test_apply_with_manager_sets_data_visualization_background_layer() {
     TEST_ASSERT_EQUAL_UINT8(
         static_cast<uint8_t>(MATRIX::MatrixDataSource::BleThermometer),
         config.source);
-    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Heatmap), config.mode);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MATRIX::MatrixDataVizMode::Gauge), config.mode);
     TEST_ASSERT_EQUAL_FLOAT(18.0f, config.minValue);
     TEST_ASSERT_EQUAL_FLOAT(28.0f, config.maxValue);
     TEST_ASSERT_EQUAL_HEX32(0x001122, config.colorMin);
