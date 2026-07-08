@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import ChartBar from '~icons/tabler/chart-bar';
 	import Clock from '~icons/tabler/clock';
 	import ChartLine from '~icons/tabler/chart-line';
@@ -8,10 +9,16 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import BaseCard from '$lib/components/layout/BaseCard.svelte';
 	import StatusRow from '$lib/components/layout/StatusRow.svelte';
+
+	let {
+		actions = undefined
+	}: {
+		actions?: Snippet;
+	} = $props();
 </script>
 
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-	<BaseCard title={m.logs_title({ locale: i18n.languageTag })} icon={FileText}>
+	<BaseCard title={m.logs_title({ locale: i18n.languageTag })} icon={FileText} {actions}>
 		<div class="alert alert-info">
 			<span>{m.logs_empty_msg({ locale: i18n.languageTag })}</span>
 		</div>

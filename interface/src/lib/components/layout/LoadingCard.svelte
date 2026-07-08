@@ -24,24 +24,34 @@
 		loading = false,
 		/** Minimum height for the card */
 		minHeight = '200px',
+		/** Optional card header actions */
+		actions = undefined,
 		children
 	}: {
 		title: string;
 		icon?: Component;
 		loading?: boolean;
 		minHeight?: string;
+		actions?: Snippet;
 		children?: Snippet;
 	} = $props();
 </script>
 
 <div class="card bg-base-200 card-shadow-base" style="min-height: {minHeight}">
 	<div class="card-body p-4">
-		<h2 class="card-title text-lg">
-			{#if Icon}
-				<Icon class="w-6 h-6" />
+		<div class="flex items-start justify-between gap-3">
+			<h2 class="card-title min-w-0 text-lg">
+				{#if Icon}
+					<Icon class="w-6 h-6 flex-none" />
+				{/if}
+				<span class="min-w-0">{title}</span>
+			</h2>
+			{#if actions}
+				<div class="shrink-0">
+					{@render actions()}
+				</div>
 			{/if}
-			{title}
-		</h2>
+		</div>
 		{#if loading}
 			<div class="flex justify-center items-center py-8">
 				<Spinner />

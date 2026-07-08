@@ -2,13 +2,16 @@
 	let {
 		startDate = $bindable(''),
 		endDate = $bindable(''),
-		availableDates = []
+		availableDates = [],
+		onHelp = undefined
 	}: {
 		startDate: string;
 		endDate: string;
 		availableDates: string[];
+		onHelp?: () => void;
 	} = $props();
 
+	import HelpTriggerButton from '$lib/components/help/HelpTriggerButton.svelte';
 	import { i18n } from '$lib/i18n.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -116,14 +119,21 @@
 			/>
 		</label>
 
-		<div class="pb-1 text-right text-xs text-base-content/55 sm:min-w-32">
-			{#if selectedDates.length > 0}
-				{m.charts_range_days_with_data(
-					{ count: selectedDates.length },
-					{ locale: i18n.languageTag }
-				)}
-			{:else}
-				{m.charts_range_no_days({ locale: i18n.languageTag })}
+		<div
+			class="flex items-center justify-between gap-2 pb-1 text-xs text-base-content/55 sm:min-w-40 sm:justify-end"
+		>
+			<span class="min-w-0 text-right">
+				{#if selectedDates.length > 0}
+					{m.charts_range_days_with_data(
+						{ count: selectedDates.length },
+						{ locale: i18n.languageTag }
+					)}
+				{:else}
+					{m.charts_range_no_days({ locale: i18n.languageTag })}
+				{/if}
+			</span>
+			{#if onHelp}
+				<HelpTriggerButton label={m.menu_help({ locale: i18n.languageTag })} onclick={onHelp} />
 			{/if}
 		</div>
 	</div>

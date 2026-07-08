@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import ChartBar from '~icons/tabler/chart-bar';
 	import FileText from '~icons/tabler/file-text';
 	import Database from '~icons/tabler/database';
@@ -11,16 +12,18 @@
 		totalFiles,
 		totalSizeKB,
 		averageSizeKB,
-		estimatedEntries
+		estimatedEntries,
+		actions = undefined
 	}: {
 		totalFiles: number;
 		totalSizeKB: number;
 		averageSizeKB: number;
 		estimatedEntries: number;
+		actions?: Snippet;
 	} = $props();
 </script>
 
-<BaseCard title={m.logs_stats_title({ locale: i18n.languageTag })} icon={ChartBar}>
+<BaseCard title={m.logs_stats_title({ locale: i18n.languageTag })} icon={ChartBar} {actions}>
 	<div class="flex flex-col gap-1">
 		<StatusRow
 			icon={FileText}

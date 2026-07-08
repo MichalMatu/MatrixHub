@@ -149,6 +149,10 @@ Core module directories:
   Avoid timestamp-only headers that invalidate half the firmware.
 - Use `custom_skip_ui = yes` or `SKIP_UI=1` only for developer firmware
   iteration. Full release builds must embed the UI.
+- Keep the gap between the top navigation and the first content card empty. Do
+  not place page-level Help/action controls as standalone rows there; put them
+  inside the relevant card header, toolbar, alert, or existing content surface
+  so they never push cards downward.
 
 ## Testing Guidance
 

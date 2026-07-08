@@ -12,7 +12,8 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 	charts_range_from: () => 'From',
 	charts_range_to: () => 'To',
 	charts_range_days_with_data: ({ count }: { count: number }) => `Days with data: ${count}`,
-	charts_range_no_days: () => 'No days with data'
+	charts_range_no_days: () => 'No days with data',
+	menu_help: () => 'Help'
 }));
 
 describe('DateSelector', () => {

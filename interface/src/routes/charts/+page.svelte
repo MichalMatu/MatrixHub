@@ -221,14 +221,6 @@
 </script>
 
 <PageWrapper>
-	<div class="mb-3 flex justify-end">
-		<HelpTriggerButton
-			label={m.menu_help({ locale })}
-			iconOnly={false}
-			onclick={() => (helpOpen = true)}
-		/>
-	</div>
-
 	{#if logsListErrorMessage}
 		<div class="alert alert-warning mb-3">
 			<span>{logsListErrorMessage}</span>
@@ -240,10 +232,13 @@
 		</div>
 	{/if}
 	{#if availableDates.length > 0}
-		<DateSelector bind:startDate bind:endDate {availableDates} />
+		<DateSelector bind:startDate bind:endDate {availableDates} onHelp={() => (helpOpen = true)} />
 	{:else if fallbackDate}
 		<div class="alert alert-info mb-3">
-			<span>{m.charts_showing_day({ date: fallbackDate }, { locale: i18n.languageTag })}</span>
+			<span class="min-w-0 flex-1">
+				{m.charts_showing_day({ date: fallbackDate }, { locale: i18n.languageTag })}
+			</span>
+			<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
 		</div>
 	{/if}
 
@@ -267,7 +262,8 @@
 			</div>
 		{:else if !isLoading}
 			<div class="alert alert-info">
-				<span>{m.charts_no_data({ locale: i18n.languageTag })}</span>
+				<span class="min-w-0 flex-1">{m.charts_no_data({ locale: i18n.languageTag })}</span>
+				<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
 			</div>
 		{/if}
 	</div>

@@ -40,14 +40,6 @@
 </script>
 
 <PageWrapper>
-	<div class="mb-3 flex justify-end">
-		<HelpTriggerButton
-			label={m.menu_help({ locale })}
-			iconOnly={false}
-			onclick={() => (helpOpen = true)}
-		/>
-	</div>
-
 	{#if logsState.loading}
 		<GridLayout cols={2}>
 			<div class="flex flex-col gap-3 md:gap-4">
@@ -56,7 +48,11 @@
 					icon={Calendar}
 					loading={true}
 					minHeight="192px"
-				/>
+				>
+					{#snippet actions()}
+						<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
+					{/snippet}
+				</LoadingCard>
 				<LoadingCard
 					title={m.logs_title({ locale: i18n.languageTag })}
 					icon={Calendar}
@@ -81,10 +77,15 @@
 		</GridLayout>
 	{:else if logsState.error}
 		<div class="alert alert-warning mb-3">
-			<span>{logsState.error}</span>
+			<span class="min-w-0 flex-1">{logsState.error}</span>
+			<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
 		</div>
 	{:else if logsState.logs.months.length === 0}
-		<LogEmptyState />
+		<LogEmptyState>
+			{#snippet actions()}
+				<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
+			{/snippet}
+		</LogEmptyState>
 	{:else}
 		<GridLayout cols={2}>
 			<!-- Left column: Log files -->
@@ -106,7 +107,11 @@
 					totalSizeKB={stats.totalSizeKB}
 					averageSizeKB={stats.averageSizeKB}
 					estimatedEntries={stats.estimatedEntries}
-				/>
+				>
+					{#snippet actions()}
+						<HelpTriggerButton label={m.menu_help({ locale })} onclick={() => (helpOpen = true)} />
+					{/snippet}
+				</LogStatisticsCard>
 
 				<LogPeriodCard
 					oldestMonth={stats.oldestMonth}
