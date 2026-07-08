@@ -5,7 +5,11 @@
 	import Wand from '~icons/tabler/wand';
 	import ChartBar from '~icons/tabler/chart-bar';
 	import * as m from '$lib/paraglide/messages.js';
-	import { MATRIX_DISPLAY_TAB_PATH, isMatrixTabPath, rememberMatrixTabPath } from './matrixNavigation';
+	import {
+		MATRIX_DISPLAY_TAB_PATH,
+		isMatrixTabPath,
+		rememberMatrixTabPath
+	} from './matrixNavigation';
 
 	const sections = $derived([
 		{

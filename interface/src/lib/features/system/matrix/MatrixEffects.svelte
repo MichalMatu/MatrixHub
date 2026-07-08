@@ -68,10 +68,12 @@
 	let lastEffectEngine = $state<MatrixEffectEngine>(MATRIX_EFFECT_ENGINE_LEGACY);
 
 	const effectCategories = $derived.by<MatrixEffectCategory[]>(() =>
-		getMatrixEffectCategories(normalizeMatrixEffectEngine(store.settings.effect_engine)).map((category) => ({
-			...category,
-			label: getEffectCategoryLabel(category.value)
-		}))
+		getMatrixEffectCategories(normalizeMatrixEffectEngine(store.settings.effect_engine)).map(
+			(category) => ({
+				...category,
+				label: getEffectCategoryLabel(category.value)
+			})
+		)
 	);
 
 	const colorPresets = $derived.by<MatrixColorPreset[]>(() =>
@@ -454,9 +456,7 @@
 							disabled={effectControlsDisabled}
 							onchange={(e) =>
 								selectReactivityProvider(
-									Number(
-										(e.target as HTMLSelectElement).value
-									) as MatrixEffectReactivityProvider
+									Number((e.target as HTMLSelectElement).value) as MatrixEffectReactivityProvider
 								)}
 						/>
 					</ContentBox>

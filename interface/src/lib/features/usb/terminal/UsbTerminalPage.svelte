@@ -373,8 +373,7 @@
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_loading({ locale: i18n.languageTag })}
 									</div>
-								{:else if quickScriptsState.hostActions.length === 0 &&
-									quickScriptsState.scripts.length === 0}
+								{:else if quickScriptsState.hostActions.length === 0 && quickScriptsState.scripts.length === 0}
 									<div class="text-sm opacity-60">
 										{m.usb_terminal_quick_scripts_empty({ locale: i18n.languageTag })}
 									</div>

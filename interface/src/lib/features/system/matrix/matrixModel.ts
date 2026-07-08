@@ -421,9 +421,10 @@ export function normalizeMatrixEffectModeForEngine(
 	effectId: number,
 	engine: MatrixEffectEngine = MATRIX_EFFECT_ENGINE_LEGACY
 ): number {
-	const max = engine === MATRIX_EFFECT_ENGINE_NATIVE_3D
-		? MATRIX_NATIVE_3D_EFFECT_MODE_MAX
-		: MATRIX_EFFECT_MODE_MAX;
+	const max =
+		engine === MATRIX_EFFECT_ENGINE_NATIVE_3D
+			? MATRIX_NATIVE_3D_EFFECT_MODE_MAX
+			: MATRIX_EFFECT_MODE_MAX;
 	if (!Number.isFinite(effectId)) return 0;
 	return Math.min(max, Math.max(0, Math.trunc(effectId)));
 }

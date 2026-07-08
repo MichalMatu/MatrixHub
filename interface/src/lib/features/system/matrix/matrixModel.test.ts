@@ -81,9 +81,7 @@ describe('matrixModel', () => {
 			value: 'all',
 			effectIds: Array.from({ length: 15 }, (_, effectId) => effectId)
 		});
-		expect(getPreferredMatrixEffectCategory(4, MATRIX_EFFECT_ENGINE_NATIVE_3D)).toBe(
-			'recommended'
-		);
+		expect(getPreferredMatrixEffectCategory(4, MATRIX_EFFECT_ENGINE_NATIVE_3D)).toBe('recommended');
 		expect(MATRIX_COLOR_PRESETS.map((preset) => preset.id)).toEqual([
 			'alert',
 			'forest',
@@ -104,11 +102,7 @@ describe('matrixModel', () => {
 		const keys = sections.flat();
 		const duplicates = keys.filter((key, index) => keys.indexOf(key) !== index);
 
-		expect(duplicates).toEqual([
-			'background_mode',
-			'effect_enabled',
-			'data_visualization_enabled'
-		]);
+		expect(duplicates).toEqual(['background_mode', 'effect_enabled', 'data_visualization_enabled']);
 		expect(MATRIX_ALARM_SETTING_KEYS).toEqual(['alarm_mode', 'custom_icons']);
 		expect(MATRIX_EFFECT_SETTING_KEYS).toContain('effect_enabled');
 		expect(MATRIX_DATA_VISUALIZATION_SETTING_KEYS).toContain('data_visualization_source');
@@ -152,7 +146,10 @@ describe('matrixModel', () => {
 			data_visualization_max: 100
 		});
 		expect(
-			getMatrixDataVisualizationPreset(MATRIX_DATA_SOURCE_WIFI_CSI, MATRIX_DATA_METRIC_SIGNAL_QUALITY)
+			getMatrixDataVisualizationPreset(
+				MATRIX_DATA_SOURCE_WIFI_CSI,
+				MATRIX_DATA_METRIC_SIGNAL_QUALITY
+			)
 		).toMatchObject({
 			data_visualization_mode: MATRIX_DATA_VIZ_MODE_HEATMAP,
 			data_visualization_min: 0,

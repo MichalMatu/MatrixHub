@@ -69,7 +69,9 @@ export function createGpioModeOptions() {
 	}));
 }
 
-export function createGpioPullOptions(options: { allowPullup?: boolean; allowPulldown?: boolean } = {}) {
+export function createGpioPullOptions(
+	options: { allowPullup?: boolean; allowPulldown?: boolean } = {}
+) {
 	return [
 		{ value: 'none', label: getGpioPullLabel('none') },
 		{ value: 'up', label: getGpioPullLabel('up'), disabled: options.allowPullup === false },

@@ -323,7 +323,9 @@ export function useUsbTerminalQuickScripts(deps: UsbTerminalQuickScriptsDeps = {
 			return pendingAction;
 		},
 		get shouldShowSection() {
-			return loading || HOST_QUICK_ACTIONS.length > 0 || scripts.length > 0 || macrosEnabled === false;
+			return (
+				loading || HOST_QUICK_ACTIONS.length > 0 || scripts.length > 0 || macrosEnabled === false
+			);
 		},
 		get isTerminalCommandDisabled() {
 			return pendingAction !== null || getStatus()?.status === 'RUNNING';

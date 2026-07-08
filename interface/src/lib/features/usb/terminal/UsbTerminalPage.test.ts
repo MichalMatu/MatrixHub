@@ -171,7 +171,9 @@ describe('UsbTerminalPage', () => {
 		mockConsoleState.error = null;
 		mockConsoleState.notice = null;
 		mockQuickScriptsState.loading = false;
-		mockQuickScriptsState.hostActions = [{ id: 'macos-focus-terminal', name: 'Focus macOS Terminal' }];
+		mockQuickScriptsState.hostActions = [
+			{ id: 'macos-focus-terminal', name: 'Focus macOS Terminal' }
+		];
 		mockQuickScriptsState.scripts = [{ name: 'Detect ESP' }, { name: 'Find Port' }];
 		mockQuickScriptsState.macrosEnabled = true;
 		mockQuickScriptsState.error = null;

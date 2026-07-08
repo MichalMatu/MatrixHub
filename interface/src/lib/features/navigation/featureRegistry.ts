@@ -267,17 +267,7 @@ const registry = [
 		id: 'system',
 		icon: menuIcons.Settings,
 		label: m.menu_system,
-		children: [
-			'status',
-			'logs',
-			'time',
-			'compensation',
-			'imu',
-			'power',
-			'users',
-			'files',
-			'styles'
-		]
+		children: ['status', 'logs', 'time', 'compensation', 'imu', 'power', 'users', 'files', 'styles']
 	},
 	{
 		type: 'leaf',

@@ -98,7 +98,10 @@
 		{ value: MATRIX_DATA_VIZ_MODE_HEATMAP, label: m.matrix_data_viz_mode_heatmap() },
 		{ value: MATRIX_DATA_VIZ_MODE_TREND, label: m.matrix_data_viz_mode_trend() },
 		{ value: MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS, label: m.matrix_data_viz_mode_spectrum_bars() },
-		{ value: MATRIX_DATA_VIZ_MODE_PERIMETER_METER, label: m.matrix_data_viz_mode_perimeter_meter() },
+		{
+			value: MATRIX_DATA_VIZ_MODE_PERIMETER_METER,
+			label: m.matrix_data_viz_mode_perimeter_meter()
+		},
 		{ value: MATRIX_DATA_VIZ_MODE_PULSE, label: m.matrix_data_viz_mode_pulse() }
 	]);
 
@@ -125,7 +128,9 @@
 					}
 				];
 			case MATRIX_DATA_SOURCE_WIFI_CSI:
-				return [{ value: MATRIX_DATA_METRIC_CSI_MOTION, label: m.matrix_data_viz_metric_csi_motion() }];
+				return [
+					{ value: MATRIX_DATA_METRIC_CSI_MOTION, label: m.matrix_data_viz_metric_csi_motion() }
+				];
 			case MATRIX_DATA_SOURCE_SCD4X:
 			default:
 				return [
@@ -144,7 +149,10 @@
 		}))
 	]);
 
-	function applyPreset(source: MatrixDataVisualizationSource, metric: MatrixDataVisualizationMetric) {
+	function applyPreset(
+		source: MatrixDataVisualizationSource,
+		metric: MatrixDataVisualizationMetric
+	) {
 		const preset = getMatrixDataVisualizationPreset(source, metric);
 		Object.assign(store.settings, preset);
 		minHex = toMatrixHexColor(preset.data_visualization_color_min);
@@ -170,7 +178,9 @@
 
 	function handleSourceChange(e: Event) {
 		if (!canManage) return;
-		const source = Number((e.currentTarget as HTMLSelectElement).value) as MatrixDataVisualizationSource;
+		const source = Number(
+			(e.currentTarget as HTMLSelectElement).value
+		) as MatrixDataVisualizationSource;
 		store.settings.data_visualization_source = source;
 		store.settings.data_visualization_enabled = true;
 		store.settings.background_mode = MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION;
@@ -444,7 +454,6 @@
 						onchange={handleStaleChange}
 					/>
 				</ContentBox>
-
 			</div>
 		{/if}
 	</div>
