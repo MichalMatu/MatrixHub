@@ -62,6 +62,11 @@ export class LogsApiService {
 	async getHistoricalChartData(date: string): Promise<ArrayBuffer> {
 		const [year, month] = date.split('-');
 		const binFile = `/data/${year}-${month}/${date}.bin`;
+		return this.getHistoricalChartDataByPath(binFile);
+	}
+
+	async getHistoricalChartDataByPath(fullPath: string): Promise<ArrayBuffer> {
+		const binFile = fullPath;
 		const url = `/api/logs/download?file=${encodeURIComponent(binFile)}`;
 
 		// Use client.fetch which handles auth headers automatically

@@ -7,6 +7,7 @@
 #include "../utils/ScopeLock.h"
 #include "../watchdog/TaskWatchdog.h"
 
+#include <cstring>
 #include <time.h>
 
 #undef LOG_TAG
@@ -20,9 +21,13 @@ namespace {
     int s_lastLoggedDayId = -1;
     bool s_headerVerified = false;
     bool s_fsReady = false;
+    char s_activeLogPath[PATH_BUFFER_SIZE] = {0};
+    uint32_t s_lastRecordTimestamp = 0;
     // Deferred low-space signal. The hot append path sets this instead of
     // walking the entire filesystem inline while holding up unrelated FS work.
     bool s_rotationPending = false;
+    constexpr uint32_t MIN_VALID_EPOCH = 1000000000UL;
+    constexpr uint32_t OFFLINE_APPEND_STEP_SECONDS = 20 * 60;
 
     // Rotation and append can walk a lot of LittleFS metadata when storage is
     // near full. Keep the current task alive while these cold-path operations run.
@@ -68,16 +73,26 @@ namespace {
         return (used <= total) ? (total - used) : 0;
     }
 
+    bool isValidEpoch(time_t timestamp) {
+        return timestamp >= static_cast<time_t>(MIN_VALID_EPOCH);
+    }
+
+    bool isBinFilePath(const char* path) {
+        if (!path) {
+            return false;
+        }
+        const char* dot = strrchr(path, '.');
+        return dot && strcmp(dot, ".bin") == 0;
+    }
+
     void buildCurrentLogPath(char* outFullpath, size_t outFullpathLen, char* outMonthDir = nullptr, size_t outMonthDirLen = 0, int* outDayId = nullptr) {
         time_t now = time(nullptr);
         struct tm timeinfo;
         localtime_r(&now, &timeinfo);
 
-        // Intentional: file layout always follows the current system clock,
-        // even before SNTP becomes valid. In AP/offline deployments this keeps
-        // datalogging fully active without introducing a second "timeless"
-        // storage mode. Consumers and maintenance flows are expected to accept
-        // pre-NTP directories/files as a normal transient condition.
+        // Normal clock-backed layout. Offline fallback path selection happens
+        // in resolveAppendTargetLocked() so invalid wall-clock time does not
+        // create a fresh 1970 log when prior history exists.
         char monthBuf[8];
         char dateBuf[11];
         strftime(monthBuf, sizeof(monthBuf), "%Y-%m", &timeinfo);
@@ -90,6 +105,186 @@ namespace {
             snprintf(outMonthDir, outMonthDirLen, "%s/%s", DATA_DIR, monthBuf);
         }
         snprintf(outFullpath, outFullpathLen, "%s/%s/%s.bin", DATA_DIR, monthBuf, dateBuf);
+    }
+
+    bool findNewestLogFileLocked(char* outPath, size_t outPathLen) {
+        if (!outPath || outPathLen == 0) {
+            return false;
+        }
+        outPath[0] = '\0';
+
+        if (!LittleFS.exists(DATA_DIR)) {
+            return false;
+        }
+
+        File root = LittleFS.open(DATA_DIR, "r");
+        if (!root || !root.isDirectory()) {
+            if (root) {
+                root.close();
+            }
+            return false;
+        }
+
+        while (true) {
+            File monthDir = root.openNextFile();
+            if (!monthDir) {
+                break;
+            }
+
+            char monthPath[MONTH_DIR_SIZE] = {0};
+            const bool hasMonth =
+                monthDir.isDirectory() && copyChildEntryPath(DATA_DIR, monthDir, monthPath, sizeof(monthPath));
+            monthDir.close();
+
+            if (!hasMonth) {
+                continue;
+            }
+
+            File monthHandle = LittleFS.open(monthPath, "r");
+            if (!monthHandle || !monthHandle.isDirectory()) {
+                if (monthHandle) {
+                    monthHandle.close();
+                }
+                continue;
+            }
+
+            while (true) {
+                File dayFile = monthHandle.openNextFile();
+                if (!dayFile) {
+                    break;
+                }
+
+                char filePath[PATH_BUFFER_SIZE] = {0};
+                const bool hasFile =
+                    !dayFile.isDirectory() &&
+                    copyChildEntryPath(monthPath, dayFile, filePath, sizeof(filePath)) &&
+                    isBinFilePath(filePath);
+                dayFile.close();
+
+                if (hasFile && (outPath[0] == '\0' || strcmp(filePath, outPath) > 0)) {
+                    strncpy(outPath, filePath, outPathLen - 1);
+                    outPath[outPathLen - 1] = '\0';
+                }
+            }
+
+            monthHandle.close();
+        }
+
+        root.close();
+        return outPath[0] != '\0';
+    }
+
+    uint32_t readLastTimestampLocked(const char* path) {
+        if (!path || path[0] == '\0') {
+            return 0;
+        }
+
+        File file = LittleFS.open(path, "r");
+        if (!file) {
+            return 0;
+        }
+
+        const size_t fileSize = file.size();
+        if (fileSize < sizeof(BinaryFileHeader) + sizeof(BinaryLogRecord)) {
+            file.close();
+            return 0;
+        }
+
+        const size_t offset = fileSize - sizeof(BinaryLogRecord);
+        BinaryLogRecord record{};
+        if (!file.seek(offset)) {
+            file.close();
+            return 0;
+        }
+
+        const size_t bytesRead = file.read(reinterpret_cast<uint8_t*>(&record), sizeof(record));
+        file.close();
+
+        if (bytesRead != sizeof(record)) {
+            return 0;
+        }
+
+        return record.timestamp;
+    }
+
+    uint32_t lastTimestampForPathLocked(const char* path) {
+        uint32_t lastTimestamp = 0;
+        if (s_activeLogPath[0] != '\0' && strcmp(s_activeLogPath, path) == 0) {
+            lastTimestamp = s_lastRecordTimestamp;
+        }
+        if (lastTimestamp == 0) {
+            lastTimestamp = readLastTimestampLocked(path);
+        }
+        return lastTimestamp;
+    }
+
+    uint32_t monotonicTimestampForPathLocked(const char* path, uint32_t timestamp) {
+        const uint32_t lastTimestamp = lastTimestampForPathLocked(path);
+        if (lastTimestamp >= MIN_VALID_EPOCH && timestamp <= lastTimestamp) {
+            return lastTimestamp + 1;
+        }
+        return timestamp;
+    }
+
+    uint32_t nextOfflineTimestampForPathLocked(const char* path) {
+        const uint32_t lastTimestamp = lastTimestampForPathLocked(path);
+        if (lastTimestamp >= MIN_VALID_EPOCH) {
+            return lastTimestamp + OFFLINE_APPEND_STEP_SECONDS;
+        }
+        if (lastTimestamp > 0) {
+            return lastTimestamp + 1;
+        }
+
+        const time_t now = time(nullptr);
+        return now > 0 ? static_cast<uint32_t>(now) : 1;
+    }
+
+    bool resolveAppendTargetLocked(
+        char* outFullpath,
+        size_t outFullpathLen,
+        char* outMonthDir,
+        size_t outMonthDirLen,
+        int* outDayId,
+        uint32_t* outTimestamp
+    ) {
+        const time_t now = time(nullptr);
+        if (isValidEpoch(now)) {
+            buildCurrentLogPath(outFullpath, outFullpathLen, outMonthDir, outMonthDirLen, outDayId);
+            if (outTimestamp) {
+                *outTimestamp = monotonicTimestampForPathLocked(outFullpath, static_cast<uint32_t>(now));
+            }
+            return false;
+        }
+
+        char fallbackPath[PATH_BUFFER_SIZE] = {0};
+        if (s_activeLogPath[0] != '\0' && LittleFS.exists(s_activeLogPath)) {
+            strncpy(fallbackPath, s_activeLogPath, sizeof(fallbackPath) - 1);
+            fallbackPath[sizeof(fallbackPath) - 1] = '\0';
+        } else {
+            findNewestLogFileLocked(fallbackPath, sizeof(fallbackPath));
+        }
+
+        if (fallbackPath[0] != '\0') {
+            snprintf(outFullpath, outFullpathLen, "%s", fallbackPath);
+            if (outMonthDir && outMonthDirLen > 0) {
+                outMonthDir[0] = '\0';
+            }
+            if (outDayId) {
+                *outDayId = -1;
+            }
+            if (outTimestamp) {
+                *outTimestamp = nextOfflineTimestampForPathLocked(fallbackPath);
+            }
+            LOGW("System time invalid; appending sensor log to latest file: %s", fallbackPath);
+            return true;
+        }
+
+        buildCurrentLogPath(outFullpath, outFullpathLen, outMonthDir, outMonthDirLen, outDayId);
+        if (outTimestamp) {
+            *outTimestamp = now > 0 ? static_cast<uint32_t>(now) : 1;
+        }
+        LOGW("System time invalid and no previous log exists; using fallback path: %s", outFullpath);
+        return false;
     }
 
     void yieldDuringRotateScan() {
@@ -124,12 +319,20 @@ namespace {
     // Fast-path helper caching the current day directory and header status in RAM.
     // Prevents Task Starvation caused by hitting VFS (LittleFS.exists/open) on every single sensor value logged.
     // Caller must already hold the global filesystem mutex when one exists.
-    bool ensureDailyFileReadyLocked(char* outFullpath, size_t outFullpathLen) {
+    bool ensureDailyFileReadyLocked(char* outFullpath, size_t outFullpathLen, uint32_t* outTimestamp = nullptr) {
         int currentDayId = -1;
         char monthDir[MONTH_DIR_SIZE];
-        buildCurrentLogPath(outFullpath, outFullpathLen, monthDir, sizeof(monthDir), &currentDayId);
+        const bool usingExistingFallback = resolveAppendTargetLocked(
+            outFullpath,
+            outFullpathLen,
+            monthDir,
+            sizeof(monthDir),
+            &currentDayId,
+            outTimestamp
+        );
 
-        if (s_lastLoggedDayId == currentDayId && s_headerVerified) {
+        if (s_lastLoggedDayId == currentDayId && s_headerVerified &&
+            strncmp(s_activeLogPath, outFullpath, sizeof(s_activeLogPath)) == 0) {
             // The fast path only caches "today's file was prepared" in RAM. The
             // file itself can still disappear later via Log UI delete/cleanup,
             // so re-check existence before we skip header preparation. Without
@@ -147,7 +350,7 @@ namespace {
             return false;
         }
         feedTaskWatchdog();
-        if (!BinaryLoggerHelpers::ensureDirectoryExists(monthDir)) {
+        if (!usingExistingFallback && !BinaryLoggerHelpers::ensureDirectoryExists(monthDir)) {
             LOGE("Failed to create month dir: %s", monthDir);
             return false;
         }
@@ -164,6 +367,8 @@ namespace {
                 LOGI("Created today's log file with header: %s", outFullpath);
                 s_lastLoggedDayId = currentDayId;
                 s_headerVerified = true;
+                strncpy(s_activeLogPath, outFullpath, sizeof(s_activeLogPath) - 1);
+                s_activeLogPath[sizeof(s_activeLogPath) - 1] = '\0';
                 return true;
             }
             LOGE("Failed to create today's log file: %s", outFullpath);
@@ -214,6 +419,8 @@ namespace {
             feedTaskWatchdog();
             s_lastLoggedDayId = currentDayId;
             s_headerVerified = true;
+            strncpy(s_activeLogPath, outFullpath, sizeof(s_activeLogPath) - 1);
+            s_activeLogPath[sizeof(s_activeLogPath) - 1] = '\0';
             return true;
         }
     }
@@ -223,6 +430,8 @@ void BinaryDataLogger::begin() {
     s_fsReady = false;
     s_lastLoggedDayId = -1;
     s_headerVerified = false;
+    s_activeLogPath[0] = '\0';
+    s_lastRecordTimestamp = 0;
     s_rotationPending = false;
 
     // Filesystem mount lifecycle belongs to StorageInitializer.
@@ -271,13 +480,25 @@ BinaryLogWriteResult BinaryDataLogger::logSensorData(uint16_t co2, float temp, f
     }
 
     char filepath[PATH_BUFFER_SIZE];
-    buildCurrentLogPath(filepath, sizeof(filepath));
+    filepath[0] = '\0';
     const size_t payloadBytes = sizeof(BinaryLogRecord);
+    uint32_t recordTimestamp = 0;
 
     SYSTEM::ScopeLock lock(g_fsMutex, pdMS_TO_TICKS(API::FS_MUTEX_TIMEOUT_MS));
     if (g_fsMutex && !lock.isLocked()) {
         return BinaryLogWriteResult::Busy;
     }
+
+    char monthDir[MONTH_DIR_SIZE];
+    int currentDayId = -1;
+    resolveAppendTargetLocked(
+        filepath,
+        sizeof(filepath),
+        monthDir,
+        sizeof(monthDir),
+        &currentDayId,
+        &recordTimestamp
+    );
 
     // Intended behavior: the append attempt stays short and predictable. If we
     // do not have the free-space headroom for a safe write, we schedule
@@ -297,7 +518,7 @@ BinaryLogWriteResult BinaryDataLogger::logSensorData(uint16_t co2, float temp, f
         return BinaryLogWriteResult::NeedsMaintenance;
     }
 
-    if (!ensureDailyFileReadyLocked(filepath, sizeof(filepath))) {
+    if (!ensureDailyFileReadyLocked(filepath, sizeof(filepath), &recordTimestamp)) {
         return BinaryLogWriteResult::Error;
     }
     feedTaskWatchdog();
@@ -314,7 +535,7 @@ BinaryLogWriteResult BinaryDataLogger::logSensorData(uint16_t co2, float temp, f
 
     // Prepare binary record
     BinaryLogRecord record;
-    record.timestamp = static_cast<uint32_t>(time(nullptr));
+    record.timestamp = recordTimestamp != 0 ? recordTimestamp : static_cast<uint32_t>(time(nullptr));
     record.co2 = co2;
     record.temp_10x = floatToInt16_10x(temp);
     record.humid_10x = floatToUInt16_10x(humid);
@@ -328,6 +549,9 @@ BinaryLogWriteResult BinaryDataLogger::logSensorData(uint16_t co2, float temp, f
 
     if (bytesWritten == sizeof(record)) {
         s_rotationPending = false;
+        s_lastRecordTimestamp = record.timestamp;
+        strncpy(s_activeLogPath, filepath, sizeof(s_activeLogPath) - 1);
+        s_activeLogPath[sizeof(s_activeLogPath) - 1] = '\0';
         LOGD("Logged to: %s (ts=%lu, co2=%u, temp=%d, humid=%u)",
              filepath, record.timestamp, record.co2, record.temp_10x, 
              record.humid_10x);
@@ -343,12 +567,23 @@ void BinaryDataLogger::logBatch(const BinaryLogRecord* records, size_t count) {
     if (!records || count == 0) return;
 
     char filepath[PATH_BUFFER_SIZE];
-    buildCurrentLogPath(filepath, sizeof(filepath));
+    filepath[0] = '\0';
     SYSTEM::ScopeLock lock(g_fsMutex, pdMS_TO_TICKS(API::FS_MUTEX_TIMEOUT_MS));
     if (g_fsMutex && !lock.isLocked()) {
         LOGW("Skipping batch write: filesystem mutex busy");
         return;
     }
+
+    char monthDir[MONTH_DIR_SIZE];
+    int currentDayId = -1;
+    resolveAppendTargetLocked(
+        filepath,
+        sizeof(filepath),
+        monthDir,
+        sizeof(monthDir),
+        &currentDayId,
+        nullptr
+    );
 
     const size_t payloadBytes = count * sizeof(BinaryLogRecord);
     const size_t headerBytes = LittleFS.exists(filepath) ? 0 : sizeof(BinaryFileHeader);

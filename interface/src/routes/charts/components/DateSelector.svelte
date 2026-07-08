@@ -1,169 +1,130 @@
 <script lang="ts">
 	let {
-		selectedDate = $bindable(''),
-		currentMonth = $bindable(''),
-		availableDates = [],
-		showCalendar = $bindable(false)
+		startDate = $bindable(''),
+		endDate = $bindable(''),
+		availableDates = []
 	}: {
-		selectedDate: string;
-		currentMonth: string;
+		startDate: string;
+		endDate: string;
 		availableDates: string[];
-		showCalendar: boolean;
 	} = $props();
-
-	// Extract unique months from available dates
-	let availableMonths = $derived(
-		Array.from(new Set(availableDates.map((date) => date.slice(0, 7)))).sort()
-	);
-
-	// Check if we can navigate to prev/next month
-	let currentMonthIndex = $derived(availableMonths.indexOf(currentMonth));
-	let canGoPrevMonth = $derived(currentMonthIndex > 0);
-	let canGoNextMonth = $derived(
-		currentMonthIndex < availableMonths.length - 1 && currentMonthIndex >= 0
-	);
-
-	// Check if we can navigate to prev/next day
-	let sortedDates = $derived([...availableDates].sort());
-	let currentDateIndex = $derived(selectedDate ? sortedDates.indexOf(selectedDate) : -1);
-	let canGoPrevDay = $derived(currentDateIndex > 0);
-	let canGoNextDay = $derived(currentDateIndex >= 0 && currentDateIndex < sortedDates.length - 1);
-
-	function getDatesForMonth(yearMonth: string) {
-		return sortedDates.filter((date) => date.startsWith(`${yearMonth}-`));
-	}
-
-	// Auto-select newest month with data when available dates change
-	$effect(() => {
-		if (availableMonths.length > 0 && !availableMonths.includes(currentMonth)) {
-			currentMonth = availableMonths[availableMonths.length - 1];
-		}
-	});
-
-	$effect(() => {
-		if (sortedDates.length === 0) return;
-		if (selectedDate && sortedDates.includes(selectedDate)) return;
-
-		const datesForMonth = getDatesForMonth(currentMonth);
-		selectedDate = datesForMonth[datesForMonth.length - 1] ?? sortedDates[sortedDates.length - 1];
-		currentMonth = selectedDate.slice(0, 7);
-	});
-
-	function changeMonth(delta: number) {
-		if (delta < 0 && !canGoPrevMonth) return;
-		if (delta > 0 && !canGoNextMonth) return;
-
-		const newIndex = currentMonthIndex + delta;
-		if (newIndex >= 0 && newIndex < availableMonths.length) {
-			const nextMonth = availableMonths[newIndex];
-			const datesForMonth = getDatesForMonth(nextMonth);
-			currentMonth = nextMonth;
-			if (datesForMonth.length > 0) {
-				selectedDate = datesForMonth[datesForMonth.length - 1];
-			}
-		}
-	}
-
-	function changeDay(delta: number) {
-		if (delta < 0 && !canGoPrevDay) return;
-		if (delta > 0 && !canGoNextDay) return;
-
-		const newIndex = currentDateIndex + delta;
-		if (newIndex >= 0 && newIndex < sortedDates.length) {
-			selectedDate = sortedDates[newIndex];
-			// Update month to match the new date
-			currentMonth = selectedDate.slice(0, 7);
-		}
-	}
-
-	function getDaysInMonth(yearMonth: string) {
-		const [year, month] = yearMonth.split('-').map(Number);
-		return new Date(year, month, 0).getDate();
-	}
-
-	function handleDateSelect(dateStr: string) {
-		selectedDate = dateStr;
-		showCalendar = false;
-	}
 
 	import { i18n } from '$lib/i18n.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import BaseCard from '$lib/components/layout/BaseCard.svelte';
-	import { FormButton } from '$lib/components/shared/forms';
+
+	let sortedDates = $derived([...availableDates].sort());
+	let minDate = $derived(sortedDates[0] ?? '');
+	let maxDate = $derived(sortedDates[sortedDates.length - 1] ?? '');
+	let selectedDates = $derived(
+		startDate && endDate ? sortedDates.filter((date) => date >= startDate && date <= endDate) : []
+	);
+
+	function firstAvailableOnOrAfter(date: string) {
+		return sortedDates.find((availableDate) => availableDate >= date) ?? maxDate;
+	}
+
+	function lastAvailableOnOrBefore(date: string) {
+		for (let index = sortedDates.length - 1; index >= 0; index--) {
+			const availableDate = sortedDates[index];
+			if (availableDate <= date) return availableDate;
+		}
+		return minDate;
+	}
+
+	function normalizeStart(date: string) {
+		if (sortedDates.length === 0) return '';
+		const bounded = date < minDate ? minDate : date > maxDate ? maxDate : date;
+		return sortedDates.includes(bounded) ? bounded : firstAvailableOnOrAfter(bounded);
+	}
+
+	function normalizeEnd(date: string) {
+		if (sortedDates.length === 0) return '';
+		const bounded = date < minDate ? minDate : date > maxDate ? maxDate : date;
+		return sortedDates.includes(bounded) ? bounded : lastAvailableOnOrBefore(bounded);
+	}
+
+	function handleStartInput(event: Event) {
+		const value = (event.currentTarget as HTMLInputElement).value;
+		const nextStart = normalizeStart(value);
+		startDate = nextStart;
+		if (!endDate || endDate < nextStart) {
+			endDate = nextStart;
+		}
+	}
+
+	function handleEndInput(event: Event) {
+		const value = (event.currentTarget as HTMLInputElement).value;
+		const nextEnd = normalizeEnd(value);
+		endDate = nextEnd;
+		if (!startDate || startDate > nextEnd) {
+			startDate = nextEnd;
+		}
+	}
+
+	$effect(() => {
+		if (sortedDates.length === 0) {
+			startDate = '';
+			endDate = '';
+			return;
+		}
+
+		const repairedStart = startDate ? normalizeStart(startDate) : maxDate;
+		const repairedEnd = endDate ? normalizeEnd(endDate) : repairedStart;
+
+		startDate = repairedStart;
+		endDate = repairedEnd < repairedStart ? repairedStart : repairedEnd;
+	});
 </script>
 
-<div class="mb-4">
-	<div class="flex items-center gap-2">
-		<!-- Month navigation -->
-		<!-- Month navigation -->
-		<FormButton
-			label="◀◀"
-			class="btn-ghost btn-sm"
-			disabled={!canGoPrevMonth}
-			onclick={() => changeMonth(-1)}
-			title={m.charts_nav_prev_month({ locale: i18n.languageTag })}
-		/>
-
-		<!-- Day navigation -->
-		<FormButton
-			label="◀"
-			class="btn-ghost btn-sm"
-			disabled={!canGoPrevDay}
-			onclick={() => changeDay(-1)}
-			title={m.charts_nav_prev_day({ locale: i18n.languageTag })}
-		/>
-
-		<!-- Date display / calendar toggle -->
-		<button
-			type="button"
-			class="btn btn-outline btn-sm flex-1"
-			onclick={() => (showCalendar = !showCalendar)}
-		>
-			{selectedDate || currentMonth}
-			{#if availableMonths.length > 0}
-				<span class="text-xs opacity-60 ml-1">
-					({currentMonthIndex + 1}/{availableMonths.length})
+<div class="mb-4 rounded-md border border-base-content/10 bg-base-100/35 p-3">
+	<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+		<label class="form-control min-w-0">
+			<span class="label py-1">
+				<span
+					class="label-text text-xs font-semibold uppercase tracking-normal text-base-content/60"
+				>
+					{m.charts_range_from({ locale: i18n.languageTag })}
 				</span>
+			</span>
+			<input
+				type="date"
+				class="input input-bordered input-sm w-full"
+				value={startDate}
+				min={minDate}
+				max={maxDate}
+				disabled={sortedDates.length === 0}
+				onchange={handleStartInput}
+			/>
+		</label>
+
+		<label class="form-control min-w-0">
+			<span class="label py-1">
+				<span
+					class="label-text text-xs font-semibold uppercase tracking-normal text-base-content/60"
+				>
+					{m.charts_range_to({ locale: i18n.languageTag })}
+				</span>
+			</span>
+			<input
+				type="date"
+				class="input input-bordered input-sm w-full"
+				value={endDate}
+				min={minDate}
+				max={maxDate}
+				disabled={sortedDates.length === 0}
+				onchange={handleEndInput}
+			/>
+		</label>
+
+		<div class="pb-1 text-right text-xs text-base-content/55 sm:min-w-32">
+			{#if selectedDates.length > 0}
+				{m.charts_range_days_with_data(
+					{ count: selectedDates.length },
+					{ locale: i18n.languageTag }
+				)}
+			{:else}
+				{m.charts_range_no_days({ locale: i18n.languageTag })}
 			{/if}
-		</button>
-
-		<!-- Day navigation -->
-		<FormButton
-			label="▶"
-			class="btn-ghost btn-sm"
-			disabled={!canGoNextDay}
-			onclick={() => changeDay(1)}
-			title={m.charts_nav_next_day({ locale: i18n.languageTag })}
-		/>
-
-		<!-- Month navigation -->
-		<FormButton
-			label="▶▶"
-			class="btn-ghost btn-sm"
-			disabled={!canGoNextMonth}
-			onclick={() => changeMonth(1)}
-			title={m.charts_nav_next_month({ locale: i18n.languageTag })}
-		/>
+		</div>
 	</div>
-	{#if showCalendar}
-		<BaseCard class="mt-2">
-			<div class="grid grid-cols-7 gap-1">
-				{#each Array(getDaysInMonth(currentMonth)) as _, i (i)}
-					{@const day = i + 1}
-					{@const dateStr = `${currentMonth}-${String(day).padStart(2, '0')}`}
-					{@const hasData = availableDates.includes(dateStr)}
-					<FormButton
-						label={String(day)}
-						class="btn-xs {selectedDate === dateStr
-							? 'btn-primary'
-							: hasData
-								? 'btn-outline'
-								: 'btn-ghost'} {hasData ? 'font-bold' : ''}"
-						disabled={!hasData}
-						onclick={() => handleDateSelect(dateStr)}
-					/>
-				{/each}
-			</div>
-		</BaseCard>
-	{/if}
 </div>

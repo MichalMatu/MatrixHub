@@ -4,7 +4,11 @@
 	import HelpTriggerButton from '$lib/components/help/HelpTriggerButton.svelte';
 	import DateSelector from './components/DateSelector.svelte';
 	import EnvironmentHistoryChart from './components/charts/EnvironmentHistoryChart.svelte';
-	import { parseBinaryLog, BinaryLogParseError } from '$lib/utils/logs/binaryLogParser';
+	import {
+		parseBinaryLog,
+		BinaryLogParseError,
+		estimateRecordCount
+	} from '$lib/utils/logs/binaryLogParser';
 	import {
 		LogsApiService,
 		type LogListResponse
@@ -17,6 +21,11 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	type Series = (number | null)[];
+	type LogFileEntry = {
+		date: string;
+		path: string;
+		size: number;
+	};
 
 	let chartData = $state<{
 		timestamps: number[];
@@ -26,9 +35,9 @@
 	}>({ timestamps: [], co2: [], temp: [], humid: [] });
 
 	let availableDates = $state<string[]>([]);
-	let selectedDate = $state('');
-	let currentMonth = $state(new Date().toISOString().slice(0, 7));
-	let showCalendar = $state(false);
+	let availableLogFiles = $state<LogFileEntry[]>([]);
+	let startDate = $state('');
+	let endDate = $state('');
 	let isLoading = $state(false);
 	let logsListErrorMessage = $state<string | null>(null);
 	let dataErrorMessage = $state<string | null>(null);
@@ -62,9 +71,9 @@
 		return new Date().toISOString().slice(0, 10);
 	}
 
-	function applySelectedDate(date: string) {
-		selectedDate = date;
-		currentMonth = date.slice(0, 7);
+	function applySelectedRange(start: string, end = start) {
+		startDate = start;
+		endDate = end;
 	}
 
 	onMount(() => {
@@ -78,21 +87,28 @@
 				logsListErrorMessage = null;
 				fallbackDate = null;
 				availableDates = [];
+				availableLogFiles = [];
 				data.months?.forEach((month) => {
 					month.files?.forEach((file) => {
-						if (file.name.endsWith('.bin')) {
-							availableDates.push(file.name.replace('.bin', ''));
+						if (file.name.endsWith('.bin') && estimateRecordCount(file.size) > 0) {
+							const date = file.name.replace('.bin', '');
+							availableLogFiles.push({
+								date,
+								path: `${month.path}/${file.name}`,
+								size: file.size
+							});
 						}
 					});
 				});
 
-				availableDates.sort();
+				availableLogFiles.sort((a, b) => a.date.localeCompare(b.date));
+				availableDates = availableLogFiles.map((file) => file.date);
 
 				if (availableDates.length > 0) {
 					const latest = availableDates[availableDates.length - 1];
-					applySelectedDate(latest);
+					applySelectedRange(latest);
 				} else {
-					applySelectedDate(getTodayDate());
+					applySelectedRange(getTodayDate());
 				}
 			})
 			.catch((err: unknown) => {
@@ -106,34 +122,62 @@
 				const today = getTodayDate();
 				logsListErrorMessage = `${prefix} ${m.charts_fallback_today({ locale: i18n.languageTag })}`;
 				fallbackDate = today;
-				applySelectedDate(today);
+				applySelectedRange(today);
 			});
 	}
 
-	async function fetchData(date?: string) {
+	function getFilesForRange(start: string, end: string) {
+		if (!start || !end) return [];
+		return availableLogFiles.filter((file) => file.date >= start && file.date <= end);
+	}
+
+	function mergeParsedLogs(files: ReturnType<typeof parseBinaryLog>[]) {
+		const rows = files.flatMap((file) =>
+			file.timestamps.map((timestamp, index) => ({
+				timestamp,
+				co2: file.co2s[index] ?? null,
+				temp: file.temps[index] ?? null,
+				humid: file.humids[index] ?? null
+			}))
+		);
+
+		rows.sort((a, b) => a.timestamp - b.timestamp);
+
+		return {
+			timestamps: rows.map((row) => row.timestamp),
+			co2: rows.map((row) => row.co2),
+			temp: rows.map((row) => row.temp),
+			humid: rows.map((row) => row.humid)
+		};
+	}
+
+	async function fetchData(start?: string, end = start) {
 		isLoading = true;
 		dataErrorMessage = null;
 
 		try {
-			let arrayBuffer: ArrayBuffer;
+			const rangeStart = start ?? getTodayDate();
+			const rangeEnd = end ?? rangeStart;
+			const files = getFilesForRange(rangeStart, rangeEnd);
+			const parsedLogs: ReturnType<typeof parseBinaryLog>[] = [];
 
-			if (!date) {
-				// Default to today's date if not specified, enforcing Persistent Storage (Flash)
-				// instead of Live PSRAM data.
-				const today = getTodayDate();
-				arrayBuffer = await api.getHistoricalChartData(today);
-			} else {
-				arrayBuffer = await api.getHistoricalChartData(date);
+			for (const file of files) {
+				try {
+					const arrayBuffer = await api.getHistoricalChartDataByPath(file.path);
+					parsedLogs.push(parseBinaryLog(arrayBuffer));
+				} catch (err) {
+					if (err instanceof ApiError && err.isNotFound) {
+						continue;
+					}
+					if (err instanceof BinaryLogParseError) {
+						Logger.warn('Skipping corrupt chart log:', file.path, err);
+						continue;
+					}
+					throw err;
+				}
 			}
 
-			const parsed = parseBinaryLog(arrayBuffer);
-
-			chartData = {
-				timestamps: parsed.timestamps,
-				co2: parsed.co2s,
-				temp: parsed.temps,
-				humid: parsed.humids
-			};
+			chartData = mergeParsedLogs(parsedLogs);
 		} catch (err) {
 			const abortKind = getRequestAbortKind(err);
 			if (abortKind === 'abort') {
@@ -164,11 +208,12 @@
 	$effect(() => {
 		// Prevent this effect from re-running due to unrelated reactive changes
 		// (e.g. global stores/page data) while fetchData() is executing.
-		// We only want to refetch when selectedDate changes.
-		const date = selectedDate;
-		if (date) {
+		// We only want to refetch when the selected range changes.
+		const start = startDate;
+		const end = endDate;
+		if (start && end) {
 			untrack(() => {
-				fetchData(date);
+				fetchData(start, end);
 			});
 		}
 	});
@@ -195,7 +240,7 @@
 		</div>
 	{/if}
 	{#if availableDates.length > 0}
-		<DateSelector bind:selectedDate bind:currentMonth {availableDates} bind:showCalendar />
+		<DateSelector bind:startDate bind:endDate {availableDates} />
 	{:else if fallbackDate}
 		<div class="alert alert-info mb-3">
 			<span>{m.charts_showing_day({ date: fallbackDate }, { locale: i18n.languageTag })}</span>

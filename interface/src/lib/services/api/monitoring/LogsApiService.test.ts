@@ -51,6 +51,28 @@ describe('LogsApiService', () => {
 		expect(await blob.text()).toBe('demo-binary');
 	});
 
+	it('downloads historical chart data by full log path', async () => {
+		const fetchMock = vi.fn(async () => {
+			return new Response('demo-binary', {
+				status: 200,
+				headers: { 'content-type': 'application/octet-stream' }
+			});
+		}) as unknown as typeof fetch;
+
+		const service = createService(fetchMock);
+		const data = await service.getHistoricalChartDataByPath('/data/2026-03/2026-03-15.bin');
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/logs/download?file=%2Fdata%2F2026-03%2F2026-03-15.bin',
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: 'Bearer token'
+				})
+			})
+		);
+		expect(new TextDecoder().decode(data)).toBe('demo-binary');
+	});
+
 	it('throws an ApiError when protected download fails', async () => {
 		const fetchMock = vi.fn(async () => {
 			return new Response(JSON.stringify({ ok: false, error: 'fs/busy' }), {
