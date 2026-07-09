@@ -194,12 +194,14 @@ void CsiService::processingTask(void* param) {
     while (!self->_shouldExit.load(std::memory_order_acquire)) {
         uint32_t now = millis();
         self->applyPendingMotionCommandsNonBlocking();
+        self->applyPendingVisualizationCommandsNonBlocking();
 
         // Wait briefly for the first packet so the idle path is cheap.
         if (self->_queue && self->_queue->pop(packet, pdMS_TO_TICKS(10))) {
             self->_dequeuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
             self->_lastPacketMs.store(now, std::memory_order_relaxed);
             self->applyPendingMotionCommandsNonBlocking();
+            self->applyPendingVisualizationCommandsNonBlocking();
             packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
             self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
             const auto motion = self->processMotionPacket(packet, now);
@@ -213,6 +215,7 @@ void CsiService::processingTask(void* param) {
                 self->_dequeuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
                 self->_lastPacketMs.store(now, std::memory_order_relaxed);
                 self->applyPendingMotionCommandsNonBlocking();
+                self->applyPendingVisualizationCommandsNonBlocking();
                 packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
                 self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
                 const auto motion = self->processMotionPacket(packet, now);

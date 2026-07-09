@@ -483,12 +483,25 @@
       "tests": ["scripts/tests/stress_test.py", "scripts/contract/verify_api_contract.py"]
     },
     {
+      "id": "matrix.data_visualization.status",
+      "method": "GET",
+      "path": "/api/matrix/data-visualization/status",
+      "auth": "authenticated",
+      "request": "none",
+      "response": "Matrix data visualization runtime status JSON with active/source/metric/mode/valid/stale/reason/value/age/bin_count and CSI consumer diagnostics",
+      "restartRequired": false,
+      "firmware": ["src/api/matrix/MatrixApiService.cpp", "lib/matrix_service/MatrixService.cpp", "src/system/matrix/MatrixTask.cpp"],
+      "frontend": ["interface/src/lib/services/api/core/MatrixApiService.ts", "interface/src/lib/features/system/matrix/MatrixDataVisualization.svelte"],
+      "sdk": ["packages/device-sdk/src/matrix.ts"],
+      "tests": ["scripts/contract/verify_api_contract.py"]
+    },
+    {
       "id": "matrix.data_visualization.csi.calibrate",
       "method": "POST",
       "path": "/api/matrix/data-visualization/csi/calibrate",
       "auth": "admin",
       "request": "none",
-      "response": "Calibration request status JSON for CSI data visualization baseline",
+      "response": "Legacy CSI visualization reset endpoint; returns JSON with status visualization_reset_requested",
       "restartRequired": false,
       "firmware": ["src/api/matrix/MatrixApiService.cpp", "src/wifisensing/csi/core/CsiService.cpp"],
       "frontend": ["interface/src/lib/services/api/core/MatrixApiService.ts", "interface/src/lib/features/system/matrix/MatrixDataVisualization.svelte"],

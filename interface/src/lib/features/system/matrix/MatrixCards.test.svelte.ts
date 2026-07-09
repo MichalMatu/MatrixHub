@@ -135,6 +135,7 @@ vi.mock('$lib/paraglide/messages.js', () => {
 		matrix_effects_enable: () => 'Enable Effects',
 		matrix_effects_desc: () => 'Runs when idle',
 		matrix_effects_disabled_hint: () => 'Effect setup is kept',
+		matrix_effects_background_live_data_action: () => 'Open live data settings',
 		matrix_effect_category: () => 'Category',
 		matrix_effect_category_recommended: () => 'Recommended',
 		matrix_effect_category_calm: () => 'Calm',
@@ -303,6 +304,19 @@ describe('Matrix cards', () => {
 			'14'
 		);
 		expect(store.saveSettingsSilentlyNow).not.toHaveBeenCalled();
+	});
+
+	it('links to live data settings when the shared background is set to live data', () => {
+		const store = createMatrixStore({
+			background_mode: 1,
+			effect_enabled: false,
+			data_visualization_enabled: true
+		});
+		render(MatrixEffects, { props: { store, canManage: true } });
+
+		expect(screen.getByRole('link', { name: 'Open live data settings' }).getAttribute('href')).toBe(
+			'/system/matrix/data'
+		);
 	});
 
 	it('uses real disabled controls while visual effects are turned off', () => {

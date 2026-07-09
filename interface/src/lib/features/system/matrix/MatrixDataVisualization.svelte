@@ -88,6 +88,12 @@
 		store.settings.data_visualization_source as MatrixDataVisualizationSource
 	);
 	const showBleSelector = $derived(selectedSource === MATRIX_DATA_SOURCE_BLE);
+	const statusLive = $derived(
+		Boolean(dataStatus && dataStatus.active && dataStatus.valid && !dataStatus.stale)
+	);
+	const showCsiDiagnostics = $derived(
+		selectedSource === MATRIX_DATA_SOURCE_WIFI_CSI && Boolean(dataStatus?.csi?.available)
+	);
 
 	$effect(() => {
 		if (!store.loading) {
@@ -329,6 +335,20 @@
 		return `${status.age_ms} ms`;
 	}
 
+	function formatCsiLastPacket(status: MatrixDataVisualizationStatus | null): string {
+		const lastPacketMs = status?.csi?.last_packet_ms ?? 0;
+		if (!lastPacketMs) {
+			return m.matrix_data_viz_csi_last_packet_never({ locale: i18n.languageTag });
+		}
+		return `${lastPacketMs} ms`;
+	}
+
+	function formatCsiConsumer(status: MatrixDataVisualizationStatus | null): string {
+		return status?.csi?.matrix_visualization_consumer_active
+			? m.matrix_data_viz_csi_consumer_active({ locale: i18n.languageTag })
+			: m.matrix_data_viz_csi_consumer_inactive({ locale: i18n.languageTag });
+	}
+
 	function getStatusReasonLabel(reason: string): string {
 		const labels: Record<string, string> = {
 			ok: m.matrix_data_viz_reason_ok({ locale: i18n.languageTag }),
@@ -376,17 +396,18 @@
 					onchange={handleBackgroundModeChange}
 				/>
 				<p class="mt-2 text-xs text-base-content/70">{m.matrix_data_viz_desc()}</p>
+				{#if store.settings.background_mode === MATRIX_BACKGROUND_MODE_EFFECTS}
+					<a class="btn btn-xs btn-outline mt-2" href="/system/matrix/effects">
+						{m.matrix_data_viz_background_effects_action({ locale: i18n.languageTag })}
+					</a>
+				{/if}
 			</ContentBox>
 
 			<ContentBox>
 				<div class="flex items-center justify-between gap-3">
 					<span class="font-bold text-sm">{m.matrix_data_viz_status_title()}</span>
-					<span
-						class="badge badge-sm {dataStatus?.valid && !dataStatus?.stale
-							? 'badge-success'
-							: 'badge-warning'}"
-					>
-						{dataStatus?.valid && !dataStatus?.stale
+					<span class="badge badge-sm {statusLive ? 'badge-success' : 'badge-warning'}">
+						{statusLive
 							? m.matrix_data_viz_status_live({ locale: i18n.languageTag })
 							: m.matrix_data_viz_status_no_fresh_data({ locale: i18n.languageTag })}
 					</span>
@@ -402,6 +423,18 @@
 						{ locale: i18n.languageTag }
 					)}
 				</p>
+				{#if showCsiDiagnostics}
+					<p class="mt-1 text-xs text-base-content/70">
+						{m.matrix_data_viz_csi_status_summary(
+							{
+								consumer: formatCsiConsumer(dataStatus),
+								packets: dataStatus?.csi?.packets_per_sec ?? 0,
+								last: formatCsiLastPacket(dataStatus)
+							},
+							{ locale: i18n.languageTag }
+						)}
+					</p>
+				{/if}
 				{#if dataStatusError}
 					<p class="mt-2 text-xs text-warning">{dataStatusError}</p>
 				{/if}

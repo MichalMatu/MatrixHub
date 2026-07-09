@@ -27,6 +27,14 @@ public:
         dataVisualizationStatus.input = input;
         setDataVisualizationInputCalls++;
     }
+    void setDataVisualizationStatusConfig(
+        const MATRIX::MatrixDataVisualizationConfig& config,
+        bool active) {
+        lastDataVisualizationConfig = config;
+        dataVisualizationStatus.active = active;
+        dataVisualizationStatus.config = config;
+        setDataVisualizationStatusConfigCalls++;
+    }
     void showEffect(uint8_t mode,
                     uint32_t speed,
                     uint32_t color1,
@@ -109,6 +117,7 @@ public:
     uint32_t setRotationCalls = 0;
     uint32_t setEffectInputCalls = 0;
     uint32_t setDataVisualizationInputCalls = 0;
+    uint32_t setDataVisualizationStatusConfigCalls = 0;
     MATRIX_FX::MatrixFxInput lastEffectInput{};
     MATRIX::MatrixDataVisualizationConfig lastDataVisualizationConfig{};
     MATRIX::MatrixDataVisualizationInput lastDataVisualizationInput{};

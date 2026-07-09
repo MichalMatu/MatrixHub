@@ -83,7 +83,14 @@ public:
     void setMotionCallback(MotionCallback cb);
     void setMotionConfig(const CsiMotionConfig& config);
     void requestMotionCalibration();
-    void resetVisualizationState();
+    /**
+     * @brief Request a CSI matrix visualization reducer reset.
+     *
+     * The reducer is owned by the CSI processing task while packets are flowing.
+     * HTTP/API callers use this non-blocking request so the reset is applied by
+     * the worker before the next packet is processed.
+     */
+    void requestVisualizationReset();
     CsiMotionSnapshot getMotionSnapshot() const;
     CsiVisualizationSnapshot getVisualizationSnapshot() const;
 
@@ -130,6 +137,7 @@ public:
     CsiCallback getCsiCallbackSnapshot();
     MotionCallback getMotionCallbackSnapshot();
     void applyPendingMotionCommandsNonBlocking();
+    void applyPendingVisualizationCommandsNonBlocking();
     CsiMotionSnapshot processMotionPacket(CsiPacket& packet, uint32_t nowMs);
     CsiVisualizationSnapshot processVisualizationPacket(const CsiPacket& packet, uint32_t nowMs);
     void publishMotionSnapshot(const CsiMotionSnapshot& snapshot);
@@ -140,6 +148,7 @@ public:
     bool reapStoppedProcessingTask(TickType_t waitTicks);
     void destroyProcessingTaskResources();
     void resetRuntimeMetrics();
+    void resetVisualizationState();
 
     CsiDataQueue* _queue = nullptr;
     TaskHandle_t _processingTaskHandle = nullptr;
@@ -181,6 +190,7 @@ public:
     CsiMotionConfig _pendingMotionConfig;
     std::atomic<bool> _motionConfigDirty{false};
     std::atomic<bool> _motionCalibrationRequested{false};
+    std::atomic<bool> _visualizationResetRequested{false};
     mutable portMUX_TYPE _motionSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     CsiMotionSnapshot _lastMotionSnapshot;
     mutable portMUX_TYPE _visualizationSnapshotMux = portMUX_INITIALIZER_UNLOCKED;

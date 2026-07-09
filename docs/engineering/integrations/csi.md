@@ -137,6 +137,14 @@ room-motion changes may remain weak on an 8x8 matrix because the live amplitude
 shape often changes slowly and broadly rather than as a large frame-to-frame
 spike.
 
+The matrix status endpoint exposes the `MatrixVisualization` consumer state,
+packets per second, last CSI packet timestamp, current bin count, and the fresh
+data reason used by the LED renderer. The legacy
+`/api/matrix/data-visualization/csi/calibrate` route is intentionally kept as a
+compatibility alias, but it now requests a visualization reducer reset. The HTTP
+handler only sets a reset flag; the CSI processing task applies the reset before
+processing the next packet so reducer mutation remains single-threaded.
+
 ## Future Work
 
 Do not tune CSI visualization by repeatedly changing constants unless the

@@ -141,6 +141,10 @@ void CsiService::requestMotionCalibration() {
     _motionCalibrationRequested.store(true, std::memory_order_release);
 }
 
+void CsiService::requestVisualizationReset() {
+    _visualizationResetRequested.store(true, std::memory_order_release);
+}
+
 CsiMotionSnapshot CsiService::getMotionSnapshot() const {
     portENTER_CRITICAL(&_motionSnapshotMux);
     const CsiMotionSnapshot copy = _lastMotionSnapshot;
@@ -244,6 +248,12 @@ void CsiService::applyPendingMotionCommandsNonBlocking() {
     if (_motionCalibrationRequested.exchange(false, std::memory_order_acq_rel)) {
         _motionDetector.resetBaseline();
         publishMotionSnapshot(_motionDetector.snapshot());
+    }
+}
+
+void CsiService::applyPendingVisualizationCommandsNonBlocking() {
+    if (_visualizationResetRequested.exchange(false, std::memory_order_acq_rel)) {
+        resetVisualizationState();
     }
 }
 

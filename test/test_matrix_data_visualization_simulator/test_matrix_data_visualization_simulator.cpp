@@ -29,6 +29,13 @@ MATRIX::MatrixDataVisualizationConfig configFor(MATRIX::MatrixDataVizMode mode) 
     return config;
 }
 
+MATRIX::MatrixDataVisualizationConfig csiConfigFor(MATRIX::MatrixDataVizMode mode) {
+    MATRIX::MatrixDataVisualizationConfig config = configFor(mode);
+    config.source = static_cast<uint8_t>(MATRIX::MatrixDataSource::WifiCsi);
+    config.metric = static_cast<uint8_t>(MATRIX::MatrixDataMetric::CsiMotion);
+    return config;
+}
+
 MATRIX::MatrixDataVisualizationInput scalarInput(float value, uint32_t timestampMs) {
     MATRIX::MatrixDataVisualizationInput input;
     input.valid = true;
@@ -141,22 +148,22 @@ void maybePrintPreviews() {
 
     printPreview(
         "CSI heatmap rising graph",
-        configFor(MATRIX::MatrixDataVizMode::Heatmap),
+        csiConfigFor(MATRIX::MatrixDataVizMode::Heatmap),
         csiInput(false),
         100);
     printPreview(
         "CSI heatmap inverted graph",
-        configFor(MATRIX::MatrixDataVizMode::Heatmap),
+        csiConfigFor(MATRIX::MatrixDataVizMode::Heatmap),
         csiInput(true),
         100);
     printPreview(
         "CSI spectrum rising graph",
-        configFor(MATRIX::MatrixDataVizMode::SpectrumBars),
+        csiConfigFor(MATRIX::MatrixDataVizMode::SpectrumBars),
         csiInput(false),
         100);
     printPreview(
         "CSI spectrum inverted graph",
-        configFor(MATRIX::MatrixDataVizMode::SpectrumBars),
+        csiConfigFor(MATRIX::MatrixDataVizMode::SpectrumBars),
         csiInput(true),
         100);
     printPreview(
@@ -266,7 +273,7 @@ void test_csi_bins_map_stably_and_shape_changes_are_visible() {
     uint32_t first[64] = {};
     uint32_t same[64] = {};
     uint32_t inverted[64] = {};
-    const auto config = configFor(MATRIX::MatrixDataVizMode::SpectrumBars);
+    const auto config = csiConfigFor(MATRIX::MatrixDataVizMode::SpectrumBars);
 
     const FrameStats firstStats = renderFrame(config, csiInput(false), 100, first);
     const FrameStats sameStats = renderFrame(config, csiInput(false), 2400, same);

@@ -69,8 +69,9 @@ esp_err_t MatrixApiService::handleDataVisualizationStatus(PsychicRequest* reques
     return Response::success(request, [this](JsonVariant& root) {
         JsonObject obj = root.to<JsonObject>();
         MATRIX::MatrixDataVisualizationStatusSnapshot snapshot{};
+        const bool serviceAvailable = _matrixService != nullptr;
 
-        if (_matrixService) {
+        if (serviceAvailable) {
             snapshot = _matrixService->getDataVisualizationStatusSnapshot();
         } else {
             snapshot.input.reason = static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoService);
@@ -80,17 +81,21 @@ esp_err_t MatrixApiService::handleDataVisualizationStatus(PsychicRequest* reques
         const uint32_t ageMs = snapshot.input.timestampMs == 0
             ? 0
             : now - snapshot.input.timestampMs;
-        const bool active = snapshot.active && snapshot.config.enabled;
-        const uint8_t reason = !active
-            ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Disabled)
-            : snapshot.input.reason;
+        const bool active = serviceAvailable && snapshot.active && snapshot.config.enabled;
+        const bool valid = active && snapshot.input.valid;
+        const bool stale = !active || snapshot.input.stale;
+        const uint8_t reason = !serviceAvailable
+            ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::NoService)
+            : (!active
+                ? static_cast<uint8_t>(MATRIX::MatrixDataVisualizationReason::Disabled)
+                : snapshot.input.reason);
 
         obj["active"] = active;
         obj["source"] = snapshot.config.source;
         obj["metric"] = snapshot.config.metric;
         obj["mode"] = snapshot.config.mode;
-        obj["valid"] = snapshot.input.valid;
-        obj["stale"] = snapshot.input.stale;
+        obj["valid"] = valid;
+        obj["stale"] = stale;
         obj["reason"] = MATRIX::matrixDataVisualizationReasonToString(reason);
         obj["value"] = snapshot.input.value;
         obj["secondary"] = snapshot.input.secondary;
@@ -123,7 +128,7 @@ esp_err_t MatrixApiService::handleCsiCalibration(PsychicRequest* request) {
         });
     }
 
-    _csiService->resetVisualizationState();
+    _csiService->requestVisualizationReset();
     return Response::success(request, [](JsonVariant& root) {
         root["ok"] = true;
         root["status"] = "visualization_reset_requested";

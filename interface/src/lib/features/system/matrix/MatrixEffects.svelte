@@ -397,6 +397,11 @@
 					onchange={handleBackgroundModeChange}
 				/>
 				<p class="mt-2 text-xs text-base-content/70">{m.matrix_effects_desc()}</p>
+				{#if store.settings.background_mode === MATRIX_BACKGROUND_MODE_DATA_VISUALIZATION}
+					<a class="btn btn-xs btn-outline mt-2" href="/system/matrix/data">
+						{m.matrix_effects_background_live_data_action({ locale: i18n.languageTag })}
+					</a>
+				{/if}
 				{#if !effectsActive}
 					<p class="mt-1 text-xs text-base-content/60">
 						{m.matrix_effects_disabled_hint()}

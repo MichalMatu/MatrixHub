@@ -56,6 +56,7 @@ public:
             config.staleBehavior = state.config.dataVisualizationStaleBehavior;
             copyMatrixDataDeviceId(config.deviceId, sizeof(config.deviceId), state.config.dataVisualizationDeviceId);
             normalizeMatrixDataVisualizationConfig(config);
+            _matrixService->setDataVisualizationStatusConfig(config, true);
 
             if (_matrixManager) {
                 MATRIX_MANAGER::LayerContent bgContent;
@@ -68,6 +69,7 @@ public:
                 _matrixService->showDataVisualization(config, 0);
             }
         } else if (wantsEffects) {
+            _matrixService->clearBackgroundDataVisualization();
             if (_matrixManager) {
                 // In layered mode the background effect must be published as the
                 // BACKGROUND layer, not pushed directly to the renderer.
@@ -84,7 +86,6 @@ public:
                 bgContent.effectReactivityGain = state.config.effectReactivityGain;
                 _matrixManager->setLayer(MATRIX_MANAGER::Layer::BACKGROUND, bgContent);
             } else {
-                _matrixService->clearBackgroundDataVisualization();
                 _matrixService->showEffect(
                     state.config.effectMode,
                     state.config.effectSpeed,

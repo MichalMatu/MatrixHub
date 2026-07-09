@@ -49,11 +49,11 @@ void test_queue_reports_capacity_depth_and_total_drops() {
     packet.len = 4;
     packet.buf[0] = 42;
 
-    TEST_ASSERT_TRUE(queue.pushFromIsr(packet));
-    TEST_ASSERT_TRUE(queue.pushFromIsr(packet));
+    TEST_ASSERT_TRUE(queue.pushFromWifiTask(packet));
+    TEST_ASSERT_TRUE(queue.pushFromWifiTask(packet));
     TEST_ASSERT_EQUAL_UINT32(2, queue.getDepth());
 
-    TEST_ASSERT_FALSE(queue.pushFromIsr(packet));
+    TEST_ASSERT_FALSE(queue.pushFromWifiTask(packet));
     TEST_ASSERT_EQUAL_UINT32(1, queue.getDroppedPacketsTotal());
     TEST_ASSERT_EQUAL_UINT32(1, queue.takeDroppedPackets());
     TEST_ASSERT_EQUAL_UINT32(0, queue.takeDroppedPackets());

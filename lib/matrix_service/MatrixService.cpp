@@ -262,6 +262,12 @@ void MatrixService::setDataVisualizationInput(const MATRIX::MatrixDataVisualizat
     _renderer.setDataVisualizationInput(input);
 }
 
+void MatrixService::setDataVisualizationStatusConfig(
+    const MATRIX::MatrixDataVisualizationConfig& config,
+    bool active) {
+    cacheDataVisualizationConfig(config, active);
+}
+
 MATRIX::MatrixDataVisualizationStatusSnapshot MatrixService::getDataVisualizationStatusSnapshot() const {
     if (!_dataVisualizationStatusMutex) {
         return _dataVisualizationStatus;

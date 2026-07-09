@@ -84,10 +84,14 @@ vi.mock('$lib/paraglide/messages.js', () => {
 		matrix_data_viz_stale_dim: 'Dim',
 		matrix_data_viz_stale_gray: 'Gray',
 		matrix_data_viz_stale_blank: 'Blank',
+		matrix_data_viz_background_effects_action: 'Open effects settings',
 		matrix_data_viz_ble_device: 'BLE sensor',
 		matrix_data_viz_ble_device_placeholder: 'Auto: first active sensor',
 		matrix_data_viz_ble_load_error: 'BLE unavailable',
 		matrix_data_viz_ble_last_seen_unknown: 'unknown',
+		matrix_data_viz_csi_consumer_active: 'consumer active',
+		matrix_data_viz_csi_consumer_inactive: 'consumer inactive',
+		matrix_data_viz_csi_last_packet_never: 'never',
 		matrix_data_viz_status_title: 'Source status',
 		matrix_data_viz_status_live: 'Live',
 		matrix_data_viz_status_no_fresh_data: 'No fresh data',
@@ -117,7 +121,16 @@ vi.mock('$lib/paraglide/messages.js', () => {
 			age: string;
 			bins: number;
 			reason: string;
-		}) => `${value} ${age} ${bins} ${reason}`
+		}) => `${value} ${age} ${bins} ${reason}`,
+		matrix_data_viz_csi_status_summary: ({
+			consumer,
+			packets,
+			last
+		}: {
+			consumer: string;
+			packets: number;
+			last: string;
+		}) => `CSI: ${consumer} ${packets} ${last}`
 	};
 });
 
@@ -261,5 +274,80 @@ describe('MatrixDataVisualization', () => {
 		expect(store.settings.background_mode).toBe(1);
 		expect(store.settings.effect_enabled).toBe(false);
 		expect(store.settings.data_visualization_enabled).toBe(true);
+	});
+
+	it('does not mark inactive but valid source snapshots as live', async () => {
+		mockGetDataVisualizationStatus.mockResolvedValueOnce({
+			active: false,
+			source: 2,
+			metric: 4,
+			mode: 3,
+			valid: true,
+			stale: false,
+			reason: 'disabled',
+			value: 77,
+			secondary: 0,
+			last_update_ms: 1000,
+			age_ms: 20,
+			bin_count: 0,
+			csi: {
+				available: true,
+				matrix_visualization_consumer_active: false,
+				packets_per_sec: 0,
+				last_packet_ms: 0
+			}
+		});
+
+		const store = createMatrixStore();
+		render(MatrixDataVisualization, { props: { store, canManage: true } });
+
+		expect(await screen.findByText('No fresh data')).toBeTruthy();
+		expect(screen.queryByText('Live')).toBeNull();
+	});
+
+	it('shows CSI diagnostics when Wi-Fi CSI is selected', async () => {
+		mockGetDataVisualizationStatus.mockResolvedValueOnce({
+			active: true,
+			source: 3,
+			metric: 5,
+			mode: 2,
+			valid: true,
+			stale: false,
+			reason: 'ok',
+			value: 42,
+			secondary: 0,
+			last_update_ms: 1000,
+			age_ms: 20,
+			bin_count: 64,
+			csi: {
+				available: true,
+				matrix_visualization_consumer_active: true,
+				packets_per_sec: 7,
+				last_packet_ms: 1234
+			}
+		});
+
+		const store = createMatrixStore({
+			data_visualization_source: 3,
+			data_visualization_metric: 5,
+			data_visualization_mode: 2,
+			data_visualization_stale_behavior: 2
+		});
+		render(MatrixDataVisualization, { props: { store, canManage: true } });
+
+		expect(await screen.findByText('CSI: consumer active 7 1234 ms')).toBeTruthy();
+	});
+
+	it('links to effects settings when the shared background is set to effects', () => {
+		const store = createMatrixStore({
+			background_mode: 0,
+			effect_enabled: true,
+			data_visualization_enabled: false
+		});
+		render(MatrixDataVisualization, { props: { store, canManage: true } });
+
+		expect(screen.getByRole('link', { name: 'Open effects settings' }).getAttribute('href')).toBe(
+			'/system/matrix/effects'
+		);
 	});
 });

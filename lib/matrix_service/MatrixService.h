@@ -54,6 +54,20 @@ public:
     void setScrollSpeed(uint16_t ms);
     void setEffectInput(const MATRIX_FX::MatrixFxInput& input);
     void setDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input);
+    /**
+     * @brief Update the data-visualization status cache without rendering.
+     *
+     * Layered callers publish background content through MatrixManager, so the
+     * renderer may not receive that content until the layer becomes visible.
+     * This method keeps the Matrix API status aligned with the configured
+     * background source regardless of current layer priority.
+     *
+     * @param config Candidate data visualization config; normalized before caching.
+     * @param active True when live data visualization is the selected background.
+     */
+    void setDataVisualizationStatusConfig(
+        const MATRIX::MatrixDataVisualizationConfig& config,
+        bool active);
     MATRIX::MatrixDataVisualizationStatusSnapshot getDataVisualizationStatusSnapshot() const;
 
     // Forces a solid color (Active Mode - blocks passive updates)
