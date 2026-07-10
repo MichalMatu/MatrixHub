@@ -1,0 +1,96 @@
+Problemy przekrojowe UX
+Każdy nagłówek BaseCard ma role="button" i tabindex=0, również gdy karta nie jest składana. Powstają dziesiątki martwych przystanków klawiatury; brakuje aria-expanded: [BaseCard.svelte (line 60)](/home/test/Desktop/MatrixHub/interface/src/lib/components/layout/BaseCard.svelte:60).
+
+Na ekranach do 360 px tytuł karty jest domyślnie ukrywany, co odbiera kontekst użytkownikowi.
+
+BaseWidget opakowuje całość w <a>, mimo że dzieci zawierają checkboxy/przyciski: [BaseWidget.svelte (line 52)](/home/test/Desktop/MatrixHub/interface/src/lib/components/layout/BaseWidget.svelte:52).
+
+FormInput i FormSelect wyświetlają error, ale nie dodają aria-invalid ani aria-describedby: [FormInput.svelte (line 175)](/home/test/Desktop/MatrixHub/interface/src/lib/components/shared/forms/FormInput.svelte:175).
+
+Kilka modali nie przekazuje dostępnej nazwy, m.in. alarm rule, task manager, network diagnostics i BLE scan results.
+
+Wspólny useSettings nie ma dobrego recovery po initial GET failure. W wielu ekranach zostają defaulty, savedSettings=null, transient toast i brak Retry.
+
+Część store’ów WS nie obsługuje resetu transportu, więc dashboard, alarmy, Shelly i sensing mogą pokazywać stare dane jako aktualne.
+
+Brak lokalizowanych tytułów dokumentu na części stron. Istniejące tytuły są najczęściej na stałe po angielsku.
+
+Direct navigation nie respektuje wszystkich guardów menu. Backend nadal chroni endpointy, ale UX prowadzi do pustych/niedziałających stron.
+
++error.svelte automatycznie odsyła 404 na dashboard, ukrywając uszkodzony link.
+
+Statusbar pokazuje zielone WiFiOff, gdy status mówi „connected”, ale RSSI jest poniżej -90: [Statusbar.svelte (line 70)](/home/test/Desktop/MatrixHub/interface/src/lib/features/navigation/Statusbar.svelte:70).
+
+Globalne overflow-x:hidden maskuje część problemów responsywności. Brakuje również obsługi prefers-reduced-motion.
+
+Istotne problemy backendu poza CSI
+Znany dev-only admin/admin oraz tylko 20 iteracji PBKDF2 muszą być release gate: [SecuritySettings.h (line 19)](/home/test/Desktop/MatrixHub/lib/framework/security/SecuritySettings.h:19), [Network.h (line 73)](/home/test/Desktop/MatrixHub/src/config/Network.h:73).
+File manager pozwala listować i pobierać /config: [FileManagerPathUtils.cpp (line 205)](/home/test/Desktop/MatrixHub/src/filemanager/infrastructure/support/FileManagerPathUtils.cpp:205).
+Wi‑Fi i NTP czytają wielopolowy _state poza mutexem; możliwy data race. NTP może też odblokować TCPIP lock, którego nie założył: [NTPSettingsService.cpp (line 83)](/home/test/Desktop/MatrixHub/lib/framework/network/NTPSettingsService.cpp:83).
+Aktualizacja security settings ma niebezpieczną semantykę full-replace.
+Otwarte WebSockety nie są ponownie autoryzowane po zmianie hasła, roli lub sekretu JWT.
+Macro, GPIO i część Power/BLE nie gwarantują atomowego rollbacku.
+Keyboard/USB Terminal zwracają false-success.
+Sekrety powiadomień mają inną semantykę niż write-only security API.
+Heartbeat pozwala administratorowi wysyłać okresowe requesty do localhost/link-local/prywatnych hostów.
+Zmiany w lib/framework/ powinny być osobnym pakietem i wymagają jawnej zgody zgodnie z zasadami repozytorium.
+Plan naprawczy
+Etap 0 — niezawodność CSI i release security
+Dodać freshness: lastFrameMs, sequence, Stale/Unavailable.
+Resetować candidate/clear/noisy timers po luce.
+Resetować baseline po reconnect/BSSID/channel/width.
+Synchronizować initial CSI state po boot/deep-sleep.
+Zastąpić zawodny callback niezawodnym mailboxem/eventem dla obu krawędzi.
+Obsłużyć first_word_invalid i ustabilizować źródło/format ramek.
+Zwracać structured result z setMotionConfig().
+Kalibracja: preconditions, progress, frame age i końcowy wynik.
+Zamknąć politykę sekretów oraz produkcyjny onboarding zamiast admin/admin.
+Etap 1 — poprawny UX konfiguracji CSI
+Nie renderować aktywnego Save przed prawidłowym GET.
+
+Stały error + Retry; osobno draft i applied runtime.
+
+Blokować kalibrację przy niezapisanych zmianach.
+
+Live badge z /ws/csi; REST tylko dla metadanych.
+
+Walidować pasma względem realnej szerokości, scalać overlap i kontrolować minimum/topK.
+
+Rozdzielić RSSI i CSI endpointami albo dodać revision/ETag/PATCH.
+
+Jeden setup flow:
+STA → wybór pasm → Save → kalibracja → test ruchu → utworzenie reguły → test kanału.
+
+Etap 2 — fundament całego frontendu
+Jeden model Loading / Ready / Empty / Stale / Error / Disabled / ReadOnly.
+Wspólny stały panel błędu z Retry dla wszystkich settings pages.
+Naprawić BaseCard, BaseWidget, nazwy dialogów, formularze i keyboard CSI.
+Centralizować lokalizowane tytuły oraz feature guards.
+Prawdziwy ekran 404, reduced motion i responsywne tabele.
+Help i akcje trzymać w nagłówkach/toolbarach kart, bez dokładania pustych rzędów pod nawigacją.
+Etap 3 — spójne kontrakty backendu
+Ujednolicić wyniki: Applied, Queued, Busy, NotReady, Failed.
+Rozdzielić „test accepted” od „message delivered”.
+Dodać transakcje/rollback dla Macro, GPIO, Power i BLE.
+Ścisłe field-level validation dla security, Wi‑Fi/AP/NTP, IMU, BLE i AirMouse.
+Ujednolicić DTO backend ↔ Zod frontend.
+Naprawić alarm rules PATCH/runtime-state zamiast resetowania całego rulesetu.
+Etap 4 — testy
+Produkcyjny detector z nagranymi rzeczywistymi CSI fixtures zamiast osobnego algorytmu Python.
+Testy gap/reconnect/deep-sleep/stale/overlap/first_word_invalid.
+E2E CSI → AlarmService → cooldown → notifier.
+Fault injection persistence i HID-not-ready.
+Playwright dla wszystkich 34 stron, trzech ról, błędów API, reconnectów WS i mobile.
+Test równoczesnego zapisu RSSI/CSI z dwóch kart.
+Obowiązkowy test sprzętowy: disconnect/reconnect podczas MotionConfirmed.
+Weryfikacja
+Native: 1018/1018 testów zaliczone.
+Target CSI/alarm: 36/36, Python harness: 4/4 — ale harness używa innego algorytmu niż firmware.
+npm run check: 0 błędów, 0 ostrzeżeń.
+Lint i dependency-cruiser: zaliczone.
+Build produkcyjny: zaliczony.
+Size gate: zaliczony, ale 1,44 MB z 1,5 MB — mały zapas.
+UI contract: niezaliczony, dwa surowe inputy date w Charts.
+Knip: niezaliczony, 6 nieużywanych eksportów i 2 typy.
+Pełny Vitest: 643/646; trzy timeouty przy równoległym obciążeniu. Izolowane ponowienie wraz z USB Terminal: 24/24 zaliczone, więc nie potwierdzają regresji funkcjonalnej.
+Playwright pozostaje niewiarygodny na tym przebiegu: Vite nie zdążył zhydratować aplikacji, a później odmawiał połączeń na mocno obciążonym współdzielonym hoście. Dodatkowo obecna specyfikacja pomija 10 stron i ma zbyt słabe asercje overflow/a11y.
