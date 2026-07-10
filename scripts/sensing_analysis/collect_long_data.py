@@ -1,3 +1,10 @@
+"""Collect a legacy, lossy CSI/RSSI summary CSV.
+
+This script intentionally omits raw I/Q and exact detector inputs. It is useful
+only for the historical RSSI pattern report and must not produce detector
+fixtures. Use ``csi_capture.py collect`` for lossless real-device replay data.
+"""
+
 import argparse
 import asyncio
 import csv
@@ -18,7 +25,10 @@ CSI_HEADER_BYTES = 13
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Collect WiFi CSI WebSocket samples and save them as CSV."
+        description=(
+            "Collect a lossy WiFi CSI summary CSV for legacy RSSI analysis; "
+            "not suitable for detector replay."
+        )
     )
     add_common_device_args(parser)
     parser.add_argument(

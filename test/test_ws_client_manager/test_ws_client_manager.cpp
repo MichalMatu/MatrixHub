@@ -171,9 +171,7 @@ httpd_req_t makeReq(httpd_method_t method, int sockfd, httpd_handle_t handle = r
 }
 
 void markClientReady(API::WEBSOCKET::WsClientManager& mgr, int fd) {
-    auto it = mgr._clients.find(fd);
-    TEST_ASSERT_TRUE(it != mgr._clients.end());
-    it->second.readyAtMs = 0;
+    TEST_ASSERT_TRUE(mgr.markClientReady(fd));
 }
 
 } // namespace
@@ -305,6 +303,105 @@ void test_targeted_broadcast_sends_only_connected_targets() {
     TEST_ASSERT_EQUAL(21, TEST_STUBS::HTTPD::sentFds[1]);
 }
 
+void test_each_handshake_assigns_a_new_nonzero_generation() {
+    TestAuthenticator auth(true);
+    API::WEBSOCKET::WsClientManager mgr("test", &auth, nullptr, 500);
+
+    httpd_req_t req = makeReq(HTTP_GET, 24);
+    TEST_ASSERT_EQUAL(ESP_OK, mgr.handleHandshake(&req));
+
+    int requested[] = {24};
+    int targets[1] = {0};
+    API::WEBSOCKET::WsClientGeneration generations[1] = {0};
+    TEST_ASSERT_EQUAL(
+        static_cast<size_t>(1),
+        mgr.snapshotTargetSessions(requested, 1, targets, generations, 1));
+    const auto firstGeneration = generations[0];
+    TEST_ASSERT_NOT_EQUAL(API::WEBSOCKET::INVALID_CLIENT_GENERATION, firstGeneration);
+
+    // Even a repeated handshake on the same numeric fd represents a new
+    // websocket session and must invalidate queued messages from the old one.
+    TEST_ASSERT_EQUAL(ESP_OK, mgr.handleHandshake(&req));
+    TEST_ASSERT_EQUAL(
+        static_cast<size_t>(1),
+        mgr.snapshotTargetSessions(requested, 1, targets, generations, 1));
+    TEST_ASSERT_NOT_EQUAL(firstGeneration, generations[0]);
+}
+
+void test_stale_target_generation_is_rejected_after_fd_reuse() {
+    TestAuthenticator auth(true);
+    API::WEBSOCKET::WsClientManager mgr("test", &auth, nullptr, 500);
+
+    httpd_req_t firstReq = makeReq(HTTP_GET, 25);
+    TEST_ASSERT_EQUAL(ESP_OK, mgr.handleHandshake(&firstReq));
+    markClientReady(mgr, 25);
+
+    int requested[] = {25};
+    int oldTargets[1] = {0};
+    API::WEBSOCKET::WsClientGeneration oldGenerations[1] = {0};
+    TEST_ASSERT_EQUAL(
+        static_cast<size_t>(1),
+        mgr.snapshotTargetSessions(
+            requested, 1, oldTargets, oldGenerations, 1));
+
+    mgr.removeClient(25);
+    httpd_req_t reusedReq = makeReq(HTTP_GET, 25);
+    TEST_ASSERT_EQUAL(ESP_OK, mgr.handleHandshake(&reusedReq));
+    markClientReady(mgr, 25);
+
+    uint8_t payload[] = {4, 2};
+    mgr.performBroadcast(
+        payload,
+        sizeof(payload),
+        HTTPD_WS_TYPE_BINARY,
+        oldTargets,
+        1,
+        true,
+        oldGenerations);
+    TEST_ASSERT_EQUAL(0, static_cast<int>(TEST_STUBS::HTTPD::sentFds.size()));
+
+    // A stale failure/removal request must not remove the new session either.
+    mgr.removeClient(25, true, true, oldGenerations[0]);
+    TEST_ASSERT_TRUE(mgr.hasClients());
+    TEST_ASSERT_EQUAL(-1, TEST_STUBS::HTTPD::lastClosedFd);
+
+    int newTargets[1] = {0};
+    API::WEBSOCKET::WsClientGeneration newGenerations[1] = {0};
+    TEST_ASSERT_EQUAL(
+        static_cast<size_t>(1),
+        mgr.snapshotTargetSessions(
+            requested, 1, newTargets, newGenerations, 1));
+    TEST_ASSERT_NOT_EQUAL(oldGenerations[0], newGenerations[0]);
+
+    mgr.performBroadcast(
+        payload,
+        sizeof(payload),
+        HTTPD_WS_TYPE_BINARY,
+        newTargets,
+        1,
+        true,
+        newGenerations);
+    TEST_ASSERT_EQUAL(1, static_cast<int>(TEST_STUBS::HTTPD::sentFds.size()));
+    TEST_ASSERT_EQUAL(25, TEST_STUBS::HTTPD::sentFds[0]);
+}
+
+void test_synchronous_targeted_broadcast_remains_fd_compatible() {
+    TestAuthenticator auth(true);
+    API::WEBSOCKET::WsClientManager mgr("test", &auth, nullptr, 500);
+
+    httpd_req_t req = makeReq(HTTP_GET, 26);
+    TEST_ASSERT_EQUAL(ESP_OK, mgr.handleHandshake(&req));
+    markClientReady(mgr, 26);
+
+    int targets[] = {26};
+    uint8_t payload[] = {7, 7};
+    mgr.performBroadcast(
+        payload, sizeof(payload), HTTPD_WS_TYPE_BINARY, targets, 1);
+
+    TEST_ASSERT_EQUAL(1, static_cast<int>(TEST_STUBS::HTTPD::sentFds.size()));
+    TEST_ASSERT_EQUAL(26, TEST_STUBS::HTTPD::sentFds[0]);
+}
+
 void test_broadcast_skips_clients_during_handshake_grace() {
     TestAuthenticator auth(true);
     API::WEBSOCKET::WsClientManager mgr("test", &auth, nullptr, 500);
@@ -321,6 +418,7 @@ void test_broadcast_skips_clients_during_handshake_grace() {
     mgr.performBroadcast(payload, sizeof(payload), HTTPD_WS_TYPE_BINARY);
     TEST_ASSERT_EQUAL(1, static_cast<int>(TEST_STUBS::HTTPD::sentFds.size()));
     TEST_ASSERT_EQUAL(23, TEST_STUBS::HTTPD::sentFds[0]);
+    TEST_ASSERT_FALSE(mgr.markClientReady(999));
 }
 
 void test_has_clients_uses_atomic_cache_when_lock_is_busy() {
@@ -393,6 +491,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_soft_errors_require_threshold_before_removal);
     RUN_TEST(test_hard_error_removes_immediately);
     RUN_TEST(test_targeted_broadcast_sends_only_connected_targets);
+    RUN_TEST(test_each_handshake_assigns_a_new_nonzero_generation);
+    RUN_TEST(test_stale_target_generation_is_rejected_after_fd_reuse);
+    RUN_TEST(test_synchronous_targeted_broadcast_remains_fd_compatible);
     RUN_TEST(test_broadcast_skips_clients_during_handshake_grace);
     RUN_TEST(test_has_clients_uses_atomic_cache_when_lock_is_busy);
     RUN_TEST(test_snapshot_clients_returns_connected_fds_in_registration_order);

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Offline CSI motion alarm harness.
 
-This is deliberately not production alarm code. It is a falsification harness for
-candidate CSI alarm algorithms before any firmware/UI alarm source is exposed.
+This is deliberately not production alarm code and is not a release gate. It is
+a historical falsification harness for candidate algorithms. Product acceptance
+uses real MHCF captures and the native C++ production-detector replay instead.
 """
 
 from __future__ import annotations

@@ -652,6 +652,19 @@
       "tests": ["scripts/analyze_csi.py", "scripts/csi_monitor.py", "tools/csi_client.py", "scripts/sensing_analysis/collect_long_data.py", "scripts/contract/verify_api_contract.py"]
     },
     {
+      "id": "wifiSensing.csiCaptureWs",
+      "method": "WS",
+      "path": "/ws/csi-capture/v1",
+      "auth": "admin via access_token cookie",
+      "request": "WebSocket connect; exact START text command begins one exclusive admin session; exact STOP command snapshots its inclusive accepted-sequence boundary",
+      "response": "Binary MHCB v1 HELLO/DATA/END/ERROR messages; HELLO/END fence the complete source sequence window and DATA embeds canonical 64-byte capture records plus exact I/Q bytes with replay origin on exactly the first record",
+      "restartRequired": false,
+      "firmware": ["src/api/wifisensing/WifiSensingApiService.cpp", "src/api/wifisensing/CsiCaptureWireFormat.cpp"],
+      "frontend": [],
+      "sdk": [],
+      "tests": ["scripts/sensing_analysis/csi_capture.py", "test/test_csi_capture_tools.py", "test/test_csi_capture_wire_format/test_csi_capture_wire_format.cpp", "test/test_csi_capture_sequence_window/test_csi_capture_sequence_window.cpp", "test/test_csi_capture_replay/test_csi_capture_replay.cpp", "scripts/contract/verify_api_contract.py"]
+    },
+    {
       "id": "alarms.rules",
       "method": "GET/POST",
       "path": "/api/alarms/rules",

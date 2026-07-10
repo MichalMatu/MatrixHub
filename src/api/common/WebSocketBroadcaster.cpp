@@ -111,13 +111,18 @@ void WebSocketBroadcaster::broadcast(int* fds, size_t count, uint8_t* data, size
     if (_taskQueue.isEnabled()) {
         WEBSOCKET::WsMessage msg;
         if (prepareInlineMessage(msg, data, len, type)) {
-            const size_t actualCount =
-                (count > WEBSOCKET::MAX_BROADCAST_TARGETS) ? WEBSOCKET::MAX_BROADCAST_TARGETS : count;
-            memcpy(msg.targets, fds, actualCount * sizeof(int));
-            msg.targetCount = actualCount;
+            msg.targetCount = snapshotTargetSessions(
+                fds, count, msg.targets, msg.targetGenerations);
+            if (msg.targetCount == 0) return;
             (void)_taskQueue.enqueue(msg);
             return;
         }
+
+        int targetSnapshots[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+        WEBSOCKET::WsClientGeneration targetGenerations[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+        const size_t targetCount = snapshotTargetSessions(
+            fds, count, targetSnapshots, targetGenerations);
+        if (targetCount == 0) return;
 
         uint8_t* payload = nullptr;
         int16_t payloadSlot = -1;
@@ -142,9 +147,11 @@ void WebSocketBroadcaster::broadcast(int* fds, size_t count, uint8_t* data, size
         memcpy(payload, data, len);
 
         msg = { payload, len, type, isAllocated, payloadSlot, {0}, 0 };
-        size_t actualCount = (count > WEBSOCKET::MAX_BROADCAST_TARGETS) ? WEBSOCKET::MAX_BROADCAST_TARGETS : count;
-        memcpy(msg.targets, fds, actualCount * sizeof(int));
-        msg.targetCount = actualCount;
+        memcpy(msg.targets, targetSnapshots, targetCount * sizeof(int));
+        memcpy(msg.targetGenerations,
+               targetGenerations,
+               targetCount * sizeof(WEBSOCKET::WsClientGeneration));
+        msg.targetCount = targetCount;
 
         if (!_taskQueue.enqueue(msg)) {
             // Pool release is handled inside WsTaskQueue::enqueue on failure
@@ -175,7 +182,8 @@ bool WebSocketBroadcaster::broadcastSerialized(size_t reserveLen,
         return false;
     }
 
-    return broadcastPrepared(nullptr, 0, payload, written, payloadSlot, isAllocated, type);
+    return broadcastPrepared(
+        nullptr, nullptr, 0, payload, written, payloadSlot, isAllocated, type);
 }
 
 bool WebSocketBroadcaster::broadcastSerialized(int* fds,
@@ -184,6 +192,14 @@ bool WebSocketBroadcaster::broadcastSerialized(int* fds,
                                                PayloadWriter writer,
                                                httpd_ws_type_t type) {
     if (!fds || count == 0 || reserveLen == 0 || !writer || !hasClients()) {
+        return false;
+    }
+
+    int targetSnapshots[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+    WEBSOCKET::WsClientGeneration targetGenerations[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+    const size_t targetCount = snapshotTargetSessions(
+        fds, count, targetSnapshots, targetGenerations);
+    if (targetCount == 0) {
         return false;
     }
 
@@ -201,12 +217,27 @@ bool WebSocketBroadcaster::broadcastSerialized(int* fds,
         return false;
     }
 
-    return broadcastPrepared(fds, count, payload, written, payloadSlot, isAllocated, type);
+    return broadcastPrepared(
+        targetSnapshots,
+        targetGenerations,
+        targetCount,
+        payload,
+        written,
+        payloadSlot,
+        isAllocated,
+        type);
 }
 
 void WebSocketBroadcaster::processBroadcast(WEBSOCKET::WsMessage& msg) {
     if (msg.targetCount > 0) {
-        _clientMgr.performBroadcast(msg.data, msg.len, msg.type, msg.targets, msg.targetCount, true);
+        _clientMgr.performBroadcast(
+            msg.data,
+            msg.len,
+            msg.type,
+            msg.targets,
+            msg.targetCount,
+            true,
+            msg.targetGenerations);
     } else {
         _clientMgr.performBroadcast(msg.data, msg.len, msg.type, nullptr, 0, true);
     }
@@ -256,6 +287,23 @@ size_t WebSocketBroadcaster::snapshotClients(int* outTargets, size_t maxCount) c
     return _clientMgr.snapshotClients(outTargets, maxCount);
 }
 
+bool WebSocketBroadcaster::markClientReady(int fd) {
+    return _clientMgr.markClientReady(fd);
+}
+
+size_t WebSocketBroadcaster::snapshotTargetSessions(
+    const int* fds,
+    size_t count,
+    int* outTargets,
+    WEBSOCKET::WsClientGeneration* outGenerations) const {
+    return _clientMgr.snapshotTargetSessions(
+        fds,
+        count,
+        outTargets,
+        outGenerations,
+        WEBSOCKET::MAX_BROADCAST_TARGETS);
+}
+
 bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
                                           uint8_t** payload,
                                           int16_t* payloadSlot,
@@ -293,13 +341,15 @@ bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
     return true;
 }
 
-bool WebSocketBroadcaster::broadcastPrepared(int* fds,
-                                             size_t count,
-                                             uint8_t* payload,
-                                             size_t len,
-                                             int16_t payloadSlot,
-                                             bool isAllocated,
-                                             httpd_ws_type_t type) {
+bool WebSocketBroadcaster::broadcastPrepared(
+    int* fds,
+    const WEBSOCKET::WsClientGeneration* targetGenerations,
+    size_t count,
+    uint8_t* payload,
+    size_t len,
+    int16_t payloadSlot,
+    bool isAllocated,
+    httpd_ws_type_t type) {
     if (!payload || len == 0) {
         WEBSOCKET::WsMessage msg = { payload, len, type, isAllocated, payloadSlot, {0}, 0 };
         _pool.releaseMessageResources(msg);
@@ -312,13 +362,17 @@ bool WebSocketBroadcaster::broadcastPrepared(int* fds,
             const size_t actualCount =
                 (count > WEBSOCKET::MAX_BROADCAST_TARGETS) ? WEBSOCKET::MAX_BROADCAST_TARGETS : count;
             memcpy(msg.targets, fds, actualCount * sizeof(int));
+            memcpy(msg.targetGenerations,
+                   targetGenerations,
+                   actualCount * sizeof(WEBSOCKET::WsClientGeneration));
             msg.targetCount = actualCount;
         }
         return _taskQueue.enqueue(msg);
     }
 
     if (fds && count > 0) {
-        _clientMgr.performBroadcast(payload, len, type, fds, count);
+        _clientMgr.performBroadcast(
+            payload, len, type, fds, count, false, targetGenerations);
     } else {
         _clientMgr.performBroadcast(payload, len, type);
     }

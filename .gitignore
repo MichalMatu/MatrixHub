@@ -49,6 +49,8 @@ node_modules/
 
 # Misc
 /artifacts/
+# CSI promotion is atomic; never stage an interrupted fixture directory.
+/test/fixtures/csi/.*.tmp/
 *.log
 /scenariusz*.out
 /scripts/sensing_analysis/raw_*.csv

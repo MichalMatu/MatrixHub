@@ -17,8 +17,16 @@ constexpr size_t MAX_CSI_BATCH_PACKETS = 10;
 struct CsiPacket {
     wifi_pkt_rx_ctrl_t rx_ctrl;
     uint8_t mac[6];
+    uint8_t dmac[6];
     int8_t buf[MAX_CSI_DATA_LEN];
     size_t len;
+    uint16_t originalLen;
+    uint16_t rxSequence;
+    bool firstWordInvalid;
+    uint32_t acceptedSequence;
+    // Exact millis() value passed to the production detector. Keeping it on
+    // the packet lets diagnostic captures replay hold/clear timing bit-for-bit.
+    uint32_t processTimestampMs;
     float compensate_gain; // Filled by the processing task after dequeue, not in ISR.
     
     // Filled by the processing task after CsiBandMotionDetector evaluates the packet.

@@ -13,7 +13,7 @@ The firmware exposes only three effective access levels:
 | --- | --- | --- |
 | `public` | Endpoint is not wrapped by auth middleware | Static frontend, `POST /rest/signIn`, `GET /rest/features` |
 | `authenticated` | Any logged-in user, regardless of `admin` flag | Read-only status/config like `GET /api/logs`, `GET /api/alarms/rules`, `GET /api/ble/status`, `GET /api/shelly/devices`, `GET /api/matrix/settings`, JWT-protected `/ws/system` and `/ws/csi` |
-| `admin` | Logged-in user with `admin=true` | Mutating settings, operational actions, scans, deletes, uploads, and control endpoints |
+| `admin` | Logged-in user with `admin=true` | Mutating settings, operational actions, scans, deletes, uploads, control endpoints, and raw `/ws/csi-capture/v1` diagnostics |
 
 Important semantic note:
 - There is no separate backend `guest` role.
@@ -22,6 +22,14 @@ Important semantic note:
 
 Compatibility note:
 - `GET /rest/generateToken` and the empty-URI `DELETE` exception in `filterRequest()` are compatibility paths. Preserve them only where required; do not copy them into new endpoints.
+
+Raw CSI capture is deliberately stricter than the compact `/ws/csi` chart
+stream: it exposes source/destination MAC addresses and unmodified I/Q, accepts
+one active admin session, writes nothing to LittleFS, and sends data only to the
+fd/session generation that completed the `START` handshake. Async targeted
+WebSocket messages retain the handshake generation as well as the numeric fd,
+so queued raw data is rejected if the operating system later reuses that fd for
+another connection.
 
 ### Countermeasure Against Timing Attacks
 Modified `ArduinoJsonJWT.cpp` to use a **constant-time memory comparison** for signature verification. This prevents attackers from guessing valid signatures one byte at a time by measuring server response times.

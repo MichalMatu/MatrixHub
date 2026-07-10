@@ -69,9 +69,14 @@ esp_err_t WsClientManager::handleHandshake(httpd_req_t *req) {
             if (lock.isLocked()) {
                 const bool wasEmpty = _clients.empty();
                 const bool wasKnown = _clients.find(fd) != _clients.end();
+                _lastClientGeneration++;
+                if (_lastClientGeneration == INVALID_CLIENT_GENERATION) {
+                    _lastClientGeneration++;
+                }
                 _clients[fd] = ClientState{
                     0,
-                    millis() + API::WS_CLIENT_HANDSHAKE_GRACE_MS
+                    millis() + API::WS_CLIENT_HANDSHAKE_GRACE_MS,
+                    _lastClientGeneration
                 };
                 _clientCount.store(_clients.size(), std::memory_order_release);
                 clientRegistered = true;
@@ -118,7 +123,10 @@ esp_err_t WsClientManager::handleHandshake(httpd_req_t *req) {
     return ESP_OK;
 }
 
-void WsClientManager::removeClient(int fd, bool triggerClose, bool isBroadcastTaskContext) {
+void WsClientManager::removeClient(int fd,
+                                   bool triggerClose,
+                                   bool isBroadcastTaskContext,
+                                   WsClientGeneration expectedGeneration) {
     bool shouldTriggerClose = false;
     bool shouldNotifyDisconnected = false;
     bool shouldDrainPendingDisconnect = false;
@@ -128,6 +136,10 @@ void WsClientManager::removeClient(int fd, bool triggerClose, bool isBroadcastTa
     if (lock.isLocked()) {
         auto it = _clients.find(fd);
         if (it != _clients.end()) {
+            if (expectedGeneration != INVALID_CLIENT_GENERATION &&
+                it->second.generation != expectedGeneration) {
+                return;
+            }
             _clients.erase(it);
             _clientCount.store(_clients.size(), std::memory_order_release);
             shouldRecordWsClose = true;
@@ -167,11 +179,19 @@ void WsClientManager::removeClient(int fd, bool triggerClose, bool isBroadcastTa
     }
 }
 
-void WsClientManager::performBroadcast(uint8_t* data, size_t len, httpd_ws_type_t type, int* targets, size_t targetCount, bool isBroadcastTaskContext) {
+void WsClientManager::performBroadcast(uint8_t* data,
+                                       size_t len,
+                                       httpd_ws_type_t type,
+                                       int* targets,
+                                       size_t targetCount,
+                                       bool isBroadcastTaskContext,
+                                       const WsClientGeneration* targetGenerations) {
     if (!_serverHandle || _clientCount.load(std::memory_order_acquire) == 0) return;
     
     int broadcastTargets[MAX_BROADCAST_TARGETS];
+    WsClientGeneration broadcastTargetGenerations[MAX_BROADCAST_TARGETS]{};
     int removeTargets[MAX_BROADCAST_TARGETS];
+    WsClientGeneration removeTargetGenerations[MAX_BROADCAST_TARGETS]{};
     size_t actualTargetCount = 0;
     {
         SYSTEM::ScopeLock lock(_lock, kClientMapLockTimeout);
@@ -183,9 +203,18 @@ void WsClientManager::performBroadcast(uint8_t* data, size_t len, httpd_ws_type_
             for (size_t i = 0; i < targetCount; i++) {
                 int fd = targets[i];
                 auto it = _clients.find(fd);
-                if (it != _clients.end() && isReadyForBroadcast(it->second, now)) {
+                const bool generationMatches =
+                    !targetGenerations ||
+                    (targetGenerations[i] != INVALID_CLIENT_GENERATION &&
+                     it != _clients.end() &&
+                     it->second.generation == targetGenerations[i]);
+                if (it != _clients.end() && generationMatches &&
+                    isReadyForBroadcast(it->second, now)) {
                     if (actualTargetCount < MAX_BROADCAST_TARGETS) {
-                        broadcastTargets[actualTargetCount++] = fd;
+                        broadcastTargets[actualTargetCount] = fd;
+                        broadcastTargetGenerations[actualTargetCount] =
+                            targetGenerations ? targetGenerations[i] : it->second.generation;
+                        actualTargetCount++;
                     }
                 }
             }
@@ -196,7 +225,9 @@ void WsClientManager::performBroadcast(uint8_t* data, size_t len, httpd_ws_type_
                     continue;
                 }
                 if (actualTargetCount < MAX_BROADCAST_TARGETS) {
-                    broadcastTargets[actualTargetCount++] = kv.first;
+                    broadcastTargets[actualTargetCount] = kv.first;
+                    broadcastTargetGenerations[actualTargetCount] = kv.second.generation;
+                    actualTargetCount++;
                 } else {
                     LOGW("[%s] Broadcast limit exceeded! Dropping client %d", _logTag, kv.first);
                 }
@@ -216,12 +247,28 @@ void WsClientManager::performBroadcast(uint8_t* data, size_t len, httpd_ws_type_
 
     for (size_t i = 0; i < actualTargetCount; i++) {
         int fd = broadcastTargets[i];
+        const WsClientGeneration expectedGeneration = broadcastTargetGenerations[i];
+
+        // The fd may have been removed and reused after the target snapshot was
+        // selected. Recheck immediately before sending queued targeted data.
+        if (targetGenerations) {
+            SYSTEM::ScopeLock lock(_lock, pdMS_TO_TICKS(10));
+            if (!lock.isLocked()) {
+                continue;
+            }
+            const auto it = _clients.find(fd);
+            if (it == _clients.end() || it->second.generation != expectedGeneration) {
+                continue;
+            }
+        }
+
         esp_err_t ret = httpd_ws_send_data(_serverHandle, fd, &ws_pkt);
         if (ret != ESP_OK) {
             SYSTEM::ScopeLock lock(_lock, pdMS_TO_TICKS(10));
             if (lock.isLocked()) {
                 auto it = _clients.find(fd);
-                if (it != _clients.end()) {
+                if (it != _clients.end() &&
+                    (!targetGenerations || it->second.generation == expectedGeneration)) {
                     it->second.failures++;
                     
                     bool isSoftError = (ret == ESP_ERR_TIMEOUT || ret == ESP_ERR_NO_MEM || ret == ESP_FAIL);
@@ -231,25 +278,38 @@ void WsClientManager::performBroadcast(uint8_t* data, size_t len, httpd_ws_type_
                         LOGW("[%s] Client %d: %d failures (err: %d), removing",
                              _logTag, fd, it->second.failures, ret);
                         if (removeCount < MAX_BROADCAST_TARGETS) {
-                            removeTargets[removeCount++] = fd;
+                            removeTargets[removeCount] = fd;
+                            removeTargetGenerations[removeCount] = expectedGeneration;
+                            removeCount++;
                         }
                     }
                 }
             }
         } else {
+            bool sessionStillCurrent = !targetGenerations;
             SYSTEM::ScopeLock lock(_lock, pdMS_TO_TICKS(10));
             if (lock.isLocked()) {
                 auto it = _clients.find(fd);
-                if (it != _clients.end()) it->second.failures = 0;
+                if (it != _clients.end() &&
+                    (!targetGenerations || it->second.generation == expectedGeneration)) {
+                    it->second.failures = 0;
+                    sessionStillCurrent = true;
+                }
             }
-            httpd_sess_update_lru_counter(_serverHandle, fd);
+            if (sessionStillCurrent) {
+                httpd_sess_update_lru_counter(_serverHandle, fd);
+            }
         }
         
         if (i % 4 == 0) vTaskDelay(0);
     }
 
     for (size_t i = 0; i < removeCount; i++) {
-        removeClient(removeTargets[i], true, isBroadcastTaskContext);
+        removeClient(
+            removeTargets[i],
+            true,
+            isBroadcastTaskContext,
+            targetGenerations ? removeTargetGenerations[i] : INVALID_CLIENT_GENERATION);
     }
 }
 
@@ -284,6 +344,50 @@ size_t WsClientManager::snapshotClients(int* outTargets, size_t maxCount) const 
     }
 
     return count;
+}
+
+size_t WsClientManager::snapshotTargetSessions(
+    const int* requestedTargets,
+    size_t requestedCount,
+    int* outTargets,
+    WsClientGeneration* outGenerations,
+    size_t maxCount) const {
+    if (!requestedTargets || requestedCount == 0 || !outTargets ||
+        !outGenerations || maxCount == 0) {
+        return 0;
+    }
+
+    SYSTEM::ScopeLock lock(_lock, kClientMapLockTimeout);
+    if (!lock.isLocked()) {
+        return 0;
+    }
+
+    size_t count = 0;
+    for (size_t i = 0; i < requestedCount && count < maxCount; i++) {
+        const auto it = _clients.find(requestedTargets[i]);
+        if (it == _clients.end()) {
+            continue;
+        }
+        outTargets[count] = it->first;
+        outGenerations[count] = it->second.generation;
+        count++;
+    }
+    return count;
+}
+
+bool WsClientManager::markClientReady(int fd) {
+    SYSTEM::ScopeLock lock(_lock, kClientMapLockTimeout);
+    if (!lock.isLocked()) {
+        return false;
+    }
+
+    auto it = _clients.find(fd);
+    if (it == _clients.end()) {
+        return false;
+    }
+
+    it->second.readyAtMs = millis();
+    return true;
 }
 
 } // namespace WEBSOCKET

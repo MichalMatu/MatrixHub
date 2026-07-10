@@ -51,6 +51,7 @@ Current CSI consumers are defined by `WIFISENSING::CSI::CsiConsumer`:
 | `AlarmSystem` | Keeps CSI active for `wifi_csi_motion` without the UI open. |
 | `Boot` | Reserved boot/runtime consumer. |
 | `MatrixVisualization` | Keeps CSI active when matrix data visualization uses Wi-Fi CSI. |
+| `DiagnosticCapture` | Keeps CSI active only for an explicit raw capture session. |
 
 ## WebSocket Wire Format
 
@@ -77,6 +78,208 @@ The header is 13 bytes. Frontend and tooling must keep this aligned with:
 
 Receivers should parse records until the payload is exhausted. A partial
 trailing record is malformed and should be dropped.
+
+The browser stream is intentionally compact and is not a lossless detector
+fixture format. It quantizes gain and omits radio/source metadata. Do not use
+`/ws/csi` captures or `scripts/sensing_analysis/collect_long_data.py` as input
+to detector acceptance tests.
+
+## Lossless Capture And Native Replay
+
+Real detector fixtures use the admin-only diagnostic endpoint:
+
+```text
+/ws/csi-capture/v1
+```
+
+The endpoint is inactive until an authenticated admin client sends the exact
+text command `START`. It replies with `HELLO`, streams canonical `DATA`
+records, and finishes only after the same client sends `STOP` and receives the
+FIFO-fenced `END` record. `HELLO.rxAcceptedStart` is an exclusive source
+boundary and STOP snapshots an inclusive source boundary. A promotable file
+must contain every accepted sequence in that exact modular interval: the first
+record is `start + 1`, the last is the STOP boundary, and the record count is
+the distance between them. This catches a missing first or boundary packet in
+addition to gaps inside the file.
+
+While valid CSI DATA continues to flow, the capture session refreshes the power
+activity lease every 30 seconds. This keeps long real-data sessions from being
+cut off by the normal five-minute-or-longer inactivity sleep policy without
+changing the user's persisted power configuration.
+
+A disconnected session, missing `HELLO`/`END`, incomplete source window,
+WebSocket queue drop, truncated input, motion-control epoch change, or session
+error flag makes the capture incomplete and therefore ineligible for promotion.
+The global source-queue drop delta remains diagnostic because packets after the
+inclusive STOP boundary may legitimately change it; loss inside the capture is
+proved precisely by the accepted-sequence window. Queue metrics are mandatory
+at START, and an unavailable snapshot fails closed instead of silently
+reporting zero drops.
+
+Raw captures use the little-endian MatrixHub CSI Fixture format (`MHCF` v1):
+
+- a 32-byte file header with version, endian marker, session, frame count, and
+  exact frame-section size
+- canonical 64-byte frame headers followed by the unmodified signed I/Q bytes
+- exact float32 gain bits and the exact `processNowMs` passed to the production
+  detector
+- source/destination identity, RX sequence, `first_word_invalid`, lengths,
+  RSSI, and canonical PHY metadata
+- observed motion score/state as diagnostic parity evidence only
+
+Canonical `MHCF` file-header offsets are:
+
+| Offset | Type | Meaning |
+| ---: | --- | --- |
+| 0 | `char[4]` | `MHCF` |
+| 4 | `uint8,uint8` | major/minor (`1.0`) |
+| 6 | `uint16` | file-header bytes (`32`) |
+| 8 | `uint32` | endian marker (`0x01020304`) |
+| 12 | `uint16` | frame-header bytes (`64`) |
+| 14 | `uint16` | flags, zero in v1 |
+| 16 | `uint32` | capture session ID |
+| 20 | `uint32` | final frame count |
+| 24 | `uint64` | exact frame-section bytes |
+
+Every frame starts with this canonical header; all multi-byte values are little
+endian:
+
+| Offset | Type | Meaning |
+| ---: | --- | --- |
+| 0 | `uint16` | whole record bytes (`64 + storedLen`) |
+| 2 | `uint16` | header bytes (`64`) |
+| 4 | `uint32` | accepted CSI sequence |
+| 8 | `uint32` | exact detector `processNowMs` |
+| 12 | `uint32` | Wi-Fi RX timestamp in microseconds |
+| 16 | `float32 bits` | exact compensation gain |
+| 20 | `float32 bits` | observed score, diagnostics only |
+| 24 | `uint16` | original I/Q length |
+| 26 | `uint16` | stored I/Q length |
+| 28 | `uint16` | Wi-Fi RX sequence |
+| 30 | `uint16` | signal length |
+| 32 | `uint8[6]` | source identity |
+| 38 | `uint8[6]` | destination identity |
+| 44 | `int8,int8` | RSSI and noise floor |
+| 46..60 | `uint8[15]` | rate, signal mode, MCS, CWB, smoothing, not-sounding, aggregation, STBC, FEC, SGI, AMPDU count, channel, secondary channel, antenna, RX state |
+| 61 | `uint8` | bit 0 first-word-invalid, bit 1 truncated, bit 2 observed motion, bit 3 replay origin |
+| 62 | `uint16` | reserved, zero in v1 |
+| 64 | `int8[storedLen]` | unmodified interleaved I/Q |
+
+WebSocket batches use a 16-byte `MHCB` header: magic at offset 0, version at
+4, message type at 6, header size at 7, canonical record-header size at 8,
+record count at 10, and session ID at 12. `HELLO` and `END` use fixed 40- and
+64-byte control payloads respectively. `HELLO.rxAcceptedStart` is exclusive;
+`END.rxAcceptedEnd` carries the inclusive STOP fence captured before drain, not
+a later global-counter sample. Encoder, collector, and native replay tests must
+change together if any offset changes.
+
+Exactly the first record carries `replay origin`. It defines a fresh native
+detector run for deterministic fixture replay; capture does **not** reset or
+otherwise mutate the live production detector. Consequently, captured
+score/motion fields describe the already-running device only and are diagnostic
+evidence, not replay expectations.
+
+The native replay starts a fresh detector at that origin and calls the real
+`CsiBandMotionDetector::process()` for every record using the captured
+`processNowMs`. Python must never implement the detector verdict or treat the
+captured observed score/state as expected behavior.
+
+### File Lifecycle
+
+Collect into ignored local artifacts:
+
+```bash
+python scripts/sensing_analysis/csi_capture.py collect \
+  --device-url https://192.168.0.18 \
+  --scenario-id long-motion-inversion-01 \
+  --duration 30m \
+  --firmware-commit <git-sha-of-flashed-build> \
+  --description "Repeated walk/quiet cycles in a fixed room"
+```
+
+`--firmware-commit` is mandatory and must be the full 40-hex commit actually
+flashed. A local transport smoke test may use `<sha>-dirty`, but promotion
+rejects dirty or unknown provenance and also requires the remaining firmware
+identity fields reported by the device.
+
+The collector writes:
+
+```text
+artifacts/csi/raw/<UTC>-<scenario-id>/
+  frames.mhcf
+  capture.json
+  scenario.json
+```
+
+`artifacts/` is ignored by Git. An interrupted or invalid run remains in a
+`.partial` directory with an incomplete manifest and must not be renamed or
+committed manually. Inside this repository, `collect --output-root` is accepted
+only below ignored `artifacts/`; raw directories and files are created with
+owner-only `0700`/`0600` permissions. Promotion is the only supported path into
+`test/fixtures/csi`.
+
+Add operator ground truth using half-open intervals relative to the first
+captured `processNowMs`:
+
+```bash
+python scripts/sensing_analysis/csi_capture.py annotate ARTIFACT_DIR \
+  --from 2m --to 3m \
+  --motion present \
+  --occupancy occupied \
+  --environment stable \
+  --evidence operator \
+  --confidence high \
+  --note "Continuous walking across the room"
+
+python scripts/sensing_analysis/csi_capture.py annotate ARTIFACT_DIR --review
+python scripts/sensing_analysis/csi_capture.py verify ARTIFACT_DIR
+python scripts/sensing_analysis/csi_capture.py report ARTIFACT_DIR
+```
+
+Ground truth describes physical reality, never the current detector result.
+The v1 vocabulary is:
+
+- `motion`: `none`, `present`, `unknown`
+- `occupancy`: `empty`, `occupied`, `unknown`
+- `environment`: `stable`, `rf_disturbance`, `reconnect`, `unknown`
+- `evidence`: `operator`, `scripted_action`, `video_timestamp`, `unknown`
+- `confidence`: `high`, `medium`, `low`, `unknown`
+
+Unknown transition intervals are valid, but a reviewed scenario must contain at
+least one interval with known motion and complete context/evidence fields.
+
+Promote only a lossless capture whose ground truth was already persisted as
+reviewed with `annotate --review`; `--reviewed` is an additional explicit
+operator attestation, not a shortcut around that stored review:
+
+```bash
+python scripts/sensing_analysis/csi_capture.py promote ARTIFACT_DIR \
+  --fixture-id csi-long-motion-inversion-01 \
+  --reviewed
+```
+
+Promotion writes only `frames.mhcf` and `scenario.json` under
+`test/fixtures/csi/<fixture-id>/`. It maps every captured MAC/BSSID identity to
+non-reversible locally administered pseudonyms while preserving equality
+relationships. It excludes device URL/IP, SSID, credentials, the device MAC
+from system metadata, and all other raw manifest fields. Never copy a raw
+capture directly into `test/fixtures/`. Free-text descriptions and annotation
+notes are also scanned fail-closed for SSID/BSSID labels, hostnames, IP/MAC
+addresses, email addresses, tokens, and secrets; keep identifying room/network
+details out of those fields.
+
+Start the real-data corpus with separate captures for quiet calibration,
+enter/walk/exit, occupied-but-stationary, repeated motion/quiet cycles over at
+least one hour, broad disturbance without human motion, traffic load without
+motion, channel/BSSID changes that do not break the capture connection, and
+frames marked `first_word_invalid`. Keep transitions explicitly labeled
+`unknown` rather than guessing.
+
+A full STA disconnect or deep-sleep wake also disconnects this WebSocket, so it
+cannot produce one complete v1 capture across that boundary. Preserve the
+separate before/after raw sessions, but do not concatenate or promote them as a
+single fixture until MHCF gains an explicit typed lifecycle-event section and
+the native replay defines its reset semantics.
 
 ## Status And Control
 
@@ -172,8 +375,12 @@ Useful targeted checks:
 
 ```bash
 pio test -e native -f test_csi_band_motion_detector
+pio test -e native -f test_csi_capture_wire_format
+pio test -e native -f test_csi_capture_sequence_window
+pio test -e native -f test_csi_capture_replay
 pio test -e native -f test_csi_visualization_reducer
 pio test -e native -f test_matrix_task
+python -m unittest test.test_csi_capture_tools
 python scripts/analyze_csi.py
 python scripts/csi_monitor.py
 ```

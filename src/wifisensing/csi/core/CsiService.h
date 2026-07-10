@@ -31,17 +31,20 @@ enum class CsiConsumer : uint8_t {
     AlarmSystem = 1,
     Boot = 2,
     MatrixVisualization = 3,
+    DiagnosticCapture = 4,
 };
 
 struct CsiMetricsSnapshot {
     bool enabled = false;
     bool queueAllocated = false;
+    bool queueMetricsValid = false;
     uint32_t activeConsumerMask = 0;
     uint8_t activeConsumerCount = 0;
     bool frontendConsumerActive = false;
     bool alarmConsumerActive = false;
     bool bootConsumerActive = false;
     bool matrixVisualizationConsumerActive = false;
+    bool diagnosticCaptureConsumerActive = false;
     size_t queueDepth = 0;
     size_t queueCapacity = 0;
     uint32_t queueDropsTotal = 0;
@@ -58,6 +61,7 @@ struct CsiMetricsSnapshot {
     uint32_t batchesPerSec = 0;
     uint32_t lastPacketMs = 0;
     uint32_t lastBatchMs = 0;
+    uint32_t motionControlEpoch = 0;
     int calibrationCount = 0;
     int calibrationTarget = CsiGainController::CALIBRATION_PACKETS;
     const char* calibrationState = "unknown";
@@ -75,6 +79,7 @@ public:
     bool setConsumerActive(CsiConsumer consumer, bool active);
     bool isConsumerActive(CsiConsumer consumer) const;
     bool hasActiveConsumers() const;
+    bool isProcessingTaskContext() const;
     CsiMetricsSnapshot getMetricsSnapshot() const;
     void recordBatchDelivery(size_t packetCount, bool accepted);
 
@@ -190,6 +195,7 @@ public:
     CsiMotionConfig _pendingMotionConfig;
     std::atomic<bool> _motionConfigDirty{false};
     std::atomic<bool> _motionCalibrationRequested{false};
+    std::atomic<uint32_t> _motionControlEpoch{0};
     std::atomic<bool> _visualizationResetRequested{false};
     mutable portMUX_TYPE _motionSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     CsiMotionSnapshot _lastMotionSnapshot;

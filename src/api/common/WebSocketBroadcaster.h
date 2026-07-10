@@ -47,6 +47,7 @@ public:
     // Snapshotting active client fds lets higher layers do targeted sends
     // without keeping their own duplicate client registries.
     size_t snapshotClients(int* outTargets, size_t maxCount) const;
+    bool markClientReady(int fd);
 
 private:
     const char* _logTag;
@@ -55,8 +56,21 @@ private:
     WEBSOCKET::WsTaskQueue _taskQueue;
 
     void processBroadcast(WEBSOCKET::WsMessage& msg);
+    size_t snapshotTargetSessions(
+        const int* fds,
+        size_t count,
+        int* outTargets,
+        WEBSOCKET::WsClientGeneration* outGenerations) const;
     bool acquirePayload(size_t reserveLen, uint8_t** payload, int16_t* payloadSlot, bool* isAllocated);
-    bool broadcastPrepared(int* fds, size_t count, uint8_t* payload, size_t len, int16_t payloadSlot, bool isAllocated, httpd_ws_type_t type);
+    bool broadcastPrepared(
+        int* fds,
+        const WEBSOCKET::WsClientGeneration* targetGenerations,
+        size_t count,
+        uint8_t* payload,
+        size_t len,
+        int16_t payloadSlot,
+        bool isAllocated,
+        httpd_ws_type_t type);
 };
 
 } // namespace API

@@ -97,6 +97,8 @@ namespace Keys {
     // CSI (WiFi Sensing)
     constexpr const char* kWsCsi = "/ws/csi";
     constexpr const char* kCsiBroadcastName = "WS-CSI";
+    constexpr const char* kWsCsiCaptureV1 = "/ws/csi-capture/v1";
+    constexpr const char* kCsiCaptureBroadcastName = "WS-CSI-Capture";
     constexpr const char* kWsUsbTerminal = "/ws/usbterminal";
     constexpr const char* kUsbTerminalBroadcastName = "WS-UsbTerminal";
     

@@ -52,6 +52,11 @@ missing from `api-contract.json`.
   `src/api/wifisensing/CsiWireFormat.cpp`,
   `interface/src/lib/features/wifisensing/csi/parseCsiFrame.ts`, and
   `docs/engineering/integrations/csi.md`.
+- `/ws/csi-capture/v1` is a separate admin-only diagnostic protocol. Its MHCB
+  records must stay aligned with `src/api/wifisensing/CsiCaptureWireFormat.cpp`,
+  `scripts/sensing_analysis/csi_capture_format.py`, the native replay codec,
+  and `docs/engineering/integrations/csi.md`. HELLO/END are accepted-sequence
+  fences, and exactly the first DATA record is the fresh native replay origin.
 
 ## Required Gates For Contract Changes
 
@@ -59,7 +64,7 @@ Run the focused contract gate first:
 
 ```bash
 python scripts/contract/verify_api_contract.py
-python -m py_compile scripts/device_client.py scripts/analyze_csi.py scripts/csi_monitor.py scripts/sensing_analysis/collect_long_data.py scripts/diagnostics/check_runtime_diagnostics.py tools/csi_client.py scripts/contract/verify_api_contract.py
+python -m py_compile scripts/device_client.py scripts/analyze_csi.py scripts/csi_monitor.py scripts/sensing_analysis/collect_long_data.py scripts/sensing_analysis/csi_capture.py scripts/sensing_analysis/csi_capture_format.py scripts/diagnostics/check_runtime_diagnostics.py tools/csi_client.py scripts/contract/verify_api_contract.py
 ```
 
 Then run the normal MatrixHub quality gates:

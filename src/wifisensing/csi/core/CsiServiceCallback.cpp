@@ -48,12 +48,18 @@ void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
         return;
     }
     self->_lastRxAcceptTimeUs.store(nowUs, std::memory_order_relaxed);
-    self->_rxAcceptedTotal.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t acceptedSequence =
+        self->_rxAcceptedTotal.fetch_add(1, std::memory_order_relaxed) + 1;
 
     CsiPacket packet;
     memcpy(&packet.rx_ctrl, &info->rx_ctrl, sizeof(wifi_pkt_rx_ctrl_t));
     memcpy(packet.mac, info->mac, 6);
+    memcpy(packet.dmac, info->dmac, 6);
+    packet.originalLen = info->len;
     packet.len = (info->len > MAX_CSI_DATA_LEN) ? MAX_CSI_DATA_LEN : info->len;
+    packet.rxSequence = info->rx_seq;
+    packet.firstWordInvalid = info->first_word_invalid;
+    packet.acceptedSequence = acceptedSequence;
     memcpy(packet.buf, info->buf, packet.len);
     // Worker task computes the real compensation after dequeue, once we're out of ISR context.
     packet.compensate_gain = 1.0f;

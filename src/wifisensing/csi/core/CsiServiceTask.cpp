@@ -52,6 +52,11 @@ bool waitForTaskSuspended(TaskHandle_t taskHandle, SemaphoreHandle_t cleanupSem,
 namespace WIFISENSING {
 namespace CSI {
 
+bool CsiService::isProcessingTaskContext() const {
+    return _processingTaskHandle != nullptr &&
+           xTaskGetCurrentTaskHandle() == _processingTaskHandle;
+}
+
 bool CsiService::startProcessingTask() {
     if (_processingTaskHandle) {
         if (!_shouldExit.load(std::memory_order_acquire)) {
@@ -202,6 +207,7 @@ void CsiService::processingTask(void* param) {
             self->_lastPacketMs.store(now, std::memory_order_relaxed);
             self->applyPendingMotionCommandsNonBlocking();
             self->applyPendingVisualizationCommandsNonBlocking();
+            packet.processTimestampMs = now;
             packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
             self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
             const auto motion = self->processMotionPacket(packet, now);
@@ -216,6 +222,7 @@ void CsiService::processingTask(void* param) {
                 self->_lastPacketMs.store(now, std::memory_order_relaxed);
                 self->applyPendingMotionCommandsNonBlocking();
                 self->applyPendingVisualizationCommandsNonBlocking();
+                packet.processTimestampMs = now;
                 packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
                 self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
                 const auto motion = self->processMotionPacket(packet, now);

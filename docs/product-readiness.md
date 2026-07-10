@@ -4,6 +4,9 @@ This note captures product-facing decisions and the near-term readiness backlog.
 It is intentionally separate from firmware architecture docs so sales, UX,
 hardware, and release work can be tracked without changing runtime behavior.
 
+The staged engineering audit and closure gates are maintained in
+[MatrixHub Commercial Hardening Audit](engineering/COMMERCIAL_HARDENING_AUDIT.md).
+
 ## Current Product Position
 
 MatrixHub should be positioned first as a local CO2 and ventilation automation

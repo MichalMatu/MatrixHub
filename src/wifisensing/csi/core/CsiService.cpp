@@ -122,6 +122,7 @@ void CsiService::setMotionCallback(MotionCallback cb) {
 }
 
 void CsiService::setMotionConfig(const CsiMotionConfig& config) {
+    _motionControlEpoch.fetch_add(1, std::memory_order_relaxed);
     if (_motionConfigMutex) {
         SYSTEM::ScopeLock lock(_motionConfigMutex, pdMS_TO_TICKS(200));
         if (!lock.isLocked()) {
@@ -138,6 +139,7 @@ void CsiService::setMotionConfig(const CsiMotionConfig& config) {
 }
 
 void CsiService::requestMotionCalibration() {
+    _motionControlEpoch.fetch_add(1, std::memory_order_relaxed);
     _motionCalibrationRequested.store(true, std::memory_order_release);
 }
 
@@ -192,6 +194,8 @@ CsiMetricsSnapshot CsiService::getMetricsSnapshot() const {
     snapshot.alarmConsumerActive = (mask & consumerBit(CsiConsumer::AlarmSystem)) != 0;
     snapshot.bootConsumerActive = (mask & consumerBit(CsiConsumer::Boot)) != 0;
     snapshot.matrixVisualizationConsumerActive = (mask & consumerBit(CsiConsumer::MatrixVisualization)) != 0;
+    snapshot.diagnosticCaptureConsumerActive =
+        (mask & consumerBit(CsiConsumer::DiagnosticCapture)) != 0;
 
     snapshot.rxFramesTotal = _rxFramesTotal.load(std::memory_order_relaxed);
     snapshot.rxAcceptedTotal = _rxAcceptedTotal.load(std::memory_order_relaxed);
@@ -206,6 +210,7 @@ CsiMetricsSnapshot CsiService::getMetricsSnapshot() const {
     snapshot.queueDropsLastSec = _queueDropsLastSec.load(std::memory_order_relaxed);
     snapshot.lastPacketMs = _lastPacketMs.load(std::memory_order_relaxed);
     snapshot.lastBatchMs = _lastBatchMs.load(std::memory_order_relaxed);
+    snapshot.motionControlEpoch = _motionControlEpoch.load(std::memory_order_relaxed);
     snapshot.calibrationCount = _gainCtrl.calibrationCount();
     snapshot.calibrationTarget = CsiGainController::CALIBRATION_PACKETS;
     snapshot.calibrationState = _gainCtrl.stateName();
@@ -223,6 +228,7 @@ CsiMetricsSnapshot CsiService::getMetricsSnapshot() const {
 
     snapshot.queueAllocated = _queue != nullptr;
     if (_queue) {
+        snapshot.queueMetricsValid = true;
         snapshot.queueDepth = _queue->getDepth();
         snapshot.queueCapacity = _queue->getCapacity();
         snapshot.queueDropsTotal = _queue->getDroppedPacketsTotal();
