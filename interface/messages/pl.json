@@ -1208,6 +1208,7 @@
 	"matrix_effect_category_dynamic": "Dynamiczne",
 	"matrix_effect_category_seasonal": "Sezonowe",
 	"matrix_effect_category_all": "Wszystkie efekty",
+	"matrix_effect_visible_flash_warning": "Ten efekt zawiera widoczne błyski. Ustaw niską jasność i nie używaj go w pobliżu osób wrażliwych na migające światło.",
 	"matrix_effect_mode": "Tryb Efektu",
 	"matrix_effect_mode_live_desc": "Zapisywany przyciskiem Zapisz w tej karcie.",
 	"matrix_effect_speed": "Szybkość Animacji",

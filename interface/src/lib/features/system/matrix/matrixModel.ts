@@ -333,6 +333,19 @@ export const MATRIX_NATIVE_3D_EFFECT_IDS = Array.from(
 	(_, effectId) => effectId
 );
 
+const MATRIX_FLASHING_LEGACY_EFFECT_IDS = new Set([1, 24, 25, 26, 27, 28, 29, 34, 35]);
+
+export function matrixEffectContainsVisibleFlashes(
+	effectId: number,
+	engine: MatrixEffectEngine = MATRIX_EFFECT_ENGINE_LEGACY
+): boolean {
+	return (
+		engine === MATRIX_EFFECT_ENGINE_LEGACY &&
+		Number.isInteger(effectId) &&
+		MATRIX_FLASHING_LEGACY_EFFECT_IDS.has(effectId)
+	);
+}
+
 export const MATRIX_EFFECT_CATEGORIES: MatrixEffectCategoryDefinition[] = [
 	{
 		value: 'recommended',

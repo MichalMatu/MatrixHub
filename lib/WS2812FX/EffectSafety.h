@@ -9,6 +9,10 @@ constexpr uint16_t kMinimumFlashPeriodMs = 500;
 constexpr uint16_t kFlashPulseMs = 80;
 constexpr uint16_t kMultiFlashCycleMs = 1000;
 constexpr uint16_t kMultiFlashGapMs = 170;
+// A localized effect frame can turn several pixels on and off at once. Keeping
+// the frame cadence at or below three updates per second is a conservative
+// product rule that does not depend on viewing distance or illuminated area.
+constexpr uint16_t kMinimumLocalizedFlashFrameMs = 334;
 
 constexpr uint16_t safeFlashPeriod(uint16_t requestedPeriodMs) {
     return requestedPeriodMs < kMinimumFlashPeriodMs
@@ -39,6 +43,19 @@ constexpr uint16_t safeMultiStrobePhaseDelay(uint16_t requestedPeriodMs, uint8_t
             return static_cast<uint16_t>(
                 cycle - (2U * kFlashPulseMs) - kMultiFlashGapMs);
     }
+}
+
+constexpr uint16_t safeLocalizedFlashFrameDelay(uint16_t effectSpeedMs) {
+    // Keep the legacy WS2812FX speed curve so large saved values do not turn a
+    // sparkle into a minute-long static frame, then apply the safety floor.
+    const uint16_t requestedPeriodMs = static_cast<uint16_t>(effectSpeedMs / 32U);
+    return requestedPeriodMs < kMinimumLocalizedFlashFrameMs
+        ? kMinimumLocalizedFlashFrameMs
+        : requestedPeriodMs;
+}
+
+constexpr bool isDoublePulseLitPhase(uint8_t phase) {
+    return (phase & 0x03U) == 0U || (phase & 0x03U) == 2U;
 }
 
 constexpr bool isFrameDue(uint32_t nowMs, uint32_t deadlineMs) {

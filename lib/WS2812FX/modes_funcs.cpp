@@ -326,22 +326,24 @@ uint16_t WS2812FX::chase(uint32_t color1, uint32_t color2, uint32_t color3) {
  * color2 = flash color
  */
 uint16_t WS2812FX::chase_flash(uint32_t color1, uint32_t color2) {
-  const static uint8_t flash_count = 4;
-  uint8_t flash_step = _seg_rt->counter_mode_call % ((flash_count * 2) + 1);
-
-  if(flash_step < (flash_count * 2)) {
-    uint32_t color = (flash_step % 2 == 0) ? color2 : color1;
-    uint16_t n = _seg_rt->counter_mode_step;
-    uint16_t m = (_seg_rt->counter_mode_step + 1) % _seg_len;
-    if(IS_REVERSE) {
-      setPixelColor(_seg->stop - n, color);
-      setPixelColor(_seg->stop - m, color);
-    } else {
-      setPixelColor(_seg->start + n, color);
-      setPixelColor(_seg->start + m, color);
-    }
-    return 30;
+  const uint8_t phase = static_cast<uint8_t>(_seg_rt->counter_mode_call & 0x03U);
+  const uint32_t color = WS2812FX_DETAIL::isDoublePulseLitPhase(phase)
+    ? color2
+    : color1;
+  const uint16_t n = _seg_rt->counter_mode_step;
+  const uint16_t m = (_seg_rt->counter_mode_step + 1) % _seg_len;
+  if(IS_REVERSE) {
+    setPixelColor(_seg->stop - n, color);
+    setPixelColor(_seg->stop - m, color);
   } else {
+    setPixelColor(_seg->start + n, color);
+    setPixelColor(_seg->start + m, color);
+  }
+
+  // A bounded double pulse replaces the former four-flash 30 ms burst. Move
+  // to the next pair only after the final dark phase, whose delay also acts as
+  // the inter-position rest period.
+  if(phase == 3U) {
     _seg_rt->counter_mode_step = (_seg_rt->counter_mode_step + 1) % _seg_len;
     if(_seg_rt->counter_mode_step == 0) {
       // update aux_param so mode_chase_flash_random() will select the next color
@@ -349,7 +351,7 @@ uint16_t WS2812FX::chase_flash(uint32_t color1, uint32_t color2) {
       SET_CYCLE;
     }
   }
-  return (_seg->speed / _seg_len);
+  return WS2812FX_DETAIL::safeMultiStrobePhaseDelay(_seg->speed, phase);
 }
 
 /*

@@ -44,6 +44,7 @@ import {
 	getDefaultMatrixDataVisualizationMode,
 	getMatrixDataVisualizationPreset,
 	isMatrixDataVisualizationModeValidForSource,
+	matrixEffectContainsVisibleFlashes,
 	matrixEffectCategoryContainsEffect,
 	normalizeMatrixColor,
 	normalizeMatrixCustomIcons,
@@ -97,6 +98,15 @@ describe('matrixModel', () => {
 			'neon',
 			'aurora'
 		]);
+	});
+
+	it('identifies legacy effects that contain visible flashes', () => {
+		for (const effectId of [1, 24, 25, 26, 27, 28, 29, 34, 35]) {
+			expect(matrixEffectContainsVisibleFlashes(effectId)).toBe(true);
+		}
+		expect(matrixEffectContainsVisibleFlashes(23)).toBe(false);
+		expect(matrixEffectContainsVisibleFlashes(34, MATRIX_EFFECT_ENGINE_NATIVE_3D)).toBe(false);
+		expect(matrixEffectContainsVisibleFlashes(24.5)).toBe(false);
 	});
 
 	it('defines matrix settings sections with only background arbitration keys shared', () => {

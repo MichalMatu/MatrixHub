@@ -337,7 +337,15 @@ G2.3b safety slice (candidate, not full G2 closure):
   and is reinitialized on mode entry; trigger and PRNG state are initialized,
 - effect deadlines are inclusive and rollover-safe,
 - full-frame Blink/Strobe modes have bounded low-flash cadence, including a
-  non-bursty double-pulse replacement for Multi Strobe.
+  non-bursty double-pulse replacement for Multi Strobe,
+- localized Flash Sparkle/Hyper Sparkle output is capped at three frames per
+  second, and both Chase Flash variants use a speed-controlled double pulse
+  instead of a fixed 30 ms burst,
+- the frontend identifies visible-flash legacy modes and keeps a warning in the
+  effect control surface,
+- a native host harness runs the real WS2812FX implementation for localized
+  flash IDs at four boundary speeds and checks cadence, lit-pixel bounds, and
+  out-of-range writes.
 
 Checkpoint evidence (2026-07-11):
 
@@ -347,11 +355,11 @@ Checkpoint evidence (2026-07-11):
 - ESP32-S3 development build: 82,296 bytes RAM (25.1%) and 3,166,759 bytes
   application flash (90.4%).
 
-This slice does not close G2.3b. Remaining work includes real-engine golden
-sequences for all 70 legacy modes, an explicit localized-flash policy for IDs
-24/25/34/35, one high-precision brightness/gamma pipeline, rotation-aware
-geometry, a curated manifest-driven commercial catalog, and physical
-locked-camera/current evidence.
+This slice does not close G2.3b. Remaining work includes expanding real-engine
+golden sequences from the four localized-flash modes to all 70 legacy modes,
+one high-precision brightness/gamma pipeline, rotation-aware geometry, a
+curated manifest-driven commercial catalog, effect-specific parameter/speed
+contracts, and physical locked-camera/current evidence.
 
 ## G3 — Shared UI State Model, Tokens, And Accessibility
 

@@ -368,7 +368,8 @@ uint16_t WS2812FX::mode_sparkle(void) {
  * Inspired by www.tweaking4all.com/hardware/arduino/arduino-led-strip-effects/
  */
 uint16_t WS2812FX::mode_flash_sparkle(void) {
-  return sparkle(_seg->colors[0], WHITE);
+  sparkle(_seg->colors[0], WHITE);
+  return WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(_seg->speed);
 }
 
 /*
@@ -384,7 +385,7 @@ uint16_t WS2812FX::mode_hyper_sparkle(void) {
   }
 
   SET_CYCLE;
-  return (_seg->speed / 32);
+  return WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(_seg->speed);
 }
 
 /*
@@ -392,7 +393,7 @@ uint16_t WS2812FX::mode_hyper_sparkle(void) {
  */
 uint16_t WS2812FX::mode_multi_strobe(void) {
   const uint8_t phase = static_cast<uint8_t>(_seg_rt->counter_mode_step & 0x03U);
-  const bool litFrame = phase == 0 || phase == 2;
+  const bool litFrame = WS2812FX_DETAIL::isDoublePulseLitPhase(phase);
   fill(litFrame ? _seg->colors[0] : _seg->colors[1], _seg->start, _seg_len);
 
   const uint16_t delay = WS2812FX_DETAIL::safeMultiStrobePhaseDelay(

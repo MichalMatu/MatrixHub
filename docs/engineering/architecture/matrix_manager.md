@@ -217,9 +217,27 @@ rollover are both handled.
 All-black Fireworks is valid and fail-dark. Color selection scans the three
 palette entries in bounded time and never retries while the MatrixTask holds the
 WS2812FX mutex. Full-frame Blink/Strobe modes enforce a minimum 500 ms cycle;
-Multi Strobe is a bounded double pulse with a minimum 1000 ms cycle. Localized
-flash modes (Flash Sparkle, Hyper Sparkle, and Chase Flash variants) remain in
-the advanced catalog pending a documented area/contrast policy and frame-trace
-gate in the next G2.3b slice.
+Multi Strobe is a bounded double pulse with a minimum 1000 ms cycle.
+
+Localized high-contrast modes use an explicit conservative product policy:
+
+- Flash Sparkle and Hyper Sparkle render no more than three new frames in any
+  one-second window (minimum frame interval 334 ms), even when the saved speed
+  requests a faster cadence.
+- Chase Flash and Chase Flash Random use two 80 ms lit pulses in a cycle of at
+  least 1000 ms; the saved speed controls the full pulse/rest cycle instead of
+  leaving a hard-coded 30 ms burst.
+- The UI marks every legacy blink/strobe/flash selector with a visible warning;
+  none of the four localized modes is present in `recommended` or `calm`.
+
+The frequency boundary follows the conservative no-more-than-three-flashes
+technique from [WCAG 2.2 SC 2.3.1][wcag-flashes], but this is an engineering
+input rather than a physical-panel conformance claim. Viewing distance,
+brightness, illuminated area, supply current, and camera exposure still belong
+to the locked-camera/current hardware gate. A host trace test runs the real
+70-mode WS2812FX engine with a deterministic clock at speeds 50, 500, 1000, and
+65535 ms and verifies the four localized modes against the 64-pixel buffer.
+
+[wcag-flashes]: https://www.w3.org/WAI/WCAG22/Understanding/three-flashes-or-below-threshold
 
 Navigation: [Project README](../../../README.md) · [Engineering Reference](../README.md) · [Architecture](../README.md#runtime-and-architecture)

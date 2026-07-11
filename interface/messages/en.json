@@ -1208,6 +1208,7 @@
 	"matrix_effect_category_dynamic": "Dynamic",
 	"matrix_effect_category_seasonal": "Seasonal",
 	"matrix_effect_category_all": "All Effects",
+	"matrix_effect_visible_flash_warning": "This effect contains visible flashes. Keep brightness low and avoid using it around people who are sensitive to flashing light.",
 	"matrix_effect_mode": "Effect Mode",
 	"matrix_effect_mode_live_desc": "Saved with the card Save action.",
 	"matrix_effect_speed": "Animation Speed",

@@ -66,6 +66,52 @@ void test_multi_strobe_is_a_bounded_double_pulse_without_a_high_frequency_burst(
     TEST_ASSERT_EQUAL_UINT16(670, WS2812FX_DETAIL::safeMultiStrobePhaseDelay(50, 3));
 }
 
+void test_localized_flash_frames_never_exceed_three_updates_per_second() {
+    TEST_ASSERT_EQUAL_UINT16(
+        334,
+        WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(50));
+    TEST_ASSERT_EQUAL_UINT16(
+        334,
+        WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(1000));
+    TEST_ASSERT_EQUAL_UINT16(
+        334,
+        WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(10688));
+    TEST_ASSERT_EQUAL_UINT16(
+        335,
+        WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(10720));
+    TEST_ASSERT_EQUAL_UINT16(
+        2047,
+        WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(65535));
+
+    uint16_t elapsedMs = 0;
+    uint8_t framesInFirstSecond = 0;
+    while (elapsedMs < 1000) {
+        ++framesInFirstSecond;
+        elapsedMs = static_cast<uint16_t>(
+            elapsedMs + WS2812FX_DETAIL::safeLocalizedFlashFrameDelay(50));
+    }
+    TEST_ASSERT_EQUAL_UINT8(3, framesInFirstSecond);
+}
+
+void test_chase_flash_uses_two_lit_pulses_in_a_bounded_cycle() {
+    uint32_t cycleMs = 0;
+    uint8_t litPhases = 0;
+    for (uint8_t phase = 0; phase < 4; ++phase) {
+        cycleMs += WS2812FX_DETAIL::safeMultiStrobePhaseDelay(50, phase);
+        if (WS2812FX_DETAIL::isDoublePulseLitPhase(phase)) {
+            ++litPhases;
+        }
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(1000, cycleMs);
+    TEST_ASSERT_EQUAL_UINT8(2, litPhases);
+    TEST_ASSERT_TRUE(WS2812FX_DETAIL::isDoublePulseLitPhase(0));
+    TEST_ASSERT_FALSE(WS2812FX_DETAIL::isDoublePulseLitPhase(1));
+    TEST_ASSERT_TRUE(WS2812FX_DETAIL::isDoublePulseLitPhase(2));
+    TEST_ASSERT_FALSE(WS2812FX_DETAIL::isDoublePulseLitPhase(3));
+    TEST_ASSERT_TRUE(WS2812FX_DETAIL::isDoublePulseLitPhase(6));
+}
+
 void test_frame_deadline_is_inclusive_and_safe_across_millis_rollover() {
     TEST_ASSERT_FALSE(WS2812FX_DETAIL::isFrameDue(99, 100));
     TEST_ASSERT_TRUE(WS2812FX_DETAIL::isFrameDue(100, 100));
@@ -157,6 +203,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_select_visible_color_skips_black_entries_and_wraps_selection);
     RUN_TEST(test_full_frame_blink_and_strobe_delays_enforce_a_safe_flash_period);
     RUN_TEST(test_multi_strobe_is_a_bounded_double_pulse_without_a_high_frequency_burst);
+    RUN_TEST(test_localized_flash_frames_never_exceed_three_updates_per_second);
+    RUN_TEST(test_chase_flash_uses_two_lit_pulses_in_a_bounded_cycle);
     RUN_TEST(test_frame_deadline_is_inclusive_and_safe_across_millis_rollover);
     RUN_TEST(test_reset_deadline_is_immediately_due_at_every_uptime_boundary);
     RUN_TEST(test_effect_runtime_initializers_are_per_instance_and_repeatable);

@@ -33,6 +33,7 @@
 		getMatrixEffectIds,
 		getPreferredMatrixEffectSpeedScale,
 		getPreferredMatrixEffectCategory,
+		matrixEffectContainsVisibleFlashes,
 		matrixEffectCategoryContainsEffect,
 		normalizeMatrixEffectEngine,
 		normalizeMatrixEffectModeForEngine,
@@ -349,6 +350,9 @@
 	const native3DControlsVisible = $derived(
 		normalizedEffectEngine === MATRIX_EFFECT_ENGINE_NATIVE_3D
 	);
+	const selectedEffectContainsVisibleFlashes = $derived(
+		matrixEffectContainsVisibleFlashes(store.settings.effect_mode, normalizedEffectEngine)
+	);
 	const reactivityControlsDisabled = $derived(
 		effectControlsDisabled ||
 			!native3DControlsVisible ||
@@ -443,6 +447,11 @@
 						onchange={(e) =>
 							void applySelectedEffect(Number((e.target as HTMLSelectElement).value))}
 					/>
+					{#if selectedEffectContainsVisibleFlashes}
+						<div class="alert alert-warning mt-3 py-2 text-xs" role="note">
+							{m.matrix_effect_visible_flash_warning({ locale: i18n.languageTag })}
+						</div>
+					{/if}
 				</ContentBox>
 
 				<ContentBox>
