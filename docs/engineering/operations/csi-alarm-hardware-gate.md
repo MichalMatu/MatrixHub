@@ -21,6 +21,13 @@ The run stops before collecting evidence unless all of these conditions hold:
 - diagnostics summary and global mutex counters are both available, so reboot,
   HTTP WebSocket drop, and lock-timeout continuity can be proven.
 
+`/api/system/info` brackets the preflight baseline with two matching reads to
+pin the exact clean firmware identity without a device-swap/reflash race.
+Runtime samples use the lightweight diagnostics boot/uptime counters plus the
+alarm `boot_id` for restart continuity; repeatedly collecting the full
+storage-bearing system snapshot would distort the one-second CSI observation
+cadence.
+
 Set credentials through `DEVICE_USER`, `DEVICE_PASSWORD`, or `DEVICE_TOKEN` so
 they do not appear in the command line. Choose a new output directory for every
 run:
@@ -98,11 +105,13 @@ the endpoint gap, keep moving through recovery, then append `reconnect_end`.
 The motion marker qualifies only when at least one network-level gap sample
 starts at or after its action timestamp and before the first complete recovery
 sample. Such a sample must either report exact
-`wifi.sta_connected=false` or contain `transport_error` from at least two
-distinct core endpoints in the same sample. A single endpoint failure, HTTP
-error, invalid JSON/shape, authentication/client error, or other non-transport
-failure does not count as reconnect proof. A late `motion_start` after recovery
-does not qualify even if `reconnect_end` has not been appended yet.
+`wifi.sta_connected=false` or contain connection-phase `transport_error` from
+the system-network endpoint and at least one other core endpoint in the same
+sample. Read timeouts, two failures inside Wi-Fi sensing alone, a single
+endpoint failure, HTTP error, invalid JSON/shape, authentication/client error,
+or other non-transport failure do not count as reconnect proof. A late
+`motion_start` after recovery does not qualify even if `reconnect_end` has not
+been appended yet.
 The post-`motion_start` sample must carry this network proof itself; it cannot
 inherit proof from an earlier gap sample. Once a planned gap is open,
 non-transport endpoint failures remain hard errors rather than planned-gap
@@ -140,7 +149,8 @@ allow-listed summaries. Only a run whose closure summary records at least
 close G1; the default reconnect must contain the motion-start edge described
 above. The closure contains the SHA-256 of the closed private trace without
 copying private fields. The gate fails on detector/alarm inversion or false
-clear, rule or firmware drift, invalid-state retention failure, runtime fault,
+clear, rule drift or firmware identity mismatch, invalid-state retention
+failure, runtime fault,
 unobservable gaps, queue/capture/HTTP WebSocket drops, growing lock timeout
 counters, device restart, or failure to exercise a complete
 clear→motion→clear cycle in detector, alarm state, and transition metadata.

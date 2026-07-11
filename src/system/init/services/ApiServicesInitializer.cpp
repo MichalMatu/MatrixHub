@@ -40,7 +40,6 @@ API::DiagnosticsApiDeps buildDiagnosticsApiDeps(
     const ApiServicesInitializerDeps& deps,
     const API::SystemApiRouteDeps& routeDeps) {
   API::DiagnosticsApiDeps diagnosticsDeps;
-  diagnosticsDeps.info = routeDeps.info;
   diagnosticsDeps.tasks = routeDeps.tasks;
   diagnosticsDeps.wifiSensingSettings = deps.wifiSensingSettings;
   diagnosticsDeps.wifiSensingService = deps.wifiSensingService;

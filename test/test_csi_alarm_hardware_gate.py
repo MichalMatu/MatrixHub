@@ -238,7 +238,6 @@ def set_sample_window(
 
 def broad_transport_outage() -> dict[str, Any]:
     return {
-        "info": transport_error(),
         "wifi": transport_error(),
         "config": transport_error(),
         "alarms": transport_error(),
@@ -248,6 +247,11 @@ def broad_transport_outage() -> dict[str, Any]:
 
 def transport_error() -> BaseException:
     return gate.RequestsConnectionError("offline")
+
+
+def wrapped_read_timeout() -> BaseException:
+    inner = gate.Urllib3ReadTimeoutError(None, "/api/test", "read timed out")
+    return gate.RequestsConnectionError(inner)
 
 
 def finding_codes(report: dict[str, Any]) -> set[str]:
@@ -312,10 +316,54 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
             polling_client.session.close()
             preflight_client.session.close()
 
+    def test_runtime_sample_does_not_repeat_full_system_info_preflight(self) -> None:
+        requested_paths: list[str] = []
+        client = FakeDeviceClient(
+            {
+                gate.WIFI_STATUS_PATH: [wifi_status(False)],
+                gate.WIFI_CONFIG_PATH: [wifi_config()],
+                gate.ALARM_RULES_PATH: [alarm_rules(False)],
+                gate.NETWORK_PATH: [network()],
+                gate.HEALTH_PATH: [health()],
+                gate.MUTEX_PATH: [mutexes()],
+            },
+            on_get=requested_paths.append,
+        )
+
+        gate.capture_sample(
+            client,
+            0,
+            gate.HEALTH_PATH,
+            gate.MUTEX_PATH,
+            consistency_rereads=0,
+        )
+
+        self.assertNotIn(gate.SYSTEM_INFO_PATH, requested_paths)
+        self.assertEqual(
+            requested_paths,
+            [path for _name, path in gate.ENDPOINTS]
+            + [gate.HEALTH_PATH, gate.MUTEX_PATH],
+        )
+
+    def test_poll_endpoint_distinguishes_connection_from_wrapped_read_timeout(
+        self,
+    ) -> None:
+        connection = gate._poll_endpoint(
+            FakeDeviceClient({gate.NETWORK_PATH: [transport_error()]}),
+            gate.NETWORK_PATH,
+        )
+        read_timeout = gate._poll_endpoint(
+            FakeDeviceClient({gate.NETWORK_PATH: [wrapped_read_timeout()]}),
+            gate.NETWORK_PATH,
+        )
+
+        self.assertEqual(connection["error"]["phase"], "connection")
+        self.assertEqual(read_timeout["error"]["phase"], "read")
+
     def test_preflight_accepts_exact_clean_sha_and_one_canonical_rule(self) -> None:
         client = FakeDeviceClient(
             {
-                gate.SYSTEM_INFO_PATH: [system_info()],
+                gate.SYSTEM_INFO_PATH: [system_info(), system_info()],
                 gate.ALARM_RULES_PATH: [alarm_rules(False)],
                 gate.WIFI_STATUS_PATH: [wifi_status(False)],
                 gate.WIFI_CONFIG_PATH: [wifi_config()],
@@ -331,6 +379,23 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
         self.assertEqual(result.rule_contract["operator"], "above")
         self.assertEqual(result.rule_contract["threshold"], 0.5)
         self.assertEqual((result.hold_ms, result.clear_hold_ms), (1200, 2500))
+
+    def test_preflight_identity_reads_bracket_the_runtime_baseline(self) -> None:
+        changed_info = system_info()
+        changed_info["firmware_commit"] = "f" * 40
+        client = FakeDeviceClient(
+            {
+                gate.SYSTEM_INFO_PATH: [system_info(), changed_info],
+                gate.ALARM_RULES_PATH: [alarm_rules(False)],
+                gate.WIFI_STATUS_PATH: [wifi_status(False)],
+                gate.WIFI_CONFIG_PATH: [wifi_config()],
+                gate.HEALTH_PATH: [health()],
+                gate.MUTEX_PATH: [mutexes()],
+            }
+        )
+
+        with self.assertRaisesRegex(gate.GateError, "does not exactly match"):
+            gate.run_preflight(client, SHA)
 
     def test_preflight_requires_exact_detector_hold_configuration(self) -> None:
         for name, config_payload, expected in (
@@ -463,7 +528,7 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
     def test_preflight_accepts_zero_sequence_boot_baseline(self) -> None:
         client = FakeDeviceClient(
             {
-                gate.SYSTEM_INFO_PATH: [system_info()],
+                gate.SYSTEM_INFO_PATH: [system_info(), system_info()],
                 gate.ALARM_RULES_PATH: [alarm_rules(False, 0, 0)],
                 gate.WIFI_STATUS_PATH: [wifi_status(False)],
                 gate.WIFI_CONFIG_PATH: [wifi_config()],
@@ -530,6 +595,7 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
                         ),
                         SHA,
                     )
+
     def test_transition_metadata_accepts_zero_to_first_event(self) -> None:
         records = capture_states(
             [
@@ -1292,14 +1358,14 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
                 gate.DeviceClientError("authentication failed"),
             ),
         }
-        for name, (info_error, wifi_error) in cases.items():
+        for name, (config_error, wifi_error) in cases.items():
             with self.subTest(name=name):
                 samples = capture_states(
                     [
                         {"wifi": wifi_status(False), "alarms": alarm_rules(False)},
                         {
-                            "info": info_error,
                             "wifi": wifi_error,
+                            "config": config_error,
                             "alarms": alarm_rules(False),
                             "network": network(True),
                         },
@@ -1499,15 +1565,17 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
         self.assertEqual(report["runtime"]["verified_reconnect_gaps"], 1)
         self.assertIn("planned_reconnect_gap", finding_codes(report))
 
-    def test_two_core_transport_errors_can_prove_partial_reconnect_outage(self) -> None:
+    def test_network_and_domain_transport_errors_can_prove_partial_reconnect_outage(
+        self,
+    ) -> None:
         samples = capture_states(
             [
                 {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
                 {
-                    "info": transport_error(),
                     "wifi": transport_error(),
+                    "config": wifi_config(),
                     "alarms": alarm_rules(False, 1, 100),
-                    "network": network(True),
+                    "network": transport_error(),
                 },
                 {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
             ]
@@ -1538,15 +1606,94 @@ class CsiAlarmHardwareGateTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "pass")
         self.assertEqual(report["runtime"]["verified_reconnect_gaps"], 1)
 
+    def test_same_family_transport_errors_cannot_impersonate_reconnect(self) -> None:
+        samples = capture_states(
+            [
+                {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
+                {
+                    "wifi": transport_error(),
+                    "config": transport_error(),
+                    "alarms": alarm_rules(False, 1, 100),
+                    "network": network(True),
+                },
+                {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
+            ]
+        )
+        for sequence, sample, timestamp in zip(
+            (0, 2, 4),
+            samples,
+            (0, 2_000_000_000, 4_000_000_000),
+            strict=True,
+        ):
+            sample["sequence"] = sequence
+            set_sample_window(sample, timestamp, timestamp)
+        records = [
+            samples[0],
+            operator_marker("reconnect_start", 1, 1_000_000_000),
+            samples[1],
+            operator_marker("reconnect_end", 3, 3_000_000_000),
+            samples[2],
+        ]
+
+        report = gate.analyze_records(
+            records,
+            preflight(),
+            require_state_cycle=False,
+            minimum_verified_reconnect_gaps=1,
+        )
+
+        self.assertEqual(report["runtime"]["verified_reconnect_gaps"], 0)
+        self.assertEqual(report["verdict"], "fail")
+        self.assertIn("reconnect_network_evidence_missing", finding_codes(report))
+
+    def test_cross_family_read_timeouts_cannot_impersonate_reconnect(self) -> None:
+        samples = capture_states(
+            [
+                {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
+                {
+                    "wifi": wrapped_read_timeout(),
+                    "alarms": alarm_rules(False, 1, 100),
+                    "network": wrapped_read_timeout(),
+                },
+                {"wifi": wifi_status(False), "alarms": alarm_rules(False, 1, 100)},
+            ]
+        )
+        for sequence, sample, timestamp in zip(
+            (0, 2, 4),
+            samples,
+            (0, 2_000_000_000, 4_000_000_000),
+            strict=True,
+        ):
+            sample["sequence"] = sequence
+            set_sample_window(sample, timestamp, timestamp)
+        records = [
+            samples[0],
+            operator_marker("reconnect_start", 1, 1_000_000_000),
+            samples[1],
+            operator_marker("reconnect_end", 3, 3_000_000_000),
+            samples[2],
+        ]
+
+        report = gate.analyze_records(
+            records,
+            preflight(),
+            require_state_cycle=False,
+            minimum_verified_reconnect_gaps=1,
+        )
+
+        self.assertEqual(report["runtime"]["verified_reconnect_gaps"], 0)
+        self.assertEqual(report["verdict"], "fail")
+        self.assertIn("reconnect_network_evidence_missing", finding_codes(report))
+
     def test_broad_transport_proof_does_not_mask_health_client_error(self) -> None:
         samples = capture_states(
             [
                 {"wifi": wifi_status(False), "alarms": alarm_rules(False)},
                 {
-                    "info": transport_error(),
                     "wifi": transport_error(),
+                    "config": wifi_config(),
                     "alarms": alarm_rules(False),
-                    "network": network(True),
+                    "network": transport_error(),
                     "health": gate.DeviceClientError("authentication failed"),
                 },
                 {"wifi": wifi_status(False), "alarms": alarm_rules(False)},

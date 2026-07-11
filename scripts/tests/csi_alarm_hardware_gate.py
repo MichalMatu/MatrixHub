@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ReadTimeout as RequestsReadTimeout
 from requests.exceptions import Timeout as RequestsTimeout
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from device_client import DeviceClient, DeviceClientError, add_common_device_args  # noqa: E402
@@ -50,7 +52,6 @@ HEALTH_PATH = "/api/diagnostics/summary"
 MUTEX_PATH = "/api/diagnostics/mutexes"
 
 ENDPOINTS = (
-    ("system_info", SYSTEM_INFO_PATH),
     ("wifi_sensing", WIFI_STATUS_PATH),
     ("wifi_config", WIFI_CONFIG_PATH),
     ("alarm_rules", ALARM_RULES_PATH),
@@ -258,6 +259,21 @@ def _get_json(client: HttpClient, path: str) -> dict[str, Any]:
     return _response_json(response, path)
 
 
+def _validate_firmware_identity(
+    info: Mapping[str, Any],
+    expected_firmware_sha: str,
+) -> str:
+    actual_sha = info.get("firmware_commit")
+    dirty = info.get("firmware_dirty")
+    if not isinstance(actual_sha, str) or not SHA_RE.fullmatch(actual_sha):
+        raise GateError("device firmware_commit is not an exact 40-character lowercase SHA")
+    if actual_sha != expected_firmware_sha:
+        raise GateError("device firmware_commit does not exactly match the expected SHA")
+    if dirty is not False:
+        raise GateError("device firmware must report firmware_dirty=false")
+    return actual_sha
+
+
 def _enabled_csi_rules(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("rules"), list):
         raise GateError(f"{ALARM_RULES_PATH} is missing the rules array")
@@ -353,14 +369,7 @@ def run_preflight(client: HttpClient, expected_firmware_sha: str) -> PreflightRe
         raise GateError("expected firmware SHA must be exactly 40 lowercase hexadecimal characters")
 
     info = _get_json(client, SYSTEM_INFO_PATH)
-    actual_sha = info.get("firmware_commit")
-    dirty = info.get("firmware_dirty")
-    if not isinstance(actual_sha, str) or not SHA_RE.fullmatch(actual_sha):
-        raise GateError("device firmware_commit is not an exact 40-character lowercase SHA")
-    if actual_sha != expected_firmware_sha:
-        raise GateError("device firmware_commit does not exactly match the expected SHA")
-    if dirty is not False:
-        raise GateError("device firmware must report firmware_dirty=false")
+    actual_sha = _validate_firmware_identity(info, expected_firmware_sha)
 
     alarm_rules = _get_json(client, ALARM_RULES_PATH)
     rule_contract = _validate_canonical_rule(alarm_rules)
@@ -381,6 +390,8 @@ def run_preflight(client: HttpClient, expected_firmware_sha: str) -> PreflightRe
     )
     _require_u32_contract(HEALTH_PATH, health, PREFLIGHT_U32_PATHS["health"])
     _require_u32_contract(MUTEX_PATH, mutexes, PREFLIGHT_U32_PATHS["mutexes"])
+    confirmed_info = _get_json(client, SYSTEM_INFO_PATH)
+    _validate_firmware_identity(confirmed_info, expected_firmware_sha)
     return PreflightResult(
         firmware_commit=actual_sha,
         firmware_dirty=False,
@@ -389,7 +400,7 @@ def run_preflight(client: HttpClient, expected_firmware_sha: str) -> PreflightRe
         health_endpoint=HEALTH_PATH,
         mutex_endpoint=MUTEX_PATH,
         rule_contract=rule_contract,
-        raw_system_info=info,
+        raw_system_info=confirmed_info,
         raw_wifi_status=wifi_status,
         raw_wifi_config=wifi_config,
         raw_alarm_rules=alarm_rules,
@@ -502,11 +513,36 @@ class MarkerTail:
         return records
 
 
+def _transport_error_phase(exc: BaseException) -> str:
+    pending: list[BaseException] = [exc]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if isinstance(current, (RequestsReadTimeout, Urllib3ReadTimeoutError)):
+            return "read"
+        for nested in (current.__cause__, current.__context__, getattr(current, "reason", None)):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+        pending.extend(item for item in current.args if isinstance(item, BaseException))
+    return "connection" if isinstance(exc, RequestsConnectionError) else "timeout"
+
+
 def _poll_endpoint(client: HttpClient, path: str) -> dict[str, Any]:
     try:
         response = client.get(path)
     except (RequestsConnectionError, RequestsTimeout) as exc:
-        return {"ok": False, "error": {"kind": "transport_error", "type": type(exc).__name__}}
+        return {
+            "ok": False,
+            "error": {
+                "kind": "transport_error",
+                "type": type(exc).__name__,
+                "phase": _transport_error_phase(exc),
+            },
+        }
     except DeviceClientError as exc:
         return {"ok": False, "error": {"kind": "client_error", "type": type(exc).__name__}}
     except Exception as exc:  # noqa: BLE001 - raw trace stores only exception type.
@@ -1000,7 +1036,6 @@ def analyze_records(
         required = {
             name: _snapshot_data(record, name)
             for name in (
-                "system_info",
                 "wifi_sensing",
                 "wifi_config",
                 "alarm_rules",
@@ -1027,13 +1062,17 @@ def analyze_records(
         network_payload = required["network"]
         sta_connected = _nested(network_payload, ("wifi", "sta_connected"))
         network_disconnect_observed = sta_connected is False
-        core_transport_errors = {
+        core_connection_errors = {
             name
             for name, _path in ENDPOINTS
             if _nested(_snapshot_item(record, name), ("error", "kind"))
             == "transport_error"
+            and _nested(_snapshot_item(record, name), ("error", "phase"))
+            == "connection"
         }
-        broad_transport_outage = len(core_transport_errors) >= 2
+        broad_transport_outage = (
+            "network" in core_connection_errors and len(core_connection_errors) >= 2
+        )
         reconnect_gap_observed = bool(missing) or network_disconnect_observed
         gap_signals = list(missing)
         if network_disconnect_observed:
@@ -1127,14 +1166,6 @@ def analyze_records(
                 source="network",
                 field="wifi.sta_connected",
             )
-
-        info = required["system_info"]
-        if info is not None:
-            if (
-                info.get("firmware_commit") != preflight.firmware_commit
-                or info.get("firmware_dirty") is not False
-            ):
-                add("firmware_identity_drift", "error", sequence)
 
         if (
             required["wifi_config"] is not None
@@ -1439,8 +1470,6 @@ def analyze_records(
         uptime = _safe_int(_nested(health, ("uptimeSec",)))
         boot_count = _safe_int(_nested(health, ("boot", "bootCount")))
         unexpected = _safe_int(_nested(health, ("boot", "unexpectedRestarts")))
-        if uptime is None:
-            uptime = _safe_int(_nested(info, ("uptime",)))
         restart_signals: list[str] = []
         if uptime is not None and "uptime" in previous_boot and uptime < previous_boot["uptime"]:
             restart_signals.append("uptime")

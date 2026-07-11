@@ -10,6 +10,7 @@
 #include "../../ble/BleService.h"
 #include "../../ble/settings/BleSettingsService.h"
 #include "../../compensation/CompensationSettingsService.h"
+#include "../../config/App.h"
 #include "../../keyboard/KeyboardService.h"
 #include "../../keyboard/KeyboardSettingsService.h"
 #include "../../macros/MacroService.h"
@@ -26,6 +27,16 @@
 #include "../../wifisensing/csi/core/CsiService.h"
 
 #include <esp_system.h>
+
+#ifndef APP_VERSION
+#define APP_VERSION APP::VERSION
+#endif
+#ifndef APP_NAME
+#define APP_NAME APP::NAME
+#endif
+#ifndef BUILD_TARGET
+#define BUILD_TARGET "esp32s3"
+#endif
 
 namespace API {
 
@@ -154,12 +165,13 @@ esp_err_t DiagnosticsApiService::handleFeatures(PsychicRequest* request) {
 
 DiagnosticsSummarySnapshot DiagnosticsApiService::buildSummarySnapshot() const {
     DiagnosticsSummarySnapshot snapshot{};
-    const SystemInfoSnapshot info = buildSystemInfoSnapshot(_deps.info);
-
-    snapshot.firmwareName = info.firmwareName;
-    snapshot.firmwareVersion = info.firmwareVersion;
-    snapshot.buildTarget = info.buildTarget;
-    snapshot.uptimeSec = info.uptimeSec;
+    // Keep the frequently polled diagnostics path independent from the full
+    // system-info snapshot. That snapshot also reads filesystem usage and is
+    // intentionally more expensive than the runtime health summary.
+    snapshot.firmwareName = APP_NAME;
+    snapshot.firmwareVersion = APP_VERSION;
+    snapshot.buildTarget = BUILD_TARGET;
+    snapshot.uptimeSec = millis() / 1000;
     snapshot.heap = buildDiagnosticsHeapSnapshot();
     snapshot.http = SYSTEM::HEALTH::HttpServerHealthTracker::getSnapshot();
     snapshot.watchdog.initialized =

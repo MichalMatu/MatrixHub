@@ -54,7 +54,6 @@ namespace CSI { class CsiService; }
 namespace API {
 
 struct DiagnosticsApiDeps {
-    SystemApiInfoDeps info;
     SystemApiTaskDeps tasks;
     WIFISENSING::WifiSensingSettings* wifiSensingSettings = nullptr;
     WIFISENSING::WifiSensingService* wifiSensingService = nullptr;
