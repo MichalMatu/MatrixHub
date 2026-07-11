@@ -89,7 +89,7 @@ void test_brightness_precedes_rotation_and_content_and_keeps_muted_frame_untouch
     TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
     TEST_ASSERT_EQUAL_HEX32(0x00AA00, matrix().lastFillColor);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
-    TEST_ASSERT_EQUAL_UINT32(1, matrix().stopCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().pauseEffectCalls);
     TEST_ASSERT_FALSE(service.isActive());
 }
 
@@ -206,6 +206,32 @@ void test_restore_from_zero_does_not_flash_pre_mute_frame_before_new_content() {
     TEST_ASSERT_EQUAL_UINT32(1, matrix().restoreOutputCalls);
 }
 
+void test_brightness_is_applied_before_effect_ownership_moves_to_scrolling_text() {
+    MatrixService service;
+    initialize(service);
+
+    service.showEffect(3, 500, 0x112233, 0x223344, 0x334455);
+    service.loop();
+    matrix().resetCounters();
+
+    // Queue content first to prove mailbox priority, not caller order, keeps a
+    // brightness update out of the pause -> first-text-frame transition window.
+    service.showText("NEXT", 0xAABBCC);
+    service.setBrightness(16);
+
+    service.loop();
+    TEST_ASSERT_EQUAL_UINT8(16, matrix().lastBrightness);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().pauseEffectCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawStringCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+
+    service.loop();
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().pauseEffectCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().drawStringCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+    TEST_ASSERT_EQUAL_HEX32(0xAABBCC, matrix().lastDrawColor);
+}
+
 void test_terminal_blackout_resets_service_icon_cache_for_same_icon_republish() {
     MatrixService service;
     initialize(service);
@@ -246,6 +272,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_expired_timeout_has_no_side_effect_while_hardware_and_content_mailbox_drains);
     RUN_TEST(test_is_active_stays_true_until_static_mailbox_is_fully_drained);
     RUN_TEST(test_restore_from_zero_does_not_flash_pre_mute_frame_before_new_content);
+    RUN_TEST(test_brightness_is_applied_before_effect_ownership_moves_to_scrolling_text);
     RUN_TEST(test_terminal_blackout_resets_service_icon_cache_for_same_icon_republish);
     return UNITY_END();
 }

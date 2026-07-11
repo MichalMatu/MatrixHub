@@ -33,6 +33,8 @@
 
 #include "WS2812FX.h"
 
+#include "EffectSafety.h"
+
 /* #####################################################
 #
 #  Mode Functions
@@ -389,20 +391,13 @@ uint16_t WS2812FX::mode_hyper_sparkle(void) {
  * Strobe effect with different strobe count and pause, controlled by speed.
  */
 uint16_t WS2812FX::mode_multi_strobe(void) {
-  fill(_seg->colors[1], _seg->start, _seg_len);
+  const uint8_t phase = static_cast<uint8_t>(_seg_rt->counter_mode_step & 0x03U);
+  const bool litFrame = phase == 0 || phase == 2;
+  fill(litFrame ? _seg->colors[0] : _seg->colors[1], _seg->start, _seg_len);
 
-  uint16_t delay = 200 + ((9 - (_seg->speed % 10)) * 100);
-  uint16_t count = 2 * ((_seg->speed / 100) + 1);
-  if(_seg_rt->counter_mode_step < count) {
-    if((_seg_rt->counter_mode_step & 1) == 0) {
-      fill(_seg->colors[0], _seg->start, _seg_len);
-      delay = 20;
-    } else {
-      delay = 50;
-    }
-  }
-
-  _seg_rt->counter_mode_step = (_seg_rt->counter_mode_step + 1) % (count + 1);
+  const uint16_t delay = WS2812FX_DETAIL::safeMultiStrobePhaseDelay(
+    _seg->speed, phase);
+  _seg_rt->counter_mode_step = (phase + 1U) & 0x03U;
   if(_seg_rt->counter_mode_step == 0) SET_CYCLE;
   return delay;
 }
@@ -587,10 +582,10 @@ uint16_t WS2812FX::mode_comet(void) {
  * Firework sparks.
  */
 uint16_t WS2812FX::mode_fireworks(void) {
-  uint32_t color = BLACK;
-  do { // randomly choose a non-BLACK color from the colors array
-    color = _seg->colors[random8(MAX_NUM_COLORS)];
-  } while (color == BLACK);
+  uint32_t color = WS2812FX_DETAIL::selectVisibleColor(
+    _seg->colors, MAX_NUM_COLORS, random8(), BLACK);
+  // An all-black palette is valid input from the API. Keep it fail-dark while
+  // completing in bounded time instead of retrying under the MatrixTask mutex.
   return fireworks(color);
 }
 
@@ -879,8 +874,7 @@ uint16_t WS2812FX::mode_trifade(void) {
 // create pulses that start in the middle of the segment and move toward it's edges
 // time two pulses to mimic a heartbeat
 uint16_t WS2812FX::mode_heartbeat(void) {
-  static unsigned long then = 0;
-  unsigned long now = millis();
+  const uint32_t now = millis();
 
   // Get and translate the segment's size option
   uint8_t size = 2 << ((_seg->options >> 1) & 0x03); // 2,4,8,16
@@ -894,7 +888,16 @@ uint16_t WS2812FX::mode_heartbeat(void) {
 
   fade_out();
 
-  int beatTimer = now - then;
+  if(_seg_rt->counter_mode_call == 0) {
+    uint16_t startLed = _seg->start + (_seg_len / 2) - size;
+    fill(_seg->colors[0], startLed, size * 2);
+    _seg_rt->aux_param = false;
+    _seg_rt->counter_mode_step = now;
+    SET_CYCLE;
+    return(_seg->speed / 32);
+  }
+
+  const uint32_t beatTimer = now - _seg_rt->counter_mode_step;
   if((beatTimer > 400) && !_seg_rt->aux_param) { // time for the second beat? (400ms after the first beat)
     uint16_t startLed = _seg->start + (_seg_len / 2) - size;
     fill(_seg->colors[0], startLed, size * 2); // create the second beat
@@ -906,7 +909,7 @@ uint16_t WS2812FX::mode_heartbeat(void) {
     fill(_seg->colors[0], startLed, size * 2); // create the first beat
 
     _seg_rt->aux_param = false; // is first beat
-    then = now; // reset the beat timer
+    _seg_rt->counter_mode_step = now; // reset the beat timer
     SET_CYCLE;
   }
 
@@ -940,15 +943,22 @@ uint16_t WS2812FX::mode_bits(void) {
 }
 
 uint16_t WS2812FX::mode_multi_comet(void) {
-  static uint16_t comets[6];
+  WS2812FXEffectRuntime& effectState =
+    _effect_runtimes[static_cast<size_t>(_seg_rt - _segment_runtimes)];
 
-  // if external data source not set, config for two comets.
+  // if external data source not set, config for six comets.
   // note: the multi_comet data array is data type uint16_t, but extDataSrc
   // is uint8_t, so be careful when you cast and count an external data source.
   // i.e. uint16_t cometData[4]; // four comets
   //      setExtDataSrc(0, (uint8_t*)cometData, sizeof(cometData) / sizeof(cometData[0]));
-  uint16_t* src = _seg_rt->extDataSrc != NULL ? (uint16_t*)_seg_rt->extDataSrc : comets;
+  uint16_t* src = _seg_rt->extDataSrc != NULL
+    ? (uint16_t*)_seg_rt->extDataSrc
+    : effectState.comets;
   uint16_t  cnt = _seg_rt->extDataCnt != 0    ? _seg_rt->extDataCnt            : 6;
+
+  if(_seg_rt->extDataSrc == NULL && _seg_rt->counter_mode_call == 0) {
+    WS2812FX_DETAIL::initializeComets(effectState, _seg_len);
+  }
 
   fade_out();
 
@@ -973,16 +983,22 @@ uint16_t WS2812FX::mode_multi_comet(void) {
 }
 
 uint16_t WS2812FX::mode_popcorn(void) {
-  static Popcorn popcorn[5]; // allocate space for 5 kernels of popcorn
+  WS2812FXEffectRuntime& effectState =
+    _effect_runtimes[static_cast<size_t>(_seg_rt - _segment_runtimes)];
 
   // if external data source not set, config for five popcorn kernels
-  Popcorn* src = _seg_rt->extDataSrc != NULL ? (Popcorn*)_seg_rt->extDataSrc : popcorn;
+  Popcorn* src = _seg_rt->extDataSrc != NULL
+    ? (Popcorn*)_seg_rt->extDataSrc
+    : effectState.popcorn;
   uint16_t cnt = _seg_rt->extDataCnt != 0    ? _seg_rt->extDataCnt           : 5;
 
-  static float coeff = 0.0f;
-  if(coeff == 0.0f) { // calculate the velocity coeff once (the secret sauce)
-    coeff = pow((float)_seg_len, 0.5223324f) * 0.3944296f;
+  if(_seg_rt->counter_mode_call == 0) {
+    effectState.popcornCoeff = pow((float)_seg_len, 0.5223324f) * 0.3944296f;
+    if(_seg_rt->extDataSrc == NULL) {
+      WS2812FX_DETAIL::initializePopcorn(effectState);
+    }
   }
+  const float coeff = effectState.popcornCoeff;
 
   uint32_t bgColor = _seg->colors[1];
   fill(bgColor, _seg->start, _seg_len); // reset all LEDs to the background color
@@ -1012,13 +1028,17 @@ uint16_t WS2812FX::mode_popcorn(void) {
 }
 
 uint16_t WS2812FX::mode_oscillator(void) {
-  static Oscillator oscillators[] = { // 2 default oscillators
-    {(uint8_t)(_seg_len/4),                        0,  1}, // size, pos, speed
-    {(uint8_t)(_seg_len/4),  (uint16_t)(_seg_len - 1), -2}
-  };
+  WS2812FXEffectRuntime& effectState =
+    _effect_runtimes[static_cast<size_t>(_seg_rt - _segment_runtimes)];
+
+  if(_seg_rt->extDataSrc == NULL && _seg_rt->counter_mode_call == 0) {
+    WS2812FX_DETAIL::initializeOscillators(effectState, _seg_len);
+  }
 
   // if external data source not set, config for two oscillators.
-  Oscillator* src = _seg_rt->extDataSrc != NULL ? (Oscillator*)_seg_rt->extDataSrc : oscillators;
+  Oscillator* src = _seg_rt->extDataSrc != NULL
+    ? (Oscillator*)_seg_rt->extDataSrc
+    : effectState.oscillators;
   uint16_t cnt    = _seg_rt->extDataCnt != 0    ? _seg_rt->extDataCnt              : 2;
 
   for(uint16_t i=0; i < cnt; i++) {

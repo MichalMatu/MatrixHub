@@ -19,7 +19,7 @@ void LedMatrix::begin(uint8_t pin) {
     // Create WS2812FX instance
     // The renderer passes logical RGB888 colors end-to-end, so the NeoPixel
     // byte order here must stay aligned with the physical panel wiring.
-    _strip = new WS2812FX(NUM_LEDS, pin, MATRIX_NEOPIXEL_TYPE);
+    _strip = new WS2812FX(NUM_LEDS, pin, MATRIX_NEOPIXEL_TYPE, 1, 1);
     
     _strip->init();
     _strip->setBrightness(_brightness);
@@ -38,6 +38,7 @@ void LedMatrix::service() {
     if (_strip && !_outputMuted) {
         if (_strip->service()) {
             _restorePending = false;
+            _pausedEffectFramePending = false;
         }
     }
 }
@@ -156,6 +157,7 @@ void LedMatrix::show() {
     if (_strip && !_outputMuted) {
         _strip->show();
         _restorePending = false;
+        _pausedEffectFramePending = false;
     }
 }
 
@@ -167,6 +169,7 @@ void LedMatrix::restoreOutputIfPending() {
     writeLogicalOutputFrame();
     _strip->show();
     _restorePending = false;
+    _pausedEffectFramePending = false;
 }
 
 void LedMatrix::setBrightness(uint8_t brightness) {
@@ -185,6 +188,7 @@ void LedMatrix::setBrightness(uint8_t brightness) {
 
     if (_outputMuted) {
         _restorePending = false;
+        _pausedEffectFramePending = false;
         writeBlackOutputFrame();
         _strip->show();
         return;
@@ -195,10 +199,29 @@ void LedMatrix::setBrightness(uint8_t brightness) {
         // command that was queued behind this higher-priority brightness
         // update. That prevents a one-tick flash of the pre-mute frame.
         _restorePending = true;
+        _pausedEffectFramePending = false;
         if (_strip->isRunning()) {
             writeBlackOutputFrame();
             _strip->start();
         }
+        return;
+    }
+
+    if (_restorePending) {
+        // A previous 0 -> non-zero transition is still waiting for the content
+        // mailbox to drain. Repeated cap changes may rescale the already-black
+        // transport buffer, but must not reveal the pre-mute logical frame or
+        // restart the pre-mute effect before the current owner renders.
+        return;
+    }
+
+    if (_pausedEffectFramePending) {
+        // A deferred text/native/data owner has not produced its first frame
+        // yet. Adafruit has already rescaled the held effect transport bytes;
+        // latch that still-current frame at the new cap instead of replacing
+        // it with the driver's intentionally black logical framebuffer.
+        _strip->show();
+        _restorePending = false;
         return;
     }
 
@@ -267,11 +290,21 @@ void LedMatrix::setExtDataSrc(uint8_t seg, uint8_t* src, uint8_t size) {
 }
 
 void LedMatrix::start() {
-    if (_strip) _strip->start();
+    if (_strip) {
+        _pausedEffectFramePending = false;
+        _strip->start();
+    }
 }
 
-void LedMatrix::stop() {
-    if (_strip) _strip->stop();
+void LedMatrix::pauseEffect() {
+    if (_strip) {
+        // Relinquish effect ownership without latching WS2812FX's implicit
+        // black frame. The renderer that takes ownership next commits its
+        // first complete frame, so transitions stay atomic on the LEDs.
+        const bool wasRunning = _strip->isRunning();
+        _strip->pause();
+        _pausedEffectFramePending = wasRunning;
+    }
 }
 
 bool LedMatrix::isRunning() const {

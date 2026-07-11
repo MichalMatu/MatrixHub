@@ -51,6 +51,8 @@
   #include <freertos/semphr.h>
 #endif
 
+#include "EffectRuntimeState.h"
+
 #define DEFAULT_BRIGHTNESS (uint8_t)16 /* set default brightness quite low to minimize current draw on startup */
 #define DEFAULT_MODE       (uint8_t)0
 #define DEFAULT_SPEED      (uint16_t)1000
@@ -405,7 +407,7 @@ class WS2812FX : public tinyNeoPixel {
       mode_oscillator(void);
 
   private:
-    uint16_t _rand16seed;
+    uint16_t _rand16seed = 0;
     void (*customShow)(void) = NULL;
 
     bool
@@ -414,6 +416,7 @@ class WS2812FX : public tinyNeoPixel {
 
     segment _segments[1];                  // array of segments (20 bytes per element)
     segment_runtime _segment_runtimes[1]; // array of segment runtimes (16 bytes per element)
+    WS2812FXEffectRuntime _effect_runtimes[1];
     uint8_t _active_segments[1];          // array of active segments (1 bytes per element)
 
     uint8_t _segments_len = 1;          // size of _segments array
@@ -468,6 +471,7 @@ class WS2812FX : public Adafruit_NeoPixel {
       _segments = new segment[_segments_len]();
       _active_segments = new uint8_t[_active_segments_len]();
       _segment_runtimes = new segment_runtime[_active_segments_len]();
+      _effect_runtimes = new WS2812FXEffectRuntime[_active_segments_len]();
 
       // init segment pointers
       _seg     = _segments;
@@ -494,6 +498,7 @@ class WS2812FX : public Adafruit_NeoPixel {
       delete[] _segments;
       delete[] _active_segments;
       delete[] _segment_runtimes;
+      delete[] _effect_runtimes;
     }
 
     void
@@ -712,15 +717,16 @@ class WS2812FX : public Adafruit_NeoPixel {
       mode_oscillator(void);
 
   private:
-    uint16_t _rand16seed;
+    uint16_t _rand16seed = 0;
     void (*customShow)(void) = NULL;
 
     bool
-      _running,
-      _triggered;
+      _running = false,
+      _triggered = false;
 
     segment* _segments;                 // array of segments (20 bytes per element)
     segment_runtime* _segment_runtimes; // array of segment runtimes (16 bytes per element)
+    WS2812FXEffectRuntime* _effect_runtimes;
     uint8_t* _active_segments;          // array of active segments (1 bytes per element)
 
     uint8_t _segments_len = 0;          // size of _segments array
@@ -811,20 +817,6 @@ class WS2812FXT {
     bool transitionDirection = true;
 };
 #endif
-
-// data struct used by the popcorn effect
-struct Popcorn {
-  float position;
-  float velocity;
-  int32_t color;
-};
-
-// data struct used by the oscillator effect
-struct Oscillator {
-  uint8_t size;
-  uint16_t pos;
-  int8_t  speed;
-};
 
 #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
   #include "modes_esp.h"

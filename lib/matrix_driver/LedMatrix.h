@@ -18,7 +18,8 @@ public:
           _brightness(50),
           _rotation(0),
           _outputMuted(false),
-          _restorePending(false) {}
+          _restorePending(false),
+          _pausedEffectFramePending(false) {}
     
     /**
      * @brief Initialize the LED matrix
@@ -90,7 +91,7 @@ public:
     void setSegment(uint8_t seg, uint16_t start, uint16_t stop, uint8_t mode, uint32_t color, uint16_t speed, bool reverse);
     void setExtDataSrc(uint8_t seg, uint8_t* src, uint8_t size);
     void start();
-    void stop();
+    void pauseEffect();
     bool isRunning() const;
 
 private:
@@ -99,6 +100,10 @@ private:
     uint8_t _rotation;
     bool _outputMuted;
     bool _restorePending;
+    // A paused legacy effect leaves its last complete transport frame in the
+    // strip buffer. Preserve it until the incoming owner commits a frame so a
+    // concurrent brightness update cannot expose the logical black buffer.
+    bool _pausedEffectFramePending;
     // Adafruit_NeoPixel stores brightness-scaled bytes, so changing brightness
     // cannot restore an exact static frame from the transport buffer. Keep the
     // 8x8 logical RGB frame here and treat the strip buffer as write-only.

@@ -191,4 +191,35 @@ kept until the first fresh sample, including HARD/SOFT hysteresis. This is a
 Matrix safety guarantee only; a complete hot-restart audit of CPU frequency,
 WiFi power-save cache, and BLE scan/power actuators remains outside G2.3a.
 
+### 7. Legacy effect entry, exit, and flash safety
+
+Legacy WS2812FX output is an owner of the transport buffer, not a second static
+frame source. `LedMatrix::pauseEffect()` only releases that ownership; it must
+not call vendor `stop()`, because `stop()` immediately transmits a black frame.
+The incoming text, icon, solid, Native3D, data-visualization, or terminal
+blackout path is responsible for the next and only visible latch.
+
+Entering or changing a legacy effect first clears all 64 transport pixels in
+memory without calling `show()`. This makes partial-update modes independent of
+the previous icon, alarm, or effect while preserving an atomic visible owner
+swap. `MatrixState` prioritizes brightness already queued before content. If a
+thermal update arrives after an effect is paused but before the deferred first
+scroll/native/data frame, `LedMatrix` rescales and re-latches the held complete
+effect frame rather than exposing its intentionally black logical framebuffer.
+
+Effect runtime must be instance- and segment-owned. Heartbeat timing, default
+comets, popcorn kernels, and oscillators are reset on mode entry; function-static
+mutable state is forbidden because it leaks history across re-entry and fresh
+driver instances. `_triggered` and the PRNG seed also have explicit initial
+values. Frame deadlines use signed-delta comparison so equality and `millis()`
+rollover are both handled.
+
+All-black Fireworks is valid and fail-dark. Color selection scans the three
+palette entries in bounded time and never retries while the MatrixTask holds the
+WS2812FX mutex. Full-frame Blink/Strobe modes enforce a minimum 500 ms cycle;
+Multi Strobe is a bounded double pulse with a minimum 1000 ms cycle. Localized
+flash modes (Flash Sparkle, Hyper Sparkle, and Chase Flash variants) remain in
+the advanced catalog pending a documented area/contrast policy and frame-trace
+gate in the next G2.3b slice.
+
 Navigation: [Project README](../../../README.md) · [Engineering Reference](../README.md) · [Architecture](../README.md#runtime-and-architecture)

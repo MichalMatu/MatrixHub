@@ -32,6 +32,7 @@
 */
 #include "WS2812FX.h"
 #include "BrightnessLimiter.h"
+#include "EffectSafety.h"
 
 /*
   overload Adafruit_NeoPixel fill() function to respect segment boundaries
@@ -69,11 +70,15 @@ uint16_t WS2812FX::blink(uint32_t color1, uint32_t color2, bool strobe) {
     uint32_t color = (IS_REVERSE) ? color1 : color2; // off
     fill(color, _seg->start, _seg_len);
     SET_CYCLE;
-    return strobe ? _seg->speed - 20 : (_seg->speed / 2);
+    return strobe
+      ? WS2812FX_DETAIL::safeStrobePhaseDelay(_seg->speed, false)
+      : WS2812FX_DETAIL::safeBlinkPhaseDelay(_seg->speed);
   } else {
     uint32_t color = (IS_REVERSE) ? color2 : color1; // on
     fill(color, _seg->start, _seg_len);
-    return strobe ? 20 : (_seg->speed / 2);
+    return strobe
+      ? WS2812FX_DETAIL::safeStrobePhaseDelay(_seg->speed, true)
+      : WS2812FX_DETAIL::safeBlinkPhaseDelay(_seg->speed);
   }
 }
 

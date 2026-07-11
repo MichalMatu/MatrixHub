@@ -88,9 +88,9 @@ public:
         running = true;
         startCalls++;
     }
-    void stop() {
+    void pauseEffect() {
         running = false;
-        stopCalls++;
+        pauseEffectCalls++;
     }
     bool isRunning() const { return running; }
 
@@ -101,7 +101,7 @@ public:
         drawBitmapCalls = 0;
         serviceCalls = 0;
         startCalls = 0;
-        stopCalls = 0;
+        pauseEffectCalls = 0;
         setPixelCalls = 0;
         restoreOutputCalls = 0;
     }
@@ -137,7 +137,7 @@ public:
     uint32_t drawBitmapCalls = 0;
     uint32_t serviceCalls = 0;
     uint32_t startCalls = 0;
-    uint32_t stopCalls = 0;
+    uint32_t pauseEffectCalls = 0;
     uint32_t setPixelCalls = 0;
     uint32_t restoreOutputCalls = 0;
     bool running = false;

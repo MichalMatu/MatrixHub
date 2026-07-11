@@ -328,6 +328,31 @@ G2.3a thermal/brightness acceptance procedure:
 `operations/matrix-thermal-brightness-gate.md`. Automated evidence is necessary
 but cannot replace the current/light and locked-camera checks in that gate.
 
+G2.3b safety slice (candidate, not full G2 closure):
+
+- legacy Fireworks terminates for an all-black palette and remains fail-dark,
+- legacy owner changes no longer latch the vendor's intermediate black frame;
+  partial-update effects start from a cleared, unlatched transport buffer,
+- mutable Heartbeat/Multi Comet/Popcorn/Oscillator state is per active segment
+  and is reinitialized on mode entry; trigger and PRNG state are initialized,
+- effect deadlines are inclusive and rollover-safe,
+- full-frame Blink/Strobe modes have bounded low-flash cadence, including a
+  non-bursty double-pulse replacement for Multi Strobe.
+
+Checkpoint evidence (2026-07-11):
+
+- native suite: 1,313 passed; the reviewed-real-CSI corpus gate was the only
+  intentional skip,
+- frontend lint and `svelte-check`: zero errors and zero warnings,
+- ESP32-S3 development build: 82,296 bytes RAM (25.1%) and 3,166,759 bytes
+  application flash (90.4%).
+
+This slice does not close G2.3b. Remaining work includes real-engine golden
+sequences for all 70 legacy modes, an explicit localized-flash policy for IDs
+24/25/34/35, one high-precision brightness/gamma pipeline, rotation-aware
+geometry, a curated manifest-driven commercial catalog, and physical
+locked-camera/current evidence.
+
 ## G3 — Shared UI State Model, Tokens, And Accessibility
 
 Purpose: make every screen feel like one product before polishing pages one by

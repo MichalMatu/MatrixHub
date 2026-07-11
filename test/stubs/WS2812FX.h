@@ -21,8 +21,13 @@ class WS2812FX {
 public:
     inline static WS2812FX* lastInstance = nullptr;
 
-    WS2812FX(uint16_t pixelCount, uint8_t pin, uint8_t type)
-        : pixels(pixelCount, 0), shownPixels(pixelCount, 0), pin(pin), type(type) {
+    WS2812FX(uint16_t pixelCount,
+             uint8_t pin,
+             uint8_t type,
+             uint8_t maxSegments = 10,
+             uint8_t maxActiveSegments = 10)
+        : pixels(pixelCount, 0), shownPixels(pixelCount, 0), pin(pin), type(type),
+          maxSegments(maxSegments), maxActiveSegments(maxActiveSegments) {
         lastInstance = this;
     }
 
@@ -45,6 +50,11 @@ public:
         }
     }
     void setBrightness(uint8_t value) {
+        if (value != brightness) {
+            for (uint32_t& color : pixels) {
+                color = rescaleColor(color, brightness, value);
+            }
+        }
         brightness = value;
         setBrightnessCalls++;
     }
@@ -83,7 +93,16 @@ public:
         startCalls++;
     }
     void trigger() { triggerCalls++; }
-    void stop() { running = false; }
+    void stop() {
+        running = false;
+        stopCalls++;
+        pixels.assign(pixels.size(), 0);
+        show();
+    }
+    void pause() {
+        running = false;
+        pauseCalls++;
+    }
     bool isRunning() const { return running; }
 
     static uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
@@ -100,11 +119,39 @@ public:
                static_cast<uint32_t>(scaleChannel(color & 0xFFU, brightness));
     }
 
+    static uint8_t rescaleTransportChannel(uint8_t value,
+                                           uint8_t oldBrightness,
+                                           uint8_t newBrightness) {
+        uint16_t scale = 0;
+        if (oldBrightness == 0) {
+            scale = 0;
+        } else if (newBrightness == 255) {
+            scale = static_cast<uint16_t>(65535U / oldBrightness);
+        } else {
+            const uint16_t encodedNew = static_cast<uint16_t>(newBrightness) + 1U;
+            scale = static_cast<uint16_t>(((encodedNew << 8U) - 1U) / oldBrightness);
+        }
+        return static_cast<uint8_t>((static_cast<uint16_t>(value) * scale) >> 8U);
+    }
+
+    static uint32_t rescaleColor(uint32_t color,
+                                 uint8_t oldBrightness,
+                                 uint8_t newBrightness) {
+        return (static_cast<uint32_t>(rescaleTransportChannel(
+                    (color >> 16U) & 0xFFU, oldBrightness, newBrightness)) << 16U) |
+               (static_cast<uint32_t>(rescaleTransportChannel(
+                    (color >> 8U) & 0xFFU, oldBrightness, newBrightness)) << 8U) |
+               static_cast<uint32_t>(rescaleTransportChannel(
+                    color & 0xFFU, oldBrightness, newBrightness));
+    }
+
     std::vector<uint32_t> pixels;
     std::vector<uint32_t> shownPixels;
     uint8_t pin = 0;
     uint8_t type = 0;
-    uint8_t brightness = 0;
+    uint8_t maxSegments = 0;
+    uint8_t maxActiveSegments = 0;
+    uint8_t brightness = 255;
     uint8_t mode = 0;
     uint16_t speed = 0;
     uint32_t colors[3] = {0, 0, 0};
@@ -114,6 +161,8 @@ public:
     uint32_t setBrightnessCalls = 0;
     uint32_t startCalls = 0;
     uint32_t triggerCalls = 0;
+    uint32_t stopCalls = 0;
+    uint32_t pauseCalls = 0;
     bool initialized = false;
     bool running = false;
     bool serviceRenderedFrame = true;

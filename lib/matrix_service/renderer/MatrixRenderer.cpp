@@ -17,7 +17,7 @@ void MatrixRenderer::blackout() {
     if (!_matrix) return;
 
     if (_effectRunning) {
-        _matrix->stop();
+        _matrix->pauseEffect();
         _effectRunning = false;
     }
     if (_nativeEffectRunning) {
@@ -48,7 +48,7 @@ void MatrixRenderer::begin(uint8_t pin) {
     // Configure WS2812FX segment for effects
     _matrix->setSegment(0, 0, UI::MATRIX::LED_COUNT - 1, FX_MODE_STATIC, 0x000000, UI::MATRIX::DEFAULT_EFFECT_SPEED, false);
     
-    _matrix->stop();
+    _matrix->pauseEffect();
     _matrix->fillScreen(0);
     _matrix->show();
     
@@ -113,7 +113,7 @@ void MatrixRenderer::showText(const char* text, uint32_t color) {
     
     // Stop FX if running
     if (_effectRunning) {
-        _matrix->stop();
+        _matrix->pauseEffect();
         _effectRunning = false;
     }
     if (_nativeEffectRunning) {
@@ -165,7 +165,7 @@ void MatrixRenderer::showText(const char* text, uint32_t color) {
 void MatrixRenderer::showSolid(uint32_t color) {
     if (!_matrix) return;
     
-    if (_effectRunning) { _matrix->stop(); _effectRunning = false; }
+    if (_effectRunning) { _matrix->pauseEffect(); _effectRunning = false; }
     if (_nativeEffectRunning) { _nativeEngine.reset(); _nativeEffectRunning = false; }
     if (_dataVisualizationRunning) { _dataVisualizationEngine.reset(); _dataVisualizationRunning = false; }
     _scrolling = false;
@@ -204,9 +204,9 @@ void MatrixRenderer::blackoutForShutdown() {
 void MatrixRenderer::setRotation(uint8_t rotation) {
     if (_matrix) {
         _matrix->setRotation(rotation);
-        if (_scrolling) {
-            _matrix->fillScreen(0);  // Clear stale pixels; scroll continues from current _x
-        }
+        // Scrolling loop() clears, redraws, and latches one complete frame.
+        // Do not mutate the transport buffer here: a paused legacy effect may
+        // still be the held visible frame until that atomic redraw occurs.
         // Defer a static icon repaint until MatrixService confirms that no newer
         // visible command is still queued behind this hardware update.
         if (!_scrolling && !_effectRunning && !_nativeEffectRunning && !_dataVisualizationRunning && _activeIcon != IconType::NONE) {
@@ -229,7 +229,7 @@ bool MatrixRenderer::isActive() const {
 void MatrixRenderer::showIcon(IconType icon, const uint32_t* customBitmap) {
     if (!_matrix) return;
     
-    if (_effectRunning) { _matrix->stop(); _effectRunning = false; }
+    if (_effectRunning) { _matrix->pauseEffect(); _effectRunning = false; }
     if (_nativeEffectRunning) { _nativeEngine.reset(); _nativeEffectRunning = false; }
     if (_dataVisualizationRunning) { _dataVisualizationEngine.reset(); _dataVisualizationRunning = false; }
     _scrolling = false;
@@ -265,6 +265,12 @@ void MatrixRenderer::showEffect(uint8_t mode, uint32_t speed, uint32_t color, ui
     // Guard the renderer too, so invalid values from stale state or a future
     // caller still fall back to a known-good effect.
     const uint8_t normalizedMode = MATRIX::normalizeMatrixEffectMode(mode);
+
+    // Many legacy modes update only part of their transport buffer per tick.
+    // Poisoning that buffer with the previous icon, alarm, or effect made the
+    // first frames depend on history. Clear it in memory without show(); the
+    // first effect frame becomes the single visible ownership transition.
+    _matrix->fillScreen(0);
     
     _effectSpeedMs = speed < UI::MATRIX::MIN_EFFECT_SPEED
         ? UI::MATRIX::MIN_EFFECT_SPEED
@@ -294,7 +300,7 @@ void MatrixRenderer::showNative3DEffect(uint8_t mode,
     if (!_matrix) return;
 
     if (_effectRunning) {
-        _matrix->stop();
+        _matrix->pauseEffect();
         _effectRunning = false;
     }
     if (_dataVisualizationRunning) {
@@ -331,7 +337,7 @@ void MatrixRenderer::showDataVisualization(const MATRIX::MatrixDataVisualization
     if (!_matrix) return;
 
     if (_effectRunning) {
-        _matrix->stop();
+        _matrix->pauseEffect();
         _effectRunning = false;
     }
     if (_nativeEffectRunning) {

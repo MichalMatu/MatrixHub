@@ -53,6 +53,7 @@
 */
 
 #include "WS2812FX.h"
+#include "EffectSafety.h"
 
 #if defined(ESP32)
   #include <freertos/task.h>
@@ -82,7 +83,7 @@ bool WS2812FX::service() {
         _seg_len = (uint16_t)(_seg->stop - _seg->start + 1);
         _seg_rt  = &_segment_runtimes[i];
         CLR_FRAME_CYCLE;
-        if(now > _seg_rt->next_time || _triggered) {
+        if(WS2812FX_DETAIL::isFrameDue(now, _seg_rt->next_time) || _triggered) {
           SET_FRAME;
           doShow = true;
           uint16_t delay = (MODE_PTR(_seg->mode))();
@@ -532,12 +533,13 @@ void WS2812FX::swapActiveSegment(uint8_t oldSeg, uint8_t newSeg) {
 
       // reset all runtime parameters EXCEPT next_time,
       // allowing the current animation frame to complete
-      __attribute__ ((unused)) segment_runtime seg_rt = _segment_runtimes[i];
+      segment_runtime& seg_rt = _segment_runtimes[i];
       seg_rt.counter_mode_step = 0;
       seg_rt.counter_mode_call = 0;
       seg_rt.aux_param = 0;
       seg_rt.aux_param2 = 0;
       seg_rt.aux_param3 = 0;
+      _effect_runtimes[i] = WS2812FXEffectRuntime{};
       break;
     }
   }
@@ -563,14 +565,20 @@ void WS2812FX::resetSegmentRuntimes() {
 }
 
 void WS2812FX::resetSegmentRuntime(uint8_t seg) {
-  uint8_t* ptr = (uint8_t*)memchr(_active_segments, seg, _active_segments_len);
-  if(ptr == NULL) return; // segment not active
-  _segment_runtimes[seg].next_time = 0;
-  _segment_runtimes[seg].counter_mode_step = 0;
-  _segment_runtimes[seg].counter_mode_call = 0;
-  _segment_runtimes[seg].aux_param = 0;
-  _segment_runtimes[seg].aux_param2 = 0;
-  _segment_runtimes[seg].aux_param3 = 0;
+  const size_t runtimeSlot = WS2812FX_DETAIL::findActiveSegmentSlot(
+    _active_segments, _active_segments_len, seg);
+  if(runtimeSlot == WS2812FX_DETAIL::kNoRuntimeSlot) return; // segment not active
+  // A zero sentinel is not compatible with signed-delta deadline comparison
+  // after 2^31 ms of uptime. Reset to the current clock so the first frame is
+  // immediately due at every millis() value, including around rollover.
+  _segment_runtimes[runtimeSlot].next_time =
+    WS2812FX_DETAIL::immediateFrameDeadline(millis());
+  _segment_runtimes[runtimeSlot].counter_mode_step = 0;
+  _segment_runtimes[runtimeSlot].counter_mode_call = 0;
+  _segment_runtimes[runtimeSlot].aux_param = 0;
+  _segment_runtimes[runtimeSlot].aux_param2 = 0;
+  _segment_runtimes[runtimeSlot].aux_param3 = 0;
+  _effect_runtimes[runtimeSlot] = WS2812FXEffectRuntime{};
   // don't reset any external data source
 }
 

@@ -39,7 +39,25 @@ void test_show_effect_normalizes_unsupported_mode() {
     TEST_ASSERT_EQUAL_HEX32(0x010203, matrix().lastColor1);
     TEST_ASSERT_EQUAL_HEX32(0x040506, matrix().lastColor2);
     TEST_ASSERT_EQUAL_HEX32(0x070809, matrix().lastColor3);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().startCalls);
+}
+
+void test_switching_legacy_effects_clears_poisoned_transport_without_black_latch() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showEffect(3, 750, 0x010203, 0x040506, 0x070809);
+    matrix().resetCounters();
+
+    renderer.showEffect(58, 800, 0x102030, 0x405060, 0x708090);
+
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().pauseEffectCalls);
+    TEST_ASSERT_EQUAL_UINT8(58, matrix().lastMode);
 }
 
 void test_show_text_same_text_new_color_repaints() {
@@ -166,7 +184,7 @@ void test_runtime_zero_mutes_legacy_effect_and_restore_resumes_it() {
 
     TEST_ASSERT_EQUAL_UINT8(0, matrix().lastBrightness);
     TEST_ASSERT_FALSE(renderer.isActive());
-    TEST_ASSERT_EQUAL_UINT32(0, matrix().stopCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().pauseEffectCalls);
     TEST_ASSERT_EQUAL_UINT32(0, matrix().fillCalls);
     TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
 
@@ -317,6 +335,24 @@ void test_rotation_defers_static_icon_repaint_until_renderer_loop() {
     TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
 }
 
+void test_scrolling_rotation_waits_for_complete_frame_before_clearing_transport() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showEffect(3, 500, 0x112233, 0x223344, 0x334455);
+    renderer.showText("ROTATE", 0xAABBCC);
+    matrix().resetCounters();
+
+    renderer.setRotation(1);
+
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+
+    renderer.loop();
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().drawStringCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+}
+
 void test_terminal_blackout_still_discards_renderer_modes() {
     MatrixRenderer renderer;
     renderer.begin(5);
@@ -327,7 +363,7 @@ void test_terminal_blackout_still_discards_renderer_modes() {
 
     TEST_ASSERT_EQUAL_UINT8(UI::MATRIX::BRIGHTNESS_DEFAULT, matrix().lastBrightness);
     TEST_ASSERT_FALSE(renderer.isActive());
-    TEST_ASSERT_EQUAL_UINT32(1, matrix().stopCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().pauseEffectCalls);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
     TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
@@ -342,6 +378,7 @@ void test_terminal_blackout_still_discards_renderer_modes() {
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_show_effect_normalizes_unsupported_mode);
+    RUN_TEST(test_switching_legacy_effects_clears_poisoned_transport_without_black_latch);
     RUN_TEST(test_show_text_same_text_new_color_repaints);
     RUN_TEST(test_show_text_same_text_same_color_is_deduplicated);
     RUN_TEST(test_show_text_after_effect_renders_immediately);
@@ -355,6 +392,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_runtime_zero_does_not_destroy_static_content_state);
     RUN_TEST(test_runtime_zero_does_not_destroy_static_icon_state);
     RUN_TEST(test_rotation_defers_static_icon_repaint_until_renderer_loop);
+    RUN_TEST(test_scrolling_rotation_waits_for_complete_frame_before_clearing_transport);
     RUN_TEST(test_terminal_blackout_still_discards_renderer_modes);
     return UNITY_END();
 }
