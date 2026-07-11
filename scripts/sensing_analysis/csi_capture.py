@@ -210,8 +210,8 @@ def parse_firmware_commit(value: str) -> str:
 
 
 def require_promotable_provenance(source: dict[str, Any]) -> None:
-    commit = str(source.get("firmware_commit", "")).strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+    commit = source.get("firmware_commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise CaptureWorkflowError(
             "promotion requires an exact clean 40-hex firmware_commit"
         )
@@ -232,8 +232,9 @@ def require_promotable_provenance(source: dict[str, Any]) -> None:
     incomplete = [
         field
         for field in required_fields
-        if not str(source.get(field, "")).strip()
-        or str(source.get(field, "")).strip().lower() == "unknown"
+        if not isinstance(source.get(field), str)
+        or not source[field].strip()
+        or source[field].strip().lower() == "unknown"
     ]
     if incomplete:
         raise CaptureWorkflowError(
@@ -1147,11 +1148,14 @@ def promote_capture(args: argparse.Namespace) -> Path:
             "board_env": str(source.get("board_env", BOARD_ENV)),
             "firmware_version": str(source.get("firmware_version", "unknown")),
             "firmware_commit": str(source.get("firmware_commit", "unknown")),
+            "firmware_dirty": source["firmware_dirty"],
+            "firmware_identity_verified": source["firmware_identity_verified"],
             "build_target": str(source.get("build_target", "unknown")),
             "esp_platform": str(source.get("esp_platform", "unknown")),
             "sdk_version": str(source.get("sdk_version", "unknown")),
             "arduino_version": str(source.get("arduino_version", "unknown")),
         }
+        require_promotable_provenance(promoted_scenario["source"])
         findings = find_sensitive_metadata(promoted_scenario)
         if findings:
             raise CaptureWorkflowError("refusing sensitive scenario metadata: " + "; ".join(findings))
@@ -1256,6 +1260,8 @@ def verify_capture(target: Path) -> dict[str, Any]:
             capture_path,
             require_reviewed=manifest_path is None,
         )
+        if manifest_path is None:
+            require_promotable_provenance(scenario["source"])
     return {
         "ok": True,
         "path": str(capture_path),

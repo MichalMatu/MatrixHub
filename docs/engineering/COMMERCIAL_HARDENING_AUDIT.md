@@ -193,6 +193,9 @@ Candidate findings addressed:
   fail-safe prerequisites used by firmware,
 - firmware builds expose embedded Git SHA/dirty identity and the collector
   verifies it against the expected flashed commit before creating evidence.
+- promotion preserves the collector-verified clean firmware identity fields
+  required by the native release parser; Python workflow and native parser
+  contract tests fail if that provenance handoff regresses.
 
 Remaining evidence gates:
 

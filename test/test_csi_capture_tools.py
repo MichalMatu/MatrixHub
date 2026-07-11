@@ -676,6 +676,17 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
             promoted_scenario = json.loads(
                 (promoted / SCENARIO_FILENAME).read_text(encoding="utf-8")
             )
+            invalid_promoted_scenario = json.loads(json.dumps(promoted_scenario))
+            del invalid_promoted_scenario["source"]["firmware_identity_verified"]
+            atomic_write_json(
+                promoted / SCENARIO_FILENAME,
+                invalid_promoted_scenario,
+            )
+            with self.assertRaisesRegex(
+                CaptureWorkflowError,
+                "collector-verified firmware identity",
+            ):
+                verify_capture(promoted)
 
         self.assertTrue(result["ok"])
         self.assertNotIn(source, promoted_bytes)
@@ -684,6 +695,26 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
         self.assertEqual(promoted_frames[0].destination_mac, bytes.fromhex("020000000002"))
         self.assertTrue(promoted_scenario["ground_truth"]["reviewed"])
         self.assertEqual(promoted_scenario["ground_truth"]["timeline"][1]["motion"], "present")
+        self.assertEqual(
+            set(promoted_scenario["source"]),
+            {
+                "kind",
+                "board_env",
+                "firmware_version",
+                "firmware_commit",
+                "firmware_dirty",
+                "firmware_identity_verified",
+                "build_target",
+                "esp_platform",
+                "sdk_version",
+                "arduino_version",
+            },
+        )
+        self.assertIs(promoted_scenario["source"]["firmware_dirty"], False)
+        self.assertIs(
+            promoted_scenario["source"]["firmware_identity_verified"],
+            True,
+        )
         self.assertNotIn("mac_address", json.dumps(promoted_scenario))
 
     def test_promotion_rejects_transport_loss(self):
@@ -809,24 +840,26 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                 )
 
     def test_promotion_requires_clean_firmware_provenance(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            capture_dir, _, _ = self.create_raw_capture(root)
-            self.mark_scenario_reviewed(capture_dir)
-            scenario_path = capture_dir / SCENARIO_FILENAME
-            scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
-            scenario["source"]["firmware_commit"] = f"{'a' * 40}-dirty"
-            atomic_write_json(scenario_path, scenario)
+        for invalid_commit in (f"{'a' * 40}-dirty", "A" * 40, 123):
+            with self.subTest(invalid_commit=invalid_commit):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    capture_dir, _, _ = self.create_raw_capture(root)
+                    self.mark_scenario_reviewed(capture_dir)
+                    scenario_path = capture_dir / SCENARIO_FILENAME
+                    scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+                    scenario["source"]["firmware_commit"] = invalid_commit
+                    atomic_write_json(scenario_path, scenario)
 
-            with self.assertRaisesRegex(CaptureWorkflowError, "clean 40-hex"):
-                promote_capture(
-                    SimpleNamespace(
-                        target=capture_dir,
-                        fixture_id="invalid-provenance-01",
-                        output_root=root / "fixtures",
-                        reviewed=True,
-                    )
-                )
+                    with self.assertRaisesRegex(CaptureWorkflowError, "clean 40-hex"):
+                        promote_capture(
+                            SimpleNamespace(
+                                target=capture_dir,
+                                fixture_id="invalid-provenance-01",
+                                output_root=root / "fixtures",
+                                reviewed=True,
+                            )
+                        )
 
     def test_verify_rejects_manifest_sequence_mismatch(self):
         with tempfile.TemporaryDirectory() as tmpdir:

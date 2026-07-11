@@ -18,7 +18,7 @@ std::string scenarioJson(const std::string& fixtureId,
                          const std::string& captureHash,
                          const std::string& timeline,
                          bool acceptanceReviewed = true,
-                         const char* sourceKind = "synthetic_unit") {
+                         const char* sourceJson = "{\"kind\":\"synthetic_unit\"}") {
     std::ostringstream json;
     json << R"json({
   "schema": "matrixhub.csi.scenario/v1",
@@ -28,8 +28,8 @@ std::string scenarioJson(const std::string& fixtureId,
   "capture_file": "frames.mhcf",
   "capture_sha256": "sha256:)json"
          << captureHash << R"json(",
-  "source": {"kind": ")json"
-         << sourceKind << R"json("},
+  "source": )json"
+         << sourceJson << R"json(,
   "detector_config": {
     "enabled": true,
     "bands": [{"start": 0, "end": 7}],
@@ -135,6 +135,63 @@ void test_scenario_parser_requires_reviewed_real_data_contract() {
         scenario,
         error));
     TEST_ASSERT_NOT_EQUAL(-1, error.find("not reviewed"));
+}
+
+void test_scenario_parser_requires_verified_clean_real_device_provenance() {
+    const std::string hash(64, '0');
+    const char* verifiedSource = R"json({
+      "kind": "real_device",
+      "board_env": "waveshare_esp32s3_matrix",
+      "firmware_version": "1.0.0-test",
+      "firmware_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "firmware_dirty": false,
+      "firmware_identity_verified": true,
+      "build_target": "esp32s3",
+      "esp_platform": "ESP32-S3",
+      "sdk_version": "5.5.1",
+      "arduino_version": "3.x"
+    })json";
+    const std::string valid = scenarioJson(
+        "real-parser",
+        hash,
+        knownNoneTimeline(101),
+        true,
+        verifiedSource);
+    CsiScenario scenario;
+    std::string error;
+    TEST_ASSERT_TRUE_MESSAGE(
+        parseScenarioJson(
+            valid,
+            "real-parser",
+            ScenarioSourcePolicy::RealDeviceOnly,
+            scenario,
+            error),
+        error.c_str());
+
+    const char* missingVerificationSource = R"json({
+      "kind": "real_device",
+      "board_env": "waveshare_esp32s3_matrix",
+      "firmware_version": "1.0.0-test",
+      "firmware_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "firmware_dirty": false,
+      "build_target": "esp32s3",
+      "esp_platform": "ESP32-S3",
+      "sdk_version": "5.5.1",
+      "arduino_version": "3.x"
+    })json";
+    const std::string missingVerification = scenarioJson(
+        "real-parser",
+        hash,
+        knownNoneTimeline(101),
+        true,
+        missingVerificationSource);
+    TEST_ASSERT_FALSE(parseScenarioJson(
+        missingVerification,
+        "real-parser",
+        ScenarioSourcePolicy::RealDeviceOnly,
+        scenario,
+        error));
+    TEST_ASSERT_NOT_EQUAL(-1, error.find("identity is not verified clean"));
 }
 
 void test_replay_metrics_measure_errors_latency_hold_and_clear() {

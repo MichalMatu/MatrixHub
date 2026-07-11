@@ -477,6 +477,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_codec_rejects_inconsistent_truncation_and_undersized_output);
     RUN_TEST(test_decoder_cursor_is_bounded_even_if_caller_tampers_with_it);
     RUN_TEST(test_scenario_parser_requires_reviewed_real_data_contract);
+    RUN_TEST(test_scenario_parser_requires_verified_clean_real_device_provenance);
     RUN_TEST(test_replay_metrics_measure_errors_latency_hold_and_clear);
     RUN_TEST(test_replay_metrics_mark_frame_staleness_unavailable);
     RUN_TEST(test_fixture_runner_sha256_matches_known_vector);
