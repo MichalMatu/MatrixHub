@@ -123,6 +123,7 @@ void PowerApiService::begin() {
             w.key(CONFIG::Keys::kThermalTempC); w.value(thermal.getTemperature(), 1); w.raw(",");
             w.key(CONFIG::Keys::kThermalCpuMhz); w.value(thermal.getCpuFrequency()); w.raw(",");
             w.key(CONFIG::Keys::kThermalThrottled); w.value(thermal.isThrottled()); w.raw(",");
+            w.key(CONFIG::Keys::kThermalMatrixLimit); w.value(thermal.getMatrixBrightnessLimit()); w.raw(",");
             w.key(CONFIG::Keys::kThermalSoftC); w.value(THERMAL::TEMP_SOFT_THROTTLE, 1); w.raw(",");
             w.key(CONFIG::Keys::kThermalHardC); w.value(THERMAL::TEMP_HARD_THROTTLE, 1); w.raw(",");
             w.key(CONFIG::Keys::kThermalCriticalC); w.value(THERMAL::TEMP_CRITICAL, 1); w.raw(",");

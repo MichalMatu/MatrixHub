@@ -63,8 +63,14 @@ namespace LOG {
 #include <WiFi.h>
 WiFiClass WiFi;
 static bool _test_sleep_requested = false;
+static uint32_t _event_sequence = 0;
+static uint32_t _matrix_zero_event = 0;
+static uint32_t _sleep_request_event = 0;
 namespace POWER {
-    void PowerManager::requestSleep(const char *reason, uint32_t delayMs) { _test_sleep_requested = true; }
+    void PowerManager::requestSleep(const char *reason, uint32_t delayMs) {
+        _test_sleep_requested = true;
+        _sleep_request_event = ++_event_sequence;
+    }
     void PowerManager::setWakeInterval(uint32_t intervalMs) {}
     bool PowerManager::isSleepRequested() { return _test_sleep_requested; }
 }
@@ -76,13 +82,29 @@ using namespace SYSTEM;
 // Extractor helper
 class ThermalMonitorTestable : public ThermalMonitor {
 public:
-    void testEvaluate(float temp) { evaluateAndApply(temp); }
-    void resetState() { _state = ThermalState::NORMAL; _currentFreq = THERMAL::FREQ_NORMAL; }
+    void testEvaluate(float temp) {
+        _lastTemp = temp;
+        evaluateAndApply(temp);
+    }
+    void resetState() {
+        _state = ThermalState::NORMAL;
+        _lastAppliedState = ThermalState::NORMAL;
+        _currentFreq = THERMAL::FREQ_NORMAL;
+        _matrixBrightnessLimit = 255;
+        _forceApplyOnNextSample = false;
+    }
+    void setLastAppliedState(ThermalState state) { _lastAppliedState = state; }
 };
 
 static ThermalMonitorTestable* monitor;
 static MatrixService mockMatrix;
 static POWER::PowerManager mockPower;
+
+void recordThermalLimit(uint8_t limit) {
+    if (limit == 0) {
+        _matrix_zero_event = ++_event_sequence;
+    }
+}
 
 void setUp(void) {
     monitor = static_cast<ThermalMonitorTestable*>(&ThermalMonitor::instance());
@@ -92,8 +114,12 @@ void setUp(void) {
     
     _mockTemp = 40.0f;
     _mockFreq = 240;
-    mockMatrix.lastLimit = 255;
+    mockMatrix.resetThermalBrightnessHistory();
     _test_sleep_requested = false;
+    _mockPsType = WIFI_PS_NONE;
+    _event_sequence = 0;
+    _matrix_zero_event = 0;
+    _sleep_request_event = 0;
     RTC::runtimeStats.hygieneSleepActive = false;
     monitor->resetState();
 }
@@ -113,6 +139,7 @@ void test_soft_throttle() {
     TEST_ASSERT_EQUAL(ThermalState::SOFT_THROTTLE, monitor->getState());
     TEST_ASSERT_EQUAL(THERMAL::FREQ_SOFT, _mockFreq);
     TEST_ASSERT_EQUAL(16, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(16, monitor->getMatrixBrightnessLimit());
 }
 
 void test_hard_throttle() {
@@ -120,15 +147,20 @@ void test_hard_throttle() {
     TEST_ASSERT_EQUAL(ThermalState::HARD_THROTTLE, monitor->getState());
     TEST_ASSERT_EQUAL(THERMAL::FREQ_HARD, _mockFreq);
     TEST_ASSERT_EQUAL(2, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(2, monitor->getMatrixBrightnessLimit());
     TEST_ASSERT_EQUAL(WIFI_PS_MAX_MODEM, _mockPsType);
 }
 
 void test_critical_shutdown() {
+    mockMatrix.thermalBrightnessLimitHook = recordThermalLimit;
     monitor->testEvaluate(THERMAL::TEMP_CRITICAL + 1.0f);
     TEST_ASSERT_EQUAL(ThermalState::CRITICAL, monitor->getState());
     TEST_ASSERT_EQUAL(0, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(0, monitor->getMatrixBrightnessLimit());
     TEST_ASSERT_TRUE(mockPower.isSleepRequested());
     TEST_ASSERT_TRUE(RTC::runtimeStats.hygieneSleepActive);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, _matrix_zero_event);
+    TEST_ASSERT_GREATER_THAN_UINT32(_matrix_zero_event, _sleep_request_event);
 }
 
 void test_hysteresis_recovery() {
@@ -142,6 +174,58 @@ void test_hysteresis_recovery() {
     // Cool down PAST hysteresis
     monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE - THERMAL::HYSTERESIS - 1.0f);
     TEST_ASSERT_EQUAL(ThermalState::NORMAL, monitor->getState());
+    TEST_ASSERT_EQUAL_UINT8(255, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(255, monitor->getMatrixBrightnessLimit());
+}
+
+void test_repeated_hysteresis_cycles_emit_ordered_cap_history() {
+    for (uint8_t cycle = 0; cycle < 3; cycle++) {
+        monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE);
+        monitor->testEvaluate(THERMAL::TEMP_HARD_THROTTLE);
+        monitor->testEvaluate(THERMAL::TEMP_HARD_THROTTLE - THERMAL::HYSTERESIS);
+        monitor->testEvaluate(THERMAL::TEMP_HARD_THROTTLE - THERMAL::HYSTERESIS - 0.1f);
+        monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE - THERMAL::HYSTERESIS);
+        monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE - THERMAL::HYSTERESIS - 0.1f);
+    }
+
+    TEST_ASSERT_EQUAL_UINT8(12, mockMatrix.thermalLimitHistoryCount);
+    for (uint8_t i = 0; i < mockMatrix.thermalLimitHistoryCount; i += 4) {
+        TEST_ASSERT_EQUAL_UINT8(16, mockMatrix.thermalLimitHistory[i]);
+        TEST_ASSERT_EQUAL_UINT8(2, mockMatrix.thermalLimitHistory[i + 1]);
+        TEST_ASSERT_EQUAL_UINT8(16, mockMatrix.thermalLimitHistory[i + 2]);
+        TEST_ASSERT_EQUAL_UINT8(255, mockMatrix.thermalLimitHistory[i + 3]);
+    }
+}
+
+void test_samples_inside_same_band_do_not_reapply_matrix_cap() {
+    monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE + 1.0f);
+    TEST_ASSERT_EQUAL_UINT32(1, mockMatrix.setThermalBrightnessLimitCalls);
+
+    monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE + 2.0f);
+    monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE - 1.0f);
+
+    TEST_ASSERT_EQUAL(ThermalState::SOFT_THROTTLE, monitor->getState());
+    TEST_ASSERT_EQUAL_UINT32(1, mockMatrix.setThermalBrightnessLimitCalls);
+}
+
+void test_monitor_restart_preserves_stale_cap_until_first_real_sample() {
+    mockMatrix.lastLimit = 2;
+    monitor->setLastAppliedState(ThermalState::HARD_THROTTLE);
+
+    TEST_ASSERT_TRUE(monitor->begin());
+
+    TEST_ASSERT_EQUAL_UINT8(2, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT32(0, mockMatrix.setThermalBrightnessLimitCalls);
+
+    monitor->testEvaluate(THERMAL::TEMP_HARD_THROTTLE - THERMAL::HYSTERESIS);
+    TEST_ASSERT_EQUAL_UINT8(2, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(1, mockMatrix.thermalLimitHistoryCount);
+    TEST_ASSERT_EQUAL_UINT8(2, mockMatrix.thermalLimitHistory[0]);
+
+    monitor->testEvaluate(THERMAL::TEMP_SOFT_THROTTLE - THERMAL::HYSTERESIS - 1.0f);
+    TEST_ASSERT_EQUAL_UINT8(255, mockMatrix.lastLimit);
+    TEST_ASSERT_EQUAL_UINT8(2, mockMatrix.thermalLimitHistoryCount);
+    TEST_ASSERT_EQUAL_UINT8(255, mockMatrix.thermalLimitHistory[1]);
 }
 
 int main(int argc, char **argv) {
@@ -151,6 +235,9 @@ int main(int argc, char **argv) {
     RUN_TEST(test_hard_throttle);
     RUN_TEST(test_critical_shutdown);
     RUN_TEST(test_hysteresis_recovery);
+    RUN_TEST(test_repeated_hysteresis_cycles_emit_ordered_cap_history);
+    RUN_TEST(test_samples_inside_same_band_do_not_reapply_matrix_cap);
+    RUN_TEST(test_monitor_restart_preserves_stale_cap_until_first_real_sample);
     return UNITY_END();
 }
 #endif // NATIVE_BUILD

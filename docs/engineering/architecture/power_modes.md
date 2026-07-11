@@ -103,6 +103,7 @@ Authenticated endpoint returning current power state, including:
 - `thermal_temp_c`
 - `thermal_cpu_mhz`
 - `thermal_throttled`
+- `thermal_matrix_limit`
 - `thermal_soft_c`
 - `thermal_hard_c`
 - `thermal_critical_c`

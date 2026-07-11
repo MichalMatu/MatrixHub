@@ -26,6 +26,7 @@ export interface PowerStatus extends PowerConfig {
 	thermal_temp_c: number | null;
 	thermal_cpu_mhz: number;
 	thermal_throttled: boolean;
+	thermal_matrix_limit: number;
 	thermal_soft_c: number;
 	thermal_hard_c: number;
 	thermal_critical_c: number;

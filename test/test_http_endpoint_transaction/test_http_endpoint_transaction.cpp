@@ -1577,6 +1577,34 @@ void test_matrix_settings_service_rolls_back_rtc_and_icons_on_save_failure() {
     TEST_ASSERT_EQUAL_UINT32_ARRAY(originalIcon, snapshot.customIcons.icons[0], MATRIX::kMatrixCustomIconPixels);
 }
 
+void test_matrix_settings_service_heals_legacy_zero_and_one_brightness() {
+    const uint8_t legacyValues[] = {0, 1, 2, 255};
+
+    for (const uint8_t legacyValue : legacyValues) {
+        RTC::mockStore.matrix = RTC::MatrixData{};
+        RTC::mockStore.matrix.brightness = legacyValue;
+
+        FS fs;
+        MatrixService matrixService;
+        MATRIX::MatrixSettingsService service(&fs, &matrixService, nullptr, nullptr, nullptr);
+
+        MATRIX::MatrixSettingsState snapshot{};
+        const StateHandlerResult readResult = service.read([&](MATRIX::MatrixSettingsState& state) {
+            snapshot = state;
+        });
+        TEST_ASSERT_TRUE(readResult.ok);
+
+        const uint8_t expected = legacyValue < UI::MATRIX::USER_BRIGHTNESS_MIN
+            ? UI::MATRIX::USER_BRIGHTNESS_MIN
+            : legacyValue;
+        TEST_ASSERT_EQUAL_UINT8(expected, snapshot.config.brightness);
+
+        service.begin();
+        TEST_ASSERT_EQUAL_UINT8(expected, RTC::getConfig().matrix.brightness);
+        TEST_ASSERT_EQUAL_UINT8(expected, service.getBrightness());
+    }
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -1612,6 +1640,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_alarm_settings_validation_reports_duplicate_rule_ids);
     RUN_TEST(test_alarm_settings_update_state_returns_unchanged_for_identical_payload);
     RUN_TEST(test_matrix_settings_service_rolls_back_rtc_and_icons_on_save_failure);
+    RUN_TEST(test_matrix_settings_service_heals_legacy_zero_and_one_brightness);
     return UNITY_END();
 }
 

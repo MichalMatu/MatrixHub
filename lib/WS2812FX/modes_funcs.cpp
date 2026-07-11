@@ -31,6 +31,7 @@
   2022-03-23   Separated from the original WS2812FX.cpp file
 */
 #include "WS2812FX.h"
+#include "BrightnessLimiter.h"
 
 /*
   overload Adafruit_NeoPixel fill() function to respect segment boundaries
@@ -375,13 +376,17 @@ uint16_t WS2812FX::fireworks(uint32_t color) {
 // for better performance, manipulate the Adafruit_NeoPixels pixels[] array directly
   uint8_t *pixels = getPixels();
   uint8_t bytesPerPixel = getNumBytesPerPixel(); // 3=RGB, 4=RGBW
+  // getBrightness() returns the external 0..255 value. With Adafruit's b+1
+  // premultiplication, that is also the maximum stored channel byte for every
+  // value below 255 (and 255 remains the unscaled maximum). Direct convolution
+  // must honor the same ceiling or neighboring pixels can add up above the
+  // user/thermal cap even though every setPixelColor() input was safe.
+  const uint8_t channelCeiling = getBrightness();
   uint16_t startPixel = _seg->start * bytesPerPixel + bytesPerPixel;
   uint16_t stopPixel = _seg->stop * bytesPerPixel;
   for(uint16_t i=startPixel; i <stopPixel; i++) {
-    uint16_t tmpPixel = (pixels[i - bytesPerPixel] >> 2) +
-      pixels[i] +
-      (pixels[i + bytesPerPixel] >> 2);
-    pixels[i] =  tmpPixel > 255 ? 255 : tmpPixel;
+    pixels[i] = WS2812FX_DETAIL::spreadTransportChannel(
+      pixels[i - bytesPerPixel], pixels[i], pixels[i + bytesPerPixel], channelCeiling);
   }
 
   uint8_t size = 2 << SIZE_OPTION;

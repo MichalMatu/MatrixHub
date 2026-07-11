@@ -142,6 +142,11 @@ def validate_power_status(data: Any) -> list[str]:
             errors += require_type("power_status", data, "thermal_state", str)
         if "thermal_cpu_mhz" in data and not is_number(data.get("thermal_cpu_mhz")):
             errors.append("power_status.thermal_cpu_mhz must be number")
+        thermal_matrix_limit = data.get("thermal_matrix_limit")
+        if isinstance(thermal_matrix_limit, bool) or not isinstance(thermal_matrix_limit, int):
+            errors.append("power_status.thermal_matrix_limit must be int")
+        elif not 0 <= thermal_matrix_limit <= 255:
+            errors.append("power_status.thermal_matrix_limit must be between 0 and 255")
     return errors
 
 
@@ -171,11 +176,18 @@ def validate_power_config(data: Any) -> list[str]:
 
 
 def validate_matrix_settings(data: Any) -> list[str]:
-    return require_keys(
+    errors = require_keys(
         "matrix_settings",
         data,
         ("brightness", "alarm_mode", "rotation", "effect_enabled", "effect_mode"),
     )
+    if not errors:
+        brightness = data.get("brightness")
+        if isinstance(brightness, bool) or not isinstance(brightness, int):
+            errors.append("matrix_settings.brightness must be int")
+        elif not 2 <= brightness <= 255:
+            errors.append("matrix_settings.brightness must be between 2 and 255")
+    return errors
 
 
 def validate_alarm_rules(data: Any) -> list[str]:
@@ -641,6 +653,72 @@ def run_config_log_noop(client: DeviceClient, results: list[dict[str, Any]], tim
         safe_post_json(client, results, "config.log_level_restore", "/api/config", payload, validate_config, timeout)
 
 
+def run_matrix_settings_noop(client: DeviceClient, results: list[dict[str, Any]], timeout: float) -> None:
+    backup = get_required_json(
+        client,
+        results,
+        "matrix.settings.backup",
+        "/api/matrix/settings",
+        validate_matrix_settings,
+        timeout,
+    )
+    if not isinstance(backup, dict):
+        append_verify_result(results, "matrix.settings.skipped", False, error="matrix backup failed")
+        return
+
+    brightness = backup.get("brightness")
+    try:
+        safe_post_json(
+            client,
+            results,
+            "matrix.settings.noop_save",
+            "/api/matrix/settings",
+            backup,
+            validate_matrix_settings,
+            timeout,
+        )
+        after = get_required_json(
+            client,
+            results,
+            "matrix.settings.verify_read",
+            "/api/matrix/settings",
+            validate_matrix_settings,
+            timeout,
+        )
+        preserved = isinstance(after, dict) and after.get("brightness") == brightness
+        append_verify_result(
+            results,
+            "matrix.settings.noop_verify",
+            preserved,
+            details={
+                "brightness_before": brightness,
+                "brightness_after": after.get("brightness") if isinstance(after, dict) else None,
+            },
+            error=None if preserved else "matrix brightness changed after no-op save",
+        )
+    finally:
+        restored = safe_post_json(
+            client,
+            results,
+            "matrix.settings.restore",
+            "/api/matrix/settings",
+            backup,
+            validate_matrix_settings,
+            timeout,
+        )
+        restored_brightness = restored.get("brightness") if isinstance(restored, dict) else None
+        append_verify_result(
+            results,
+            "matrix.settings.restore_verify",
+            restored_brightness == brightness,
+            details={
+                "brightness_expected": brightness,
+                "brightness_restored": restored_brightness,
+            },
+            error=None if restored_brightness == brightness else "matrix brightness restore mismatch",
+        )
+
+
 def heartbeat_disabled_payload(settings: dict[str, Any]) -> dict[str, Any]:
     slots = settings.get("slots")
     slot_count = len(slots) if isinstance(slots, list) and slots else 4
@@ -718,15 +796,7 @@ def run_heartbeat_disabled_write(client: DeviceClient, results: list[dict[str, A
 def run_safe_writes(client: DeviceClient, timeout: float) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     run_config_log_noop(client, results, timeout)
-    safe_noop_write(
-        client,
-        results,
-        name="matrix.settings",
-        read_path="/api/matrix/settings",
-        write_path="/api/matrix/settings",
-        validator=validate_matrix_settings,
-        timeout=timeout,
-    )
+    run_matrix_settings_noop(client, results, timeout)
     safe_noop_write(
         client,
         results,

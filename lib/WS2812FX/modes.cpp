@@ -842,41 +842,12 @@ uint16_t WS2812FX::mode_rainbow_larson(void) {
 }
 
 uint16_t WS2812FX::mode_rainbow_fireworks(void) {
-  for(uint16_t i=_seg->start; i <= _seg->stop; i++) {
-    uint32_t color = getRawPixelColor(i); // get the raw pixel color (ignore global brightness)
-    color = (color >> 1) & 0x7F7F7F7F;    // fade all pixels
-    setRawPixelColor(i, color);
-
-    // search for the fading red pixels, and create the appropriate neighboring pixels
-    if(color == 0x7F0000) {
-      setPixelColor(i-1, 0xFF7F00); // orange
-      setPixelColor(i+1, 0xFF7F00);
-    } else if(color == 0x3F0000) {
-      setPixelColor(i-2, 0xFFFF00); // yellow
-      setPixelColor(i+2, 0xFFFF00);
-    } else if(color == 0x1F0000) {
-      setPixelColor(i-3, 0x00FF00); // green
-      setPixelColor(i+3, 0x00FF00);
-    } else if(color == 0x0F0000) {
-      setPixelColor(i-4, 0x0000FF); // blue
-      setPixelColor(i+4, 0x0000FF);
-    } else if(color == 0x070000) {
-      setPixelColor(i-5, 0x4B0082); // indigo
-      setPixelColor(i+5, 0x4B0082);
-    } else if(color == 0x030000) {
-      setPixelColor(i-6, 0x9400D3); // violet
-      setPixelColor(i+6, 0x9400D3);
-    }
-  }
-
-  // occasionally create a random red pixel
-  if(random8(4) == 0) {
-    uint16_t rand16 = random16(_seg_len - 12 > 1 ? _seg_len - 12 : 1);
-    uint16_t index = _seg->start + 6 + rand16;
-    setRawPixelColor(index, RED); // set the raw pixel color (ignore global brightness)
-    SET_CYCLE;
-  }
-  return(_seg->speed / _seg_len);
+  // The original implementation stored an unscaled RED seed directly in the
+  // NeoPixel transport buffer, bypassing both user brightness and the thermal
+  // cap. Reuse the brightness-safe fireworks state machine with a fresh wheel
+  // color per frame. This keeps mode 63 useful at low brightness without raw
+  // threshold comparisons that only worked at full output.
+  return fireworks(color_wheel(random8()));
 }
 
 uint16_t WS2812FX::mode_trifade(void) {

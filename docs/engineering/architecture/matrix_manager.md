@@ -149,9 +149,46 @@ semaphore, stack, or TCB underneath another caller.
 Do not enqueue `MatrixState` brightness or clear commands after `MatrixTask`
 has stopped: there is no consumer left to apply them. The shutdown blackout is
 terminal and intentionally bypasses `MatrixState`, so it neither changes the
-persisted brightness configuration nor serves as a general runtime mute. A
-runtime zero-brightness transition destroys renderer state and requires the
-manager to invalidate and replay the top layer when output becomes visible
-again.
+persisted brightness configuration nor serves as a general runtime mute.
+
+Runtime brightness zero has a separate reversible contract. It commits black at
+the driver, pauses animation writes, preserves renderer mode plus the logical
+8x8 RGB frame, and accepts newer content while muted. A 0 -> non-zero transition
+stays black until any brightness/rotation/content commands behind it have been
+consumed; this prevents a stale pre-mute frame from flashing before the current
+top layer. Static content is then restored from the logical frame, while legacy
+effects restart from a cleared transport buffer and submit one fresh frame.
+
+Because the terminal blackout deliberately clears renderer state but does not
+clear manager layers, `MatrixTask::start()` invalidates the manager render cache.
+The first update after a supported stop -> start therefore republishes even an
+unchanged top layer. `MatrixService::blackoutForShutdown()` also clears its icon
+dedup and timeout caches so an unchanged icon cannot be skipped after restart.
+
+### 6. Brightness and thermal ownership
+
+Persisted/user brightness is constrained to 2..255. Value 0 is reserved for the
+runtime thermal mute and is never written back as user configuration.
+`MatrixState` publishes `min(userTarget, thermalLimit)` and coalesces changes
+against the last value delivered to the renderer. Thermal bands map to limits
+255 (normal), 16 (soft), 2 (hard), and 0 (critical).
+
+`LedMatrix` treats the NeoPixel transport buffer as write-only because global
+brightness is premultiplied and repeated rescaling is lossy. Static, text,
+native, and data-visualization frames are repainted from a separate 64-pixel
+logical buffer on every non-zero brightness change. Legacy effects own the
+transport buffer directly; their cap transition clears that buffer without an
+intermediate latch, restarts the effect, and forces one frame. If the forced
+frame cannot be produced, the driver fails closed by latching black.
+
+The power status endpoint exposes `thermal_matrix_limit` for read-only device
+evidence. It proves the governor's requested cap, not optical brightness or RMT
+delivery; release acceptance still requires current/light measurement on the
+target board.
+
+On a ThermalMonitor task restart, the Matrix cap and previous thermal band are
+kept until the first fresh sample, including HARD/SOFT hysteresis. This is a
+Matrix safety guarantee only; a complete hot-restart audit of CPU frequency,
+WiFi power-save cache, and BLE scan/power actuators remains outside G2.3a.
 
 Navigation: [Project README](../../../README.md) · [Engineering Reference](../README.md) · [Architecture](../README.md#runtime-and-architecture)

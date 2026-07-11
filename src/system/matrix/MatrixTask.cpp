@@ -312,6 +312,15 @@ void MatrixTask::start(MatrixMenuService* menu,
     if (!_taskHandle.load(std::memory_order_acquire)) {
         LOGE("Failed to create MatrixTask");
         destroyTaskResources();
+        return;
+    }
+
+    if (matrixManager) {
+        // The terminal shutdown blackout intentionally clears renderer state,
+        // while the manager still remembers the last top layer/hash. A supported
+        // stop -> start lifecycle must therefore republish that unchanged layer
+        // on the new worker's first update.
+        matrixManager->invalidateCache();
     }
 }
 

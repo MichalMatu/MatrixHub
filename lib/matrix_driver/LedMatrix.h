@@ -13,7 +13,12 @@ public:
     static constexpr uint8_t HEIGHT = 8;
     static constexpr uint16_t NUM_LEDS = WIDTH * HEIGHT;
     
-    LedMatrix() : _strip(nullptr), _brightness(50), _rotation(0), _outputMuted(false) {}
+    LedMatrix()
+        : _strip(nullptr),
+          _brightness(50),
+          _rotation(0),
+          _outputMuted(false),
+          _restorePending(false) {}
     
     /**
      * @brief Initialize the LED matrix
@@ -66,6 +71,9 @@ public:
      * @brief Push changes to LEDs
      */
     void show();
+
+    /** Commit the preserved static frame after a reversible output mute. */
+    void restoreOutputIfPending();
     
     // ===== Configuration =====
     
@@ -90,9 +98,16 @@ private:
     uint8_t _brightness;
     uint8_t _rotation;
     bool _outputMuted;
+    bool _restorePending;
+    // Adafruit_NeoPixel stores brightness-scaled bytes, so changing brightness
+    // cannot restore an exact static frame from the transport buffer. Keep the
+    // 8x8 logical RGB frame here and treat the strip buffer as write-only.
+    uint32_t _framebuffer[NUM_LEDS] = {};
     
     /**
      * @brief Convert x,y to linear LED index with rotation
      */
     uint16_t xy(int16_t x, int16_t y) const;
+    void writeBlackOutputFrame();
+    void writeLogicalOutputFrame();
 };

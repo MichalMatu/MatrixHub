@@ -7,6 +7,14 @@ void setUp(void) {
 }
 void tearDown(void) {}
 
+void assertBrightnessCommand(MatrixState& state, uint8_t expected) {
+    MatrixCommand command;
+    TEST_ASSERT_TRUE(state.poll(command));
+    TEST_ASSERT_EQUAL(static_cast<int>(CommandType::SET_BRIGHTNESS),
+                      static_cast<int>(command.type));
+    TEST_ASSERT_EQUAL_UINT8(expected, command.value8);
+}
+
 void test_request_text_preserves_payload_up_to_command_buffer_size() {
     MatrixState state;
     MatrixCommand command;
@@ -107,6 +115,86 @@ void test_latest_content_wins_after_pending_hardware_update() {
     TEST_ASSERT_EQUAL_HEX32(0xAA0000, command.color);
 
     TEST_ASSERT_FALSE(state.poll(command));
+}
+
+void test_thermal_cap_uses_min_of_latest_user_target_and_limit() {
+    MatrixState state;
+
+    state.setBrightness(80);
+    assertBrightnessCommand(state, 80);
+    state.setThermalBrightnessLimit(16);
+    assertBrightnessCommand(state, 16);
+    state.setThermalBrightnessLimit(2);
+    assertBrightnessCommand(state, 2);
+    state.setThermalBrightnessLimit(255);
+    assertBrightnessCommand(state, 80);
+    TEST_ASSERT_FALSE(state.hasPendingCommands());
+}
+
+void test_user_brightness_changed_while_muted_restores_latest_target() {
+    MatrixState state;
+
+    state.setBrightness(80);
+    assertBrightnessCommand(state, 80);
+    state.setThermalBrightnessLimit(0);
+    assertBrightnessCommand(state, 0);
+
+    state.setBrightness(40);
+    TEST_ASSERT_FALSE(state.hasPendingCommands());
+    state.setThermalBrightnessLimit(16);
+    assertBrightnessCommand(state, 16);
+    state.setThermalBrightnessLimit(255);
+    assertBrightnessCommand(state, 40);
+}
+
+void test_repeated_cap_sequence_never_inverts_or_sticks() {
+    MatrixState state;
+
+    state.setBrightness(64);
+    assertBrightnessCommand(state, 64);
+    state.setThermalBrightnessLimit(16);
+    assertBrightnessCommand(state, 16);
+    state.setThermalBrightnessLimit(2);
+    assertBrightnessCommand(state, 2);
+    state.setThermalBrightnessLimit(16);
+    assertBrightnessCommand(state, 16);
+    state.setThermalBrightnessLimit(255);
+    assertBrightnessCommand(state, 64);
+}
+
+void test_user_target_below_cap_is_never_brightened() {
+    MatrixState state;
+
+    state.setBrightness(8);
+    assertBrightnessCommand(state, 8);
+    state.setThermalBrightnessLimit(16);
+    TEST_ASSERT_FALSE(state.hasPendingCommands());
+    state.setThermalBrightnessLimit(2);
+    assertBrightnessCommand(state, 2);
+    state.setThermalBrightnessLimit(255);
+    assertBrightnessCommand(state, 8);
+}
+
+void test_duplicate_and_coalesced_caps_preserve_latest_content_order() {
+    MatrixState state;
+    MatrixCommand command;
+
+    state.setBrightness(80);
+    state.setThermalBrightnessLimit(16);
+    state.requestEffect(3, 850, 1, 2, 3, 0);
+    state.requestSolid(0xAA0000);
+    state.setThermalBrightnessLimit(16);
+
+    assertBrightnessCommand(state, 16);
+    TEST_ASSERT_TRUE(state.poll(command));
+    TEST_ASSERT_EQUAL(static_cast<int>(CommandType::SHOW_SOLID),
+                      static_cast<int>(command.type));
+    TEST_ASSERT_EQUAL_HEX32(0xAA0000, command.color);
+    TEST_ASSERT_FALSE(state.poll(command));
+
+    state.setThermalBrightnessLimit(2);
+    state.setThermalBrightnessLimit(16);
+    TEST_ASSERT_FALSE(state.hasPendingCommands());
 }
 
 void test_new_text_supersedes_pending_clear_without_replaying_clear() {
@@ -339,6 +427,11 @@ int main(int argc, char **argv) {
     RUN_TEST(test_request_effect_carries_engine_reactivity_and_background_cache);
     RUN_TEST(test_request_data_visualization_carries_config_and_replaces_effect_background);
     RUN_TEST(test_latest_content_wins_after_pending_hardware_update);
+    RUN_TEST(test_thermal_cap_uses_min_of_latest_user_target_and_limit);
+    RUN_TEST(test_user_brightness_changed_while_muted_restores_latest_target);
+    RUN_TEST(test_repeated_cap_sequence_never_inverts_or_sticks);
+    RUN_TEST(test_user_target_below_cap_is_never_brightened);
+    RUN_TEST(test_duplicate_and_coalesced_caps_preserve_latest_content_order);
     RUN_TEST(test_new_text_supersedes_pending_clear_without_replaying_clear);
     RUN_TEST(test_new_clear_supersedes_pending_icon);
     RUN_TEST(test_each_visible_content_type_can_be_the_latest_command);

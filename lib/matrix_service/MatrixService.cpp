@@ -164,6 +164,15 @@ void MatrixService::loop() {
         }
     }
 
+    // Brightness and rotation are intentionally consumed before visible
+    // content. If another command is still queued, remain on the current/black
+    // frame and skip timeout side effects as well as animation for this tick.
+    // Otherwise an expired pre-mute item could restore an old background before
+    // the newer layer command waiting behind the hardware update.
+    if (_state.hasPendingCommands()) {
+        return;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Phase 2: Auto-clear timeout check
     // ─────────────────────────────────────────────────────────────
@@ -239,7 +248,11 @@ void MatrixService::setBrightness(uint8_t brightness) {
 }
 
 void MatrixService::blackoutForShutdown() {
-    _renderer.setBrightness(UI::MATRIX::BRIGHTNESS_OFF);
+    _activeIcon = IconType::NONE;
+    _autoClearing = false;
+    _displayStartMs = 0;
+    _displayDurationMs = 0;
+    _renderer.blackoutForShutdown();
 }
 
 void MatrixService::setThermalBrightnessLimit(uint8_t limit) {
@@ -325,7 +338,11 @@ void MatrixService::showSolidColor(uint32_t color) {
 }
 
 bool MatrixService::isActive() const {
-    return _renderer.isActive();
+    // Hardware settings and latest visible content are intentionally consumed
+    // one per tick. Keep the fast cadence while that bounded mailbox drains so
+    // a muted static display does not wait multiple 200 ms idle intervals to
+    // restore brightness -> rotation -> content.
+    return _renderer.isActive() || _state.hasPendingCommands();
 }
 
 void MatrixService::cacheDataVisualizationConfig(const MATRIX::MatrixDataVisualizationConfig& config, bool active) {

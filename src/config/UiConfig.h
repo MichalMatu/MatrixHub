@@ -11,7 +11,10 @@ namespace UI {
     }
     namespace MATRIX {
         constexpr uint8_t BRIGHTNESS_OFF = 0;
-        constexpr uint8_t BRIGHTNESS_DEFAULT = 2; // Reduced from 10 for thermal safety
+        // Keep the project-specific name distinct from WS2812FX's
+        // BRIGHTNESS_MIN macro, which is visible in matrix translation units.
+        constexpr uint8_t USER_BRIGHTNESS_MIN = 2;
+        constexpr uint8_t BRIGHTNESS_DEFAULT = USER_BRIGHTNESS_MIN; // Reduced from 10 for thermal safety
         constexpr uint32_t SCROLL_INTERVAL_MS = 20; // Default scroll speed (ms/px). Lower = faster
         constexpr uint32_t MENU_TEXT_COLOR_DEFAULT = 0xFFFFFF; // RGB888 white
         constexpr bool MENU_ENABLED_DEFAULT = true;

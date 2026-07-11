@@ -33,6 +33,8 @@ public:
     void setDataVisualizationInput(const MATRIX::MatrixDataVisualizationInput& input);
     void clear();
     void setBrightness(uint8_t brightness);
+    /** Destructive terminal blackout used only after MatrixTask exits its loop. */
+    void blackoutForShutdown();
     void setRotation(uint8_t rotation);
     void setScrollSpeed(uint16_t ms);
     
@@ -52,6 +54,7 @@ private:
     bool _effectRunning;
     bool _nativeEffectRunning = false;
     bool _dataVisualizationRunning = false;
+    bool _staticIconRepaintPending = false;
     IconType _activeIcon = IconType::NONE;
     bool _hasActiveIconBitmap = false;
     uint32_t _activeIconBitmap[64];

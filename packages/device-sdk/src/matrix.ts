@@ -60,6 +60,7 @@ export interface MatrixDataVisualizationStatus {
 }
 
 const MATRIX_COLOR_MASK = 0xffffff;
+const MATRIX_USER_BRIGHTNESS_MIN = 2;
 const MATRIX_CUSTOM_ICON_SLOTS = 3;
 const MATRIX_CUSTOM_ICON_PIXELS = 64;
 const MATRIX_EFFECT_ENGINE_MAX = 1;
@@ -427,7 +428,7 @@ export function parseMatrixSettings(value: unknown): MatrixSettings | null {
   }
 
   const settings: MatrixSettings = {
-    brightness: clampInteger(brightness, 0, 255),
+    brightness: clampInteger(brightness, MATRIX_USER_BRIGHTNESS_MIN, 255),
     alarm_mode: clampInteger(alarmMode, 0, 2),
     rotation: clampInteger(rotation, 0, 3),
     auto_rotate: autoRotate,

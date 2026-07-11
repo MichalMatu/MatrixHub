@@ -79,6 +79,9 @@ public:
      */
     uint32_t getCpuFrequency() const { return _currentFreq; }
 
+    /** Current Matrix brightness ceiling applied by the thermal governor. */
+    uint8_t getMatrixBrightnessLimit() const { return _matrixBrightnessLimit; }
+
     /**
      * @brief Check if currently throttled
      */
@@ -102,9 +105,12 @@ protected:
     POWER::PowerManager* _powerManager = nullptr;
     MatrixService* _matrixService = nullptr;
     volatile ThermalState _state = ThermalState::NORMAL;
+    ThermalState _lastAppliedState = ThermalState::NORMAL;
     volatile float _lastTemp = 0.0f;
     volatile uint32_t _currentFreq = 240;
+    volatile uint8_t _matrixBrightnessLimit = 255;
     volatile bool _running = false;
+    bool _forceApplyOnNextSample = false;
 
     TaskHandle_t _taskHandle = nullptr;
     SemaphoreHandle_t _cleanupSem = nullptr;

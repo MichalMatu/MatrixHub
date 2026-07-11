@@ -54,6 +54,9 @@ MatrixSettingsService::~MatrixSettingsService() {
 
 void MatrixSettingsService::begin() {
     RTC::updateConfig([](RTC::ConfigStore& store) {
+        store.matrix.brightness = std::max(
+            store.matrix.brightness,
+            UI::MATRIX::USER_BRIGHTNESS_MIN);
         auto& menu = store.matrix.menu;
         if (menu.textColor == 0) {
             menu.textColor = UI::MATRIX::MENU_TEXT_COLOR_DEFAULT;
@@ -313,6 +316,9 @@ bool MatrixSettingsService::syncCachedStateLocked() {
 
     // Re-sanitize cached RTC data on read so older persisted configs are healed
     // even if they were saved before effect-mode validation existed.
+    snapshot->config.brightness = std::max(
+        snapshot->config.brightness,
+        UI::MATRIX::USER_BRIGHTNESS_MIN);
     snapshot->config.effectEngine = normalizeMatrixEffectEngine(snapshot->config.effectEngine);
     snapshot->config.effectMode = normalizeMatrixEffectModeForEngine(
         snapshot->config.effectMode,

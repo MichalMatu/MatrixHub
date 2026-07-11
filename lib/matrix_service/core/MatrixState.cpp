@@ -133,11 +133,11 @@ void MatrixState::setBrightness(uint8_t brightness) {
         effective = _thermalLimit;
     }
     
-    // Only update if effective value changed
-    if (_pendingBrightness != effective || !_flags.brightnessDirty) {
-        _pendingBrightness = effective;
-        _flags.brightnessDirty = true;
-    }
+    _pendingBrightness = effective;
+    // Coalesce all writers against the value already published to the renderer.
+    // This also cancels a pending change if a newer update returns to the
+    // currently visible value before MatrixTask polls the mailbox.
+    _flags.brightnessDirty = (_pendingBrightness != _lastPublishedBrightness);
 }
 
 void MatrixState::setThermalBrightnessLimit(uint8_t limit) {
@@ -152,11 +152,8 @@ void MatrixState::setThermalBrightnessLimit(uint8_t limit) {
         effective = _thermalLimit;
     }
     
-    // Force update if changed
-    if (_pendingBrightness != effective) {
-        _pendingBrightness = effective;
-        _flags.brightnessDirty = true;
-    }
+    _pendingBrightness = effective;
+    _flags.brightnessDirty = (_pendingBrightness != _lastPublishedBrightness);
 }
 
 void MatrixState::setRotation(uint8_t rotation) {
@@ -190,6 +187,7 @@ bool MatrixState::poll(MatrixCommand& cmd) {
     if (_flags.brightnessDirty) {
         cmd.type = CommandType::SET_BRIGHTNESS;
         cmd.value8 = _pendingBrightness;
+        _lastPublishedBrightness = _pendingBrightness;
         _flags.brightnessDirty = false;
         return true;
     }
@@ -211,6 +209,14 @@ bool MatrixState::poll(MatrixCommand& cmd) {
     }
     
     return false;
+}
+
+bool MatrixState::hasPendingCommands() const {
+    SYSTEM::ScopeLock lock(_mutex, portMAX_DELAY);
+    configASSERT(lock.isLocked());
+    if (!lock.isLocked()) return true;
+
+    return _flags.brightnessDirty || _flags.rotationDirty || _flags.contentDirty;
 }
 
 MatrixState::BgEffect MatrixState::getBackgroundEffect() const {

@@ -30,6 +30,7 @@ void MatrixRenderer::blackout() {
     }
 
     _scrolling = false;
+    _staticIconRepaintPending = false;
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
     _matrix->fillScreen(0);
@@ -91,15 +92,24 @@ void MatrixRenderer::loop() {
             _matrix->drawBitmap(_dataVisualizationFrame);
             _matrix->show();
         }
+    } else if (_staticIconRepaintPending && _activeIcon != IconType::NONE) {
+        _matrix->fillScreen(0);
+        IconDrawer::draw(
+            _matrix,
+            _activeIcon,
+            _hasActiveIconBitmap ? _activeIconBitmap : nullptr);
+        _matrix->show();
+        _staticIconRepaintPending = false;
+    } else {
+        // Static content has no animation tick that can repaint it. The driver
+        // keeps this as a no-op unless a 0 -> non-zero runtime restore is
+        // waiting for the MatrixState mailbox to drain.
+        _matrix->restoreOutputIfPending();
     }
 }
 
 void MatrixRenderer::showText(const char* text, uint32_t color) {
     if (!_matrix || !text) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
     
     // Stop FX if running
     if (_effectRunning) {
@@ -116,6 +126,7 @@ void MatrixRenderer::showText(const char* text, uint32_t color) {
     }
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
+    _staticIconRepaintPending = false;
     
     // Minimal padding for visual spacing between loops
     char paddedText[kMatrixRenderedTextCapacity];
@@ -153,10 +164,6 @@ void MatrixRenderer::showText(const char* text, uint32_t color) {
 
 void MatrixRenderer::showSolid(uint32_t color) {
     if (!_matrix) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
     
     if (_effectRunning) { _matrix->stop(); _effectRunning = false; }
     if (_nativeEffectRunning) { _nativeEngine.reset(); _nativeEffectRunning = false; }
@@ -164,6 +171,7 @@ void MatrixRenderer::showSolid(uint32_t color) {
     _scrolling = false;
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
+    _staticIconRepaintPending = false;
     
     _matrix->fillScreen(color);
     _matrix->show();
@@ -179,11 +187,18 @@ void MatrixRenderer::setBrightness(uint8_t brightness) {
     _brightness = brightness;
     if (_matrix) {
         _matrix->setBrightness(brightness);
-
-        if (isDisplayMuted()) {
-            blackout();
-        }
     }
+}
+
+void MatrixRenderer::blackoutForShutdown() {
+    if (!_matrix) return;
+
+    // Runtime brightness zero is a reversible output mute. Shutdown is
+    // intentionally different: discard all renderer modes and commit a black
+    // logical frame without changing the configured/effective brightness.
+    // Keeping those states aligned also makes a supported MatrixTask stop/start
+    // resume deterministic instead of leaving MatrixState at N and renderer at 0.
+    blackout();
 }
 
 void MatrixRenderer::setRotation(uint8_t rotation) {
@@ -192,11 +207,10 @@ void MatrixRenderer::setRotation(uint8_t rotation) {
         if (_scrolling) {
             _matrix->fillScreen(0);  // Clear stale pixels; scroll continues from current _x
         }
-        // Re-render static icon after rotation change
+        // Defer a static icon repaint until MatrixService confirms that no newer
+        // visible command is still queued behind this hardware update.
         if (!_scrolling && !_effectRunning && !_nativeEffectRunning && !_dataVisualizationRunning && _activeIcon != IconType::NONE) {
-            _matrix->fillScreen(0);
-            IconDrawer::draw(_matrix, _activeIcon, _hasActiveIconBitmap ? _activeIconBitmap : nullptr);
-            _matrix->show();
+            _staticIconRepaintPending = true;
         }
     }
 }
@@ -208,21 +222,19 @@ void MatrixRenderer::setScrollSpeed(uint16_t ms) {
 }
 
 bool MatrixRenderer::isActive() const {
-    return _scrolling || _effectRunning || _nativeEffectRunning || _dataVisualizationRunning;
+    return !isDisplayMuted() &&
+           (_scrolling || _effectRunning || _nativeEffectRunning || _dataVisualizationRunning);
 }
 
 void MatrixRenderer::showIcon(IconType icon, const uint32_t* customBitmap) {
     if (!_matrix) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
     
     if (_effectRunning) { _matrix->stop(); _effectRunning = false; }
     if (_nativeEffectRunning) { _nativeEngine.reset(); _nativeEffectRunning = false; }
     if (_dataVisualizationRunning) { _dataVisualizationEngine.reset(); _dataVisualizationRunning = false; }
     _scrolling = false;
     _activeIcon = icon;
+    _staticIconRepaintPending = false;
     
     if (customBitmap) {
         memcpy(_activeIconBitmap, customBitmap, sizeof(uint32_t) * 64);
@@ -237,13 +249,10 @@ void MatrixRenderer::showIcon(IconType icon, const uint32_t* customBitmap) {
 
 void MatrixRenderer::showEffect(uint8_t mode, uint32_t speed, uint32_t color, uint32_t color2, uint32_t color3) {
     if (!_matrix) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
     
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
+    _staticIconRepaintPending = false;
     if (_nativeEffectRunning) {
         _nativeEngine.reset();
         _nativeEffectRunning = false;
@@ -283,10 +292,6 @@ void MatrixRenderer::showNative3DEffect(uint8_t mode,
                                         uint8_t reactivityProvider,
                                         uint8_t reactivityGain) {
     if (!_matrix) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
 
     if (_effectRunning) {
         _matrix->stop();
@@ -299,6 +304,7 @@ void MatrixRenderer::showNative3DEffect(uint8_t mode,
     _scrolling = false;
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
+    _staticIconRepaintPending = false;
 
     MATRIX_FX::MatrixFxConfig config;
     config.mode = MATRIX_FX::normalizeNative3DMode(mode);
@@ -323,10 +329,6 @@ void MatrixRenderer::setEffectInput(const MATRIX_FX::MatrixFxInput& input) {
 
 void MatrixRenderer::showDataVisualization(const MATRIX::MatrixDataVisualizationConfig& config) {
     if (!_matrix) return;
-    if (isDisplayMuted()) {
-        blackout();
-        return;
-    }
 
     if (_effectRunning) {
         _matrix->stop();
@@ -339,6 +341,7 @@ void MatrixRenderer::showDataVisualization(const MATRIX::MatrixDataVisualization
     _scrolling = false;
     _activeIcon = IconType::NONE;
     _hasActiveIconBitmap = false;
+    _staticIconRepaintPending = false;
 
     _dataVisualizationEngine.configure(config);
     _dataVisualizationRunning = true;

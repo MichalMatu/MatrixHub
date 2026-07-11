@@ -43,10 +43,11 @@ namespace CONFIG {
 namespace JSON {
 
 void deserializeMatrix(JsonObject& obj, RTC::MatrixData& data) {
-    // Brightness (0-255)
+    // Persisted/user brightness stays non-zero. Runtime thermal muting uses the
+    // separate MatrixState thermal limit and must not leak into saved config.
     if (obj[Keys::kBrightness].is<uint8_t>()) {
         uint8_t v = obj[Keys::kBrightness].as<uint8_t>();
-        data.brightness = (uint8_t)std::clamp<int>(v, 0, 255);
+        data.brightness = (uint8_t)std::clamp<int>(v, UI::MATRIX::USER_BRIGHTNESS_MIN, 255);
     }
 
     // Alarm mode (0=SOLID, 1=ICON, 2=SCROLL_TEXT)

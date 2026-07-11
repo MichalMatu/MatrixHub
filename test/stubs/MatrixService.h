@@ -93,7 +93,19 @@ public:
     uint8_t lastLimit = 255;
     void setThermalBrightnessLimit(uint8_t limit) {
         lastLimit = limit;
+        if (thermalLimitHistoryCount < sizeof(thermalLimitHistory)) {
+            thermalLimitHistory[thermalLimitHistoryCount++] = limit;
+        }
         setThermalBrightnessLimitCalls++;
+        if (thermalBrightnessLimitHook) {
+            thermalBrightnessLimitHook(limit);
+        }
+    }
+    void resetThermalBrightnessHistory() {
+        lastLimit = 255;
+        setThermalBrightnessLimitCalls = 0;
+        thermalLimitHistoryCount = 0;
+        thermalBrightnessLimitHook = nullptr;
     }
     void setRotation(uint8_t rotation) {
         lastRotation = rotation;
@@ -125,6 +137,9 @@ public:
     uint32_t clearBackgroundDataVisualizationCalls = 0;
     uint32_t blackoutForShutdownCalls = 0;
     uint32_t setThermalBrightnessLimitCalls = 0;
+    uint8_t thermalLimitHistory[16] = {};
+    uint8_t thermalLimitHistoryCount = 0;
+    void (*thermalBrightnessLimitHook)(uint8_t) = nullptr;
     void (*blackoutForShutdownHook)() = nullptr;
     bool lastClearStopBackground = false;
     uint8_t lastEffectMode = 0;

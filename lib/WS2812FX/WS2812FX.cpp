@@ -252,8 +252,14 @@ void WS2812FX::setColors(uint8_t seg, uint32_t* c) {
 
 void WS2812FX::setBrightness(uint8_t b) {
 //b = constrain(b, BRIGHTNESS_MIN, BRIGHTNESS_MAX);
+#if defined(MEGATINYCORE)
   brightness = b;
-  execShow();
+#else
+  // Preserve Adafruit_NeoPixel's b+1 encoding and rescale its premultiplied
+  // transport buffer. The display driver owns the following logical repaint
+  // and show(), so brightness changes cannot transmit a stale frame here.
+  Adafruit_NeoPixel::setBrightness(b);
+#endif
 }
 
 void WS2812FX::increaseBrightness(uint8_t s) {

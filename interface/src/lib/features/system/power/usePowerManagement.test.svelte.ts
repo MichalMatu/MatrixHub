@@ -83,6 +83,7 @@ describe('usePowerManagement', () => {
 			thermal_temp_c: 44.5,
 			thermal_cpu_mhz: 240,
 			thermal_throttled: false,
+			thermal_matrix_limit: 255,
 			thermal_soft_c: 60,
 			thermal_hard_c: 68,
 			thermal_critical_c: 80,

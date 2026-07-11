@@ -56,6 +56,7 @@ public:
     }
 
     void show() { showCalls++; }
+    void restoreOutputIfPending() { restoreOutputCalls++; }
     void setBrightness(uint8_t brightness) { lastBrightness = brightness; }
     void setRotation(uint8_t rotation) { lastRotation = rotation; }
     uint8_t width() const { return WIDTH; }
@@ -102,6 +103,7 @@ public:
         startCalls = 0;
         stopCalls = 0;
         setPixelCalls = 0;
+        restoreOutputCalls = 0;
     }
 
     uint8_t begunPin = 0;
@@ -137,5 +139,6 @@ public:
     uint32_t startCalls = 0;
     uint32_t stopCalls = 0;
     uint32_t setPixelCalls = 0;
+    uint32_t restoreOutputCalls = 0;
     bool running = false;
 };

@@ -263,6 +263,8 @@ CsiVisualizationSnapshot CsiService::getVisualizationSnapshot() const {
 
 WiFiClass WiFi;
 
+static uint32_t g_matrixManagerInvalidations = 0;
+
 namespace MATRIX {
 
 void MatrixMenuService::update() {}
@@ -271,7 +273,13 @@ void MatrixMenuService::update() {}
 
 namespace MATRIX_MANAGER {
 
+MatrixLayerManager::MatrixLayerManager() {}
+MatrixNotificationQueue::MatrixNotificationQueue() {}
+MatrixManagerService::MatrixManagerService(MatrixService* matrixService)
+    : _matrixService(matrixService) {}
+MatrixManagerService::~MatrixManagerService() {}
 void MatrixManagerService::update() {}
+void MatrixManagerService::invalidateCache() { g_matrixManagerInvalidations++; }
 
 }  // namespace MATRIX_MANAGER
 
@@ -305,6 +313,7 @@ void resetState() {
     g_bleSelectedLookupCalls = 0;
     g_bleSlotLookupCalls = 0;
     g_blackoutSawStopAckAvailable = false;
+    g_matrixManagerInvalidations = 0;
     TEST_STUBS::WIFI::reset();
     MATRIX::MatrixTask::_shutdownEpilogueComplete.store(false);
     MATRIX::MatrixTask::resetAutoRotationState();
@@ -348,6 +357,21 @@ void test_start_does_not_touch_resources_while_lifecycle_owner_is_active() {
     TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastTaskFunction);
     TEST_ASSERT_TRUE(MATRIX::MatrixTask::_lifecycleInProgress.load());
     MATRIX::MatrixTask::_lifecycleInProgress.store(false);
+}
+
+void test_successful_start_invalidates_manager_cache_once() {
+    MatrixService matrix;
+    MATRIX_MANAGER::MatrixManagerService manager(&matrix);
+
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, &manager, nullptr, nullptr, nullptr);
+
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_EQUAL_UINT32(1, g_matrixManagerInvalidations);
+
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, &manager, nullptr, nullptr, nullptr);
+    TEST_ASSERT_EQUAL_UINT32(1, g_matrixManagerInvalidations);
 }
 
 void test_shutdown_epilogue_blacks_out_before_ack_and_reaps_resources() {
@@ -802,6 +826,7 @@ int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_without_matrix_service_cannot_claim_blackout_completion);
     RUN_TEST(test_start_does_not_touch_resources_while_lifecycle_owner_is_active);
+    RUN_TEST(test_successful_start_invalidates_manager_cache_once);
     RUN_TEST(test_shutdown_epilogue_blacks_out_before_ack_and_reaps_resources);
     RUN_TEST(test_stop_from_worker_requests_exit_without_self_delete);
     RUN_TEST(test_stop_timeout_retains_resources_until_late_epilogue_can_be_reaped);

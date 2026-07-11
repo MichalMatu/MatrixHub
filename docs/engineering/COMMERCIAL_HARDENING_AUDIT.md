@@ -324,6 +324,10 @@ Tests and evidence:
 - recorded real-matrix comparison at multiple brightness levels,
 - long hardware soak with no torn frame, random pixel, freeze, or restore jump.
 
+G2.3a thermal/brightness acceptance procedure:
+`operations/matrix-thermal-brightness-gate.md`. Automated evidence is necessary
+but cannot replace the current/light and locked-camera checks in that gate.
+
 ## G3 — Shared UI State Model, Tokens, And Accessibility
 
 Purpose: make every screen feel like one product before polishing pages one by

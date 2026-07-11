@@ -241,6 +241,7 @@ void test_power_status_exposes_thermal_diagnostics_without_activity_side_effect(
     TEST_ASSERT_EQUAL_STRING("normal", doc["thermal_state"].as<const char*>());
     TEST_ASSERT_EQUAL(240U, doc["thermal_cpu_mhz"].as<unsigned int>());
     TEST_ASSERT_FALSE(doc["thermal_throttled"].as<bool>());
+    TEST_ASSERT_EQUAL(255U, doc["thermal_matrix_limit"].as<unsigned int>());
     TEST_ASSERT_EQUAL(60, doc["thermal_soft_c"].as<int>());
     TEST_ASSERT_EQUAL(68, doc["thermal_hard_c"].as<int>());
     TEST_ASSERT_EQUAL(80, doc["thermal_critical_c"].as<int>());

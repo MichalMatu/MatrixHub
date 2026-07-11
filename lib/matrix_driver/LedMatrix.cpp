@@ -22,7 +22,7 @@ void LedMatrix::begin(uint8_t pin) {
     _strip = new WS2812FX(NUM_LEDS, pin, MATRIX_NEOPIXEL_TYPE);
     
     _strip->init();
-    _strip->setBrightness(_brightness == 0 ? 1 : _brightness);
+    _strip->setBrightness(_brightness);
     
     // Default segment: all LEDs, static black
     _strip->setSegment(0, 0, NUM_LEDS - 1, FX_MODE_STATIC, (uint32_t)0x000000, 1000, (bool)false);
@@ -36,7 +36,9 @@ void LedMatrix::begin(uint8_t pin) {
 
 void LedMatrix::service() {
     if (_strip && !_outputMuted) {
-        _strip->service();
+        if (_strip->service()) {
+            _restorePending = false;
+        }
     }
 }
 
@@ -73,15 +75,22 @@ uint16_t LedMatrix::xy(int16_t x, int16_t y) const {
 void LedMatrix::setPixel(int16_t x, int16_t y, uint32_t color) {
     if (!_strip) return;
     if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
-    
-    _strip->setPixelColor(xy(x, y), color);
+
+    const uint16_t index = xy(x, y);
+    _framebuffer[index] = color;
+    if (!_outputMuted) {
+        _strip->setPixelColor(index, color);
+    }
 }
 
 void LedMatrix::fillScreen(uint32_t color) {
     if (!_strip) return;
-    
+
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        _strip->setPixelColor(i, color);
+        _framebuffer[i] = color;
+        if (!_outputMuted) {
+            _strip->setPixelColor(i, color);
+        }
     }
 }
 
@@ -144,27 +153,90 @@ int16_t LedMatrix::getStringWidth(const char* str) {
 }
 
 void LedMatrix::show() {
-    if (_strip) {
-        if (_outputMuted) {
-            fillScreen(0);
-        }
+    if (_strip && !_outputMuted) {
         _strip->show();
+        _restorePending = false;
     }
 }
 
+void LedMatrix::restoreOutputIfPending() {
+    if (!_strip || _outputMuted || !_restorePending || _strip->isRunning()) {
+        return;
+    }
+
+    writeLogicalOutputFrame();
+    _strip->show();
+    _restorePending = false;
+}
+
 void LedMatrix::setBrightness(uint8_t brightness) {
+    const bool wasMuted = _outputMuted;
     _brightness = brightness;
     _outputMuted = (brightness == 0);
-    if (_strip) {
-        // Adafruit_NeoPixel rolls 0 over to full brightness internally.
-        // Keep the hardware path on a safe non-zero value and enforce "off"
-        // by muting output separately.
-        _strip->setBrightness(_outputMuted ? 1 : brightness);
+    if (!_strip) {
+        return;
+    }
 
-        if (_outputMuted) {
-            fillScreen(0);
-            _strip->show();
+    // WS2812FX delegates to Adafruit_NeoPixel's premultiplied brightness
+    // buffer. Always repaint from our logical frame after changing it; merely
+    // rescaling the transport bytes is lossy, especially after a low thermal
+    // limit. The driver owns the single explicit show() below.
+    _strip->setBrightness(brightness);
+
+    if (_outputMuted) {
+        _restorePending = false;
+        writeBlackOutputFrame();
+        _strip->show();
+        return;
+    }
+
+    if (wasMuted) {
+        // Stay physically black until MatrixService has drained any content
+        // command that was queued behind this higher-priority brightness
+        // update. That prevents a one-tick flash of the pre-mute frame.
+        _restorePending = true;
+        if (_strip->isRunning()) {
+            writeBlackOutputFrame();
+            _strip->start();
         }
+        return;
+    }
+
+    if (_strip->isRunning()) {
+        // Legacy effects mutate the WS2812FX transport buffer directly, so the
+        // logical static framebuffer is not authoritative while an effect owns
+        // output. Adafruit has already rescaled every transport byte to the new
+        // cap; restart and force one fresh effect frame instead of transmitting
+        // an intermediate black frame that would look like a glitch.
+        writeBlackOutputFrame();
+        _strip->start();
+        _strip->trigger();
+        if (_strip->service()) {
+            _restorePending = false;
+        } else {
+            // Fail closed if an invalid/no-active segment cannot produce the
+            // forced frame. Latch black at the new cap instead of leaving the
+            // previous physical frame visible indefinitely.
+            _strip->show();
+            _restorePending = false;
+        }
+        return;
+    }
+
+    writeLogicalOutputFrame();
+    _strip->show();
+    _restorePending = false;
+}
+
+void LedMatrix::writeBlackOutputFrame() {
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        _strip->setPixelColor(i, 0);
+    }
+}
+
+void LedMatrix::writeLogicalOutputFrame() {
+    for (uint16_t i = 0; i < NUM_LEDS; i++) {
+        _strip->setPixelColor(i, _framebuffer[i]);
     }
 }
 

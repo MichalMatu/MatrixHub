@@ -34,6 +34,7 @@ public:
     
     // Main Loop Polling (Returns highest priority pending command)
     bool poll(MatrixCommand& outCommand);
+    bool hasPendingCommands() const;
     
     // Background State Persistence
     struct BgEffect {
@@ -84,8 +85,9 @@ private:
     MatrixCommand _pendingContent{};
     uint32_t _notificationColor = 0;
     
-    uint8_t _pendingBrightness = 0;
-    uint8_t _userTargetBrightness = 20; // Default fallback
+    uint8_t _pendingBrightness = UI::MATRIX::BRIGHTNESS_DEFAULT;
+    uint8_t _lastPublishedBrightness = UI::MATRIX::BRIGHTNESS_DEFAULT;
+    uint8_t _userTargetBrightness = UI::MATRIX::BRIGHTNESS_DEFAULT;
     uint8_t _thermalLimit = 255; // Default no limit
     uint8_t _pendingRotation = 0;
     

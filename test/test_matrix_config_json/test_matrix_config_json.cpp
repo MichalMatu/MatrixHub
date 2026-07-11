@@ -107,6 +107,22 @@ void test_deserialize_matrix_normalizes_rgb888_colors() {
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFF, data.menu.textColor);
 }
 
+void test_deserialize_matrix_reserves_zero_brightness_for_runtime_thermal_mute() {
+    RTC::MatrixData data{};
+
+    for (uint8_t requested : {0, 1, 2, 255}) {
+        JsonDocument doc;
+        doc[CONFIG::Keys::kBrightness] = requested;
+        JsonObject obj = doc.as<JsonObject>();
+        CONFIG::JSON::deserializeMatrix(obj, data);
+
+        const uint8_t expected = requested < UI::MATRIX::USER_BRIGHTNESS_MIN
+            ? UI::MATRIX::USER_BRIGHTNESS_MIN
+            : requested;
+        TEST_ASSERT_EQUAL_UINT8(expected, data.brightness);
+    }
+}
+
 void test_deserialize_matrix_normalizes_native_3d_effect_fields() {
     JsonDocument doc;
     doc[CONFIG::Keys::kEffectEngine] = 1;
@@ -323,6 +339,7 @@ int main(int argc, char** argv) {
 
     UNITY_BEGIN();
     RUN_TEST(test_deserialize_matrix_normalizes_rgb888_colors);
+    RUN_TEST(test_deserialize_matrix_reserves_zero_brightness_for_runtime_thermal_mute);
     RUN_TEST(test_deserialize_matrix_normalizes_native_3d_effect_fields);
     RUN_TEST(test_serialize_matrix_writes_effect_engine_and_reactivity_fields);
     RUN_TEST(test_deserialize_matrix_normalizes_data_visualization_fields);

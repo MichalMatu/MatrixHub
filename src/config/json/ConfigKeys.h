@@ -288,6 +288,7 @@ namespace Keys {
     constexpr const char* kThermalTempC = "thermal_temp_c";
     constexpr const char* kThermalCpuMhz = "thermal_cpu_mhz";
     constexpr const char* kThermalThrottled = "thermal_throttled";
+    constexpr const char* kThermalMatrixLimit = "thermal_matrix_limit";
     constexpr const char* kThermalSoftC = "thermal_soft_c";
     constexpr const char* kThermalHardC = "thermal_hard_c";
     constexpr const char* kThermalCriticalC = "thermal_critical_c";

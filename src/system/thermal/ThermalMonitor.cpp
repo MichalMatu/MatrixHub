@@ -126,6 +126,11 @@ bool ThermalMonitor::begin() {
         return false;
     }
 
+    // Preserve any prior SOFT/HARD cap through the startup delay. The first
+    // actual temperature sample reapplies the correct state even if it is still
+    // NORMAL, so a hot monitor restart cannot brighten the panel for 5 seconds.
+    _forceApplyOnNextSample = true;
+
     LOGD("Started (interval=%ums, thresholds=%.0f/%.0f/%.0f°C)",
          THERMAL::MONITOR_INTERVAL_MS,
          THERMAL::TEMP_SOFT_THROTTLE,
@@ -239,10 +244,16 @@ void ThermalMonitor::restoreNormalState() {
 }
 
 void ThermalMonitor::evaluateAndApply(float temp) {
-    ThermalState newState = _state;
+    // On a monitor restart, evaluate the first fresh sample against the last
+    // applied thermal band. This preserves HARD/SOFT hysteresis instead of
+    // treating the restart as an artificial NORMAL transition.
+    const ThermalState evaluationState = _forceApplyOnNextSample
+        ? _lastAppliedState
+        : _state;
+    ThermalState newState = evaluationState;
 
     // Evaluate based on current state (hysteresis logic)
-    switch (_state) {
+    switch (evaluationState) {
         case ThermalState::NORMAL:
             // Transition UP only
             if (temp >= THERMAL::TEMP_CRITICAL) {
@@ -283,7 +294,8 @@ void ThermalMonitor::evaluateAndApply(float temp) {
             break;
     }
 
-    if (newState != _state) {
+    if (newState != _state || _forceApplyOnNextSample) {
+        _forceApplyOnNextSample = false;
         applyState(newState);
     }
 }
@@ -399,6 +411,7 @@ void ThermalMonitor::applyState(ThermalState newState) {
     } else if (newState == ThermalState::SOFT_THROTTLE) {
         matrixLimit = 16; // User requested 16 max for soft throttle
     }
+    _matrixBrightnessLimit = matrixLimit;
     if (_matrixService) {
         _matrixService->setThermalBrightnessLimit(matrixLimit);
     }
@@ -429,6 +442,7 @@ void ThermalMonitor::applyState(ThermalState newState) {
          _lastTemp);
 
     _state = newState;
+    _lastAppliedState = newState;
 
     // Handle CRITICAL Shutdown
     if (newState == ThermalState::CRITICAL) {
