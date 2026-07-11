@@ -10,7 +10,7 @@ The `MatrixManagerService` acts as the "Director" for the Matrix display. It dec
 ## Architecture
 
 The Matrix Manager subsystem is responsible for determining *what* to display and *when*. It manages:
-1. **Z-Index Layering:** Deciding which feature has priority to be shown (e.g., Alarms override Menus, Menus override Notifications).
+1. **Z-Index Layering:** Deciding which feature has priority to be shown.
 2. **Notification Queueing:** A PSRAM-allocated FIFO queue that handles incoming messages so they don't block logic or get instantly overwritten.
 
 ### Core Components
@@ -18,10 +18,11 @@ The Matrix Manager subsystem is responsible for determining *what* to display an
 #### 1. `MatrixLayerManager`
 Manages the Z-index priority using an internal layer stack.
 *   **Layers (Highest Priority to Lowest):**
-    *   `ALARM` (Top priority - overrides everything)
-    *   `SYSTEM_MODAL` (Critical system feedback such as booting or recovery notices)
+    *   `RESET_MODAL` (Factory-reset warning and confirmation feedback)
+    *   `MENU` (Button-driven interactive configuration)
+    *   `SYSTEM_MODAL` (Critical, self-clearing system feedback)
     *   `NOTIFICATION` (Popup messages queued by runtime or API events)
-    *   `MENU` (User interactive configuration menu)
+    *   `ALARM` (Latched warning state, restored after higher transient layers)
     *   `IDLE` (Animations, Dashboard)
     *   `BACKGROUND` (Bottom priority)
 *   **Behavior:** Only the highest-priority active layer is rendered. Thread-safe via mutexes.
@@ -87,5 +88,46 @@ Why both matter:
 
 `MatrixRuntimeApplier` is the canonical place that handles both steps when the
 settings payload turns `effectEnabled` off.
+
+### 3. Pending visible content is latest-wins
+
+`MatrixManagerService` resolves layers before it calls `MatrixService`, but the
+service may still have to apply a brightness or rotation update before the next
+visible frame. `MatrixState` therefore keeps hardware settings as independent
+coalesced updates and keeps exactly one pending visible-content command.
+
+A newer text, icon, solid, effect, visualization, or clear request replaces any
+older visible command that has not reached the renderer yet. Do not restore
+separate dirty bits or a fixed content-type priority inside `MatrixState`: that
+can render a newer alarm solid first and then replay an older background effect
+on the following MatrixTask tick while the layer manager incorrectly believes
+the alarm is still on screen.
+
+Background effect and data-visualization caches remain separate because they
+describe what should be restored after a temporary higher layer disappears;
+they are not a queue of frames waiting to be rendered. Clearing either cache
+also cancels a matching persistent command that has not reached the renderer;
+temporary commands with a non-zero duration are left intact.
+
+All access to this multi-field mailbox uses a non-expiring task-context mutex.
+Callers must not use `MatrixState` from an ISR.
+
+### 4. Renderer ownership and cache invalidation
+
+When `MatrixManagerService` exists, feature-level visual feedback must be
+published as a layer. Direct `MatrixService::show*()` calls can replace a
+pending command after the manager has already cached that layer as rendered.
+The long-hold gesture opens `MENU` before it reaches the reset threshold, so
+factory-reset feedback first closes that menu and then uses `RESET_MODAL`.
+That dedicated top layer also prevents an in-flight menu refresh from hiding a
+critical reset prompt. After its visible timeout the manager republishes the
+next layer, including a latched alarm. The armed message has no timeout because
+the confirmation window starts on button release; cancellation replaces it
+with a timed message.
+
+`invalidateCache()` forces the active top layer to be republished without
+forgetting whether the manager currently owns visible output. If invalidation
+follows removal of the final layer, the next update clears the renderer and
+cannot leave a disabled background effect running.
 
 Navigation: [Project README](../../../README.md) · [Engineering Reference](../README.md) · [Architecture](../README.md#runtime-and-architecture)

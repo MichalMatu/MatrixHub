@@ -64,55 +64,30 @@ public:
     bool getCustomIcon(IconType type, uint32_t* outBuffer) const;
 
 private:
-    // Keep this aligned with MatrixCommand::text so long messages are not truncated
-    // before they even reach the renderer.
-    static constexpr size_t kPendingTextCapacity = kMatrixTextCapacity;
-
     mutable SemaphoreHandle_t _mutex = nullptr;
     mutable StaticSemaphore_t _mutexBuffer;
+
+    // MatrixState is the cross-task mailbox for a multi-field command. Its
+    // short critical sections must never continue after a timed-out lock,
+    // otherwise the renderer can observe a torn command payload.
     
-    // State Flags (Prioritized Bitfield)
+    // Hardware settings may be coalesced independently, but visible content is
+    // a single latest-wins mailbox. Keeping one dirty bit per content type can
+    // replay an older effect after a newer alarm/icon command on the next task
+    // tick, leaving the layer manager and physical display out of sync.
     struct {
-        uint16_t clearDirty       : 1;
-        uint16_t iconDirty        : 1;
-        uint16_t textDirty        : 1;
-        uint16_t colorDirty       : 1;
-        uint16_t effectDirty      : 1;
-        uint16_t dataVisualizationDirty : 1;
-        uint16_t brightnessDirty  : 1;
-        uint16_t rotationDirty    : 1;
-        uint16_t stopBackgroundOnClear : 1;
-    } _flags = {0,0,0,0,0,0,0,0,1};
+        uint8_t contentDirty      : 1;
+        uint8_t brightnessDirty   : 1;
+        uint8_t rotationDirty     : 1;
+    } _flags = {0, 0, 0};
+
+    MatrixCommand _pendingContent{};
+    uint32_t _notificationColor = 0;
     
-    // Pending Data
-    
-    volatile IconType _pendingIcon = IconType::NONE;
-    volatile uint32_t _pendingIconDuration = 0;
-    
-    char _pendingText[kPendingTextCapacity] = {0};
-    volatile uint32_t _pendingTextColor = 0;
-    volatile uint32_t _pendingTextDuration = 0;
-    
-    volatile uint32_t _notificationColor = 0;
-    volatile uint32_t _activeSolidColor = 0;
-    
-    // Effect State
-    volatile uint8_t _pendingEffectMode = 0;
-    volatile uint8_t _pendingEffectEngine = 0;
-    volatile uint32_t _pendingEffectSpeed = 0;
-    volatile uint32_t _pendingEffectColor = 0;
-    volatile uint32_t _pendingEffectColor2 = 0;
-    volatile uint32_t _pendingEffectColor3 = 0;
-    volatile uint32_t _pendingEffectDuration = 0;
-    volatile uint8_t _pendingEffectReactivityProvider = 0;
-    volatile uint8_t _pendingEffectReactivityGain = 0;
-    MATRIX::MatrixDataVisualizationConfig _pendingDataVisualizationConfig{};
-    volatile uint32_t _pendingDataVisualizationDuration = 0;
-    
-    volatile uint8_t _pendingBrightness = 0;
-    volatile uint8_t _userTargetBrightness = 20; // Default fallback
-    volatile uint8_t _thermalLimit = 255; // Default no limit
-    volatile uint8_t _pendingRotation = 0;
+    uint8_t _pendingBrightness = 0;
+    uint8_t _userTargetBrightness = 20; // Default fallback
+    uint8_t _thermalLimit = 255; // Default no limit
+    uint8_t _pendingRotation = 0;
     
     // Background Effect Cache
     BgEffect _bgEffect;
@@ -126,4 +101,6 @@ private:
     
     // Current logical mode (to determine override behavior)
     MatrixMode _currentMode = MatrixMode::OFF;
+
+    MatrixCommand& replacePendingContent(CommandType type);
 };

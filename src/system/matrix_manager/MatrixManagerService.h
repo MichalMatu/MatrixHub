@@ -78,6 +78,7 @@ private:
     CommandType _lastRenderedType = CommandType::NONE;
     uint32_t _lastContentHash = 0;
     bool _wasRendering = false;
+    bool _forceRender = false;
     LayerContent _lastRenderedContent;
     
     uint32_t _lastUpdateMs = 0;

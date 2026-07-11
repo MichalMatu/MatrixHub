@@ -26,15 +26,29 @@ struct RecursiveMutexSemaphoreState {
 
 inline TickType_t lastSemaphoreTakeTimeout = 0;
 inline uint32_t semaphoreTakeCount = 0;
+inline uint32_t forcedSemaphoreTakeFailures = 0;
 
 inline void resetSemaphoreTakeStats() {
     lastSemaphoreTakeTimeout = 0;
     semaphoreTakeCount = 0;
+    forcedSemaphoreTakeFailures = 0;
 }
 
 inline void recordSemaphoreTake(TickType_t timeout) {
     lastSemaphoreTakeTimeout = timeout;
     semaphoreTakeCount++;
+}
+
+inline void failNextSemaphoreTake() {
+    forcedSemaphoreTakeFailures++;
+}
+
+inline bool consumeForcedSemaphoreTakeFailure() {
+    if (forcedSemaphoreTakeFailures == 0) {
+        return false;
+    }
+    forcedSemaphoreTakeFailures--;
+    return true;
 }
 
 inline std::unordered_set<SemaphoreHandle_t>& binarySemaphores() {
@@ -99,6 +113,9 @@ inline SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* buffer) 
 
 inline int xSemaphoreTake(SemaphoreHandle_t s, uint32_t t) {
     TEST_STUBS::FREERTOS::recordSemaphoreTake(t);
+    if (TEST_STUBS::FREERTOS::consumeForcedSemaphoreTakeFailure()) {
+        return pdFALSE;
+    }
     if (!TEST_STUBS::FREERTOS::isBinarySemaphoreHandle(s)) {
         if (TEST_STUBS::FREERTOS::isMutexSemaphoreHandle(s)) {
             auto* state = static_cast<TEST_STUBS::FREERTOS::MutexSemaphoreState*>(s);
@@ -195,6 +212,9 @@ inline int xSemaphoreTakeRecursive(SemaphoreHandle_t s, uint32_t t) {
     }
 
     TEST_STUBS::FREERTOS::recordSemaphoreTake(t);
+    if (TEST_STUBS::FREERTOS::consumeForcedSemaphoreTakeFailure()) {
+        return pdFALSE;
+    }
     auto* state = static_cast<TEST_STUBS::FREERTOS::RecursiveMutexSemaphoreState*>(s);
     if (t == portMAX_DELAY) {
         state->mutex.lock();

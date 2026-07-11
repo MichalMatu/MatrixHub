@@ -9,6 +9,7 @@
 #include "../../health/network/HttpServerHealthTracker.h"
 #include "../../health/wifi/WifiHealthTracker.h"
 #include "../../logging/Logging.h"
+#include "../../matrix_manager/MatrixManagerService.h"
 #include "../../rtc/RtcConfig.h"
 #include "../../reset/FactoryReset.h"
 #include "../../services/ServiceRegistry.h"
@@ -48,6 +49,35 @@ WiFiOperatingMode wifiModeFromMenuAction(MATRIX::WifiMenuAction action) {
         case MATRIX::WifiMenuAction::Off:
         default:
             return WiFiOperatingMode::Off;
+    }
+}
+
+void publishResetFeedback(MATRIX_MANAGER::MatrixManagerService* matrixManager,
+                          MatrixService* matrixService,
+                          MATRIX::MatrixMenuService* menuService,
+                          const char* text,
+                          uint32_t color,
+                          uint32_t durationMs) {
+    // A medium hold opens MENU before the reset warning threshold is reached.
+    // Close it explicitly so MENU cannot hide or periodically overwrite the
+    // reset modal while the same physical button remains held.
+    if (menuService) {
+        menuService->exitMenu();
+    }
+
+    if (matrixManager) {
+        MATRIX_MANAGER::LayerContent content;
+        content.active = true;
+        content.type = CommandType::SHOW_TEXT;
+        strlcpy(content.text, text, sizeof(content.text));
+        content.color = color;
+        content.durationMs = durationMs;
+        matrixManager->setLayer(MATRIX_MANAGER::Layer::RESET_MODAL, content);
+        return;
+    }
+
+    if (matrixService) {
+        matrixService->showText(text, color, durationMs);
     }
 }
 
@@ -112,16 +142,21 @@ void initializeButtonRouting(ServiceRegistry& services, ButtonHandler& buttonHan
     // the button (or a physically stuck button) sees what is about to happen
     // and gets a chance to abort. Colors are chosen to be obvious even at low
     // matrix brightness: amber warning, red armed, green cancelled.
+    auto* matrixManager = services.getMatrixManager();
     auto* matrix = services.getMatrixService();
-    if (matrix) {
-        bindings.onResetWarning = [matrix]() {
-            matrix->showText("RESET?", 0xFFA000, FACTORY::LONG_PRESS_MS - FACTORY::RESET_WARNING_MS);
+    if (matrixManager || matrix) {
+        bindings.onResetWarning = [matrixManager, matrix, menu]() {
+            publishResetFeedback(matrixManager, matrix, menu, "RESET?", 0xFFA000,
+                                 FACTORY::LONG_PRESS_MS - FACTORY::RESET_WARNING_MS);
         };
-        bindings.onResetArmed = [matrix]() {
-            matrix->showText("RELEASE +2x", 0xFF0000, FACTORY::RESET_CONFIRM_WINDOW_MS);
+        bindings.onResetArmed = [matrixManager, matrix, menu]() {
+            // The confirmation window starts on release, which may happen long
+            // after the 10-second threshold. Keep the armed message until the
+            // reset completes or the cancellation callback replaces it.
+            publishResetFeedback(matrixManager, matrix, menu, "RELEASE +2x", 0xFF0000, 0);
         };
-        bindings.onResetCancelled = [matrix]() {
-            matrix->showText("CANCEL", 0x00C800, 1500);
+        bindings.onResetCancelled = [matrixManager, matrix, menu]() {
+            publishResetFeedback(matrixManager, matrix, menu, "CANCEL", 0x00C800, 1500);
         };
     }
 

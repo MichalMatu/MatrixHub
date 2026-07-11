@@ -9,7 +9,7 @@ namespace MATRIX_MANAGER {
  * 
  * Each layer holds a LayerContent. Only the highest-priority active layer
  * is rendered at any time. Priority comes from the Layer enum value itself:
- * MENU is highest, BACKGROUND is lowest.
+ * RESET_MODAL is highest, BACKGROUND is lowest.
  *
  * MatrixManagerService owns this object and provides synchronization.
  */

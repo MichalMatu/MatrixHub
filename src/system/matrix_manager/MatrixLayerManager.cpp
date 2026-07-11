@@ -88,7 +88,7 @@ bool MatrixLayerManager::getTopLayer(LayerContent& out, Layer& outLayer) const {
 }
 
 bool MatrixLayerManager::getTopLayer(LayerContent& out, Layer& outLayer, uint32_t& outHash) const {
-    // Iterate from highest priority (MENU=5) down to BACKGROUND=0.
+    // Iterate from highest priority (RESET_MODAL=6) down to BACKGROUND=0.
     for (int8_t i = LAYER_COUNT - 1; i >= 0; i--) {
         if (_layers[i].active) {
             out = _layers[i];

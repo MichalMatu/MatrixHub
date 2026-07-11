@@ -17,10 +17,11 @@ enum class Layer : uint8_t {
     ALARM         = 2,  // Warnings/Alerts from Alarm Service
     NOTIFICATION  = 3,  // Queued runtime/API messages
     SYSTEM_MODAL  = 4,  // Macro scripts running/printing (overrides alarms, but self-clears)
-    MENU          = 5   // Button-activated menu (Absolute highest priority)
+    MENU          = 5,  // Button-activated menu
+    RESET_MODAL   = 6   // Factory-reset feedback (must stay visible above MENU)
 };
 
-constexpr uint8_t LAYER_COUNT = 6;
+constexpr uint8_t LAYER_COUNT = 7;
 
 /**
  * @brief Content descriptor for a single layer.

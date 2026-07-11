@@ -11,10 +11,14 @@ public:
 
     void init(uint8_t pin) {}
     void loop() {}
-    void showIcon(IconType icon, uint32_t duration) {}
+    void showIcon(IconType icon, uint32_t duration) {
+        (void)duration;
+        lastIcon = icon;
+        showIconCalls++;
+    }
     void showText(const char* text, uint32_t color, uint32_t duration) {
         (void)duration;
-        lastText = text ? text : "";
+        strlcpy(lastText, text ? text : "", sizeof(lastText));
         lastTextColor = color;
         showTextCalls++;
     }
@@ -55,7 +59,10 @@ public:
         lastEffectReactivityGain = reactivityGain;
         showEffectCalls++;
     }
-    void showSolidColor(uint16_t color) {}
+    void showSolidColor(uint32_t color) {
+        lastSolidColor = color;
+        showSolidCalls++;
+    }
     void showDataVisualization(const MATRIX::MatrixDataVisualizationConfig& config, uint32_t duration = 0) {
         (void)duration;
         lastDataVisualizationConfig = config;
@@ -95,9 +102,13 @@ public:
     }
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b) { return 0; }
 
-    const char* lastText = nullptr;
+    char lastText[kMatrixTextCapacity] = {0};
     uint32_t lastTextColor = 0;
+    IconType lastIcon = IconType::NONE;
+    uint32_t lastSolidColor = 0;
+    uint32_t showIconCalls = 0;
     uint32_t showTextCalls = 0;
+    uint32_t showSolidCalls = 0;
     uint32_t showEffectCalls = 0;
     uint32_t showDataVisualizationCalls = 0;
     uint32_t clearCalls = 0;

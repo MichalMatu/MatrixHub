@@ -123,7 +123,8 @@ void MatrixManagerService::update() {
 
         if (hasActiveLayer) {
             // Check if content changed. Layer hashes are computed on mutation.
-            bool changed = !_wasRendering ||
+            bool changed = _forceRender ||
+                           !_wasRendering ||
                            topLayer != _lastRenderedLayer ||
                            topContent.type != _lastRenderedType ||
                            topHash != _lastContentHash;
@@ -135,12 +136,14 @@ void MatrixManagerService::update() {
                 _lastRenderedType = topContent.type;
                 _lastContentHash = topHash;
                 _wasRendering = true;
+                _forceRender = false;
                 shouldApplyContent = true;
                 LOGD("Rendering layer %u (type=%d)",
                      static_cast<unsigned>(topLayer), static_cast<int>(topContent.type));
             }
         } else {
             // No active layers — clear display
+            _forceRender = false;
             if (_wasRendering) {
                 _wasRendering = false;
                 shouldClearDisplay = true;
@@ -162,8 +165,10 @@ void MatrixManagerService::invalidateCache() {
         LOGW("invalidateCache: mutex timeout");
         return;
     }
-    _lastContentHash = 0;
-    _wasRendering = false;
+    // Preserve _wasRendering so clearing the final layer still emits a
+    // renderer clear. Marking the manager idle here used to leave a stale
+    // persistent effect running after the BACKGROUND layer was disabled.
+    _forceRender = true;
 }
 
 // ─── Internal Helpers ────────────────────────────────────────────
