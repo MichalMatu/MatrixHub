@@ -100,7 +100,7 @@ void LedMatrix::drawChar(int16_t x, int16_t y, char c, uint32_t color, uint32_t 
     if (!glyph) return;
     
     // Font is stored as columns (5 bytes per char), LSB = top row
-    for (int8_t col = 0; col < Font5x7::CHAR_WIDTH; col++) {
+    for (int8_t col = 0; col < Font5x7::CHAR_PIXEL_WIDTH; col++) {
         uint8_t colData = pgm_read_byte(&glyph[col]);
         int16_t px = x + col;
         
@@ -114,7 +114,7 @@ void LedMatrix::drawChar(int16_t x, int16_t y, char c, uint32_t color, uint32_t 
     }
     // Draw character spacing column (always background)
     if (draw_bg) {
-        int16_t px = x + Font5x7::CHAR_WIDTH;
+        int16_t px = x + Font5x7::CHAR_PIXEL_WIDTH;
         for (int8_t row = 0; row < Font5x7::CHAR_HEIGHT; row++) {
             setPixel(px, y + row, bg_color);
         }
@@ -127,7 +127,7 @@ void LedMatrix::drawString(int16_t x, int16_t y, const char* str, uint32_t color
     int16_t cursorX = x;
     while (*str) {
         // Only draw chars that are at least partially on-screen
-        if (cursorX + Font5x7::CHAR_WIDTH > 0 && cursorX < WIDTH) {
+        if (cursorX + Font5x7::CHAR_PIXEL_WIDTH > 0 && cursorX < WIDTH) {
             drawChar(cursorX, y, *str, color, bg_color, draw_bg);
         }
         

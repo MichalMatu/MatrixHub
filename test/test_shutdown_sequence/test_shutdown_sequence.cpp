@@ -47,6 +47,8 @@ inline bool shellyRunning = false;
 inline int shellyStopCalls = 0;
 inline int blePrepareCalls = 0;
 inline int matrixTaskStopCalls = 0;
+inline bool matrixTaskStopResult = true;
+inline int matrixTaskStopFailuresRemaining = 0;
 inline int imuClearConsumerCalls = 0;
 inline int thermalStopCalls = 0;
 inline int psramLogBufferEndCalls = 0;
@@ -91,6 +93,8 @@ void reset() {
     shellyStopCalls = 0;
     blePrepareCalls = 0;
     matrixTaskStopCalls = 0;
+    matrixTaskStopResult = true;
+    matrixTaskStopFailuresRemaining = 0;
     imuClearConsumerCalls = 0;
     thermalStopCalls = 0;
     psramLogBufferEndCalls = 0;
@@ -391,9 +395,14 @@ void ImuManager::clearConsumers() {
 
 namespace MATRIX {
 
-void MatrixTask::stop() {
+bool MatrixTask::stop() {
     TEST_SHUTDOWN::calls.push("matrixTask.stop");
     TEST_SHUTDOWN::matrixTaskStopCalls++;
+    if (TEST_SHUTDOWN::matrixTaskStopFailuresRemaining > 0) {
+        TEST_SHUTDOWN::matrixTaskStopFailuresRemaining--;
+        return false;
+    }
+    return TEST_SHUTDOWN::matrixTaskStopResult;
 }
 
 }  // namespace MATRIX
@@ -501,9 +510,9 @@ void test_execute_stops_runtime_services_before_network_and_hardware_shutdown() 
     TEST_ASSERT_EQUAL_INT(WIFI_MODE_NULL, TEST_STUBS::WIFI::mode);
     TEST_ASSERT_TRUE(firstClient.closed());
     TEST_ASSERT_TRUE(secondClient.closed());
-    TEST_ASSERT_EQUAL_UINT8(UI::MATRIX::BRIGHTNESS_OFF, registry.getMatrixService()->lastLimit);
-    TEST_ASSERT_EQUAL_UINT32(1, registry.getMatrixService()->clearCalls);
-    TEST_ASSERT_TRUE(registry.getMatrixService()->lastClearStopBackground);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->setThermalBrightnessLimitCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->clearCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->blackoutForShutdownCalls);
 
     TEST_ASSERT_EQUAL_UINT32(SHUTDOWN::HTTP_CLIENT_CLOSE_GRACE_MS +
                                  SHUTDOWN::HARDWARE_SETTLE_DELAY_MS +
@@ -565,6 +574,39 @@ void test_execute_retries_reconciler_and_rssi_cleanup_before_network_shutdown() 
         TEST_STUBS::FREERTOS::tickCount);
 }
 
+void test_execute_continues_without_cross_owner_matrix_write_when_stop_is_pending() {
+    auto& registry = TEST_SHUTDOWN::rawObject<ServiceRegistry>();
+    TEST_SHUTDOWN::wirePowerManager(registry);
+    TEST_SHUTDOWN::wireMatrixService(registry);
+    TEST_SHUTDOWN::matrixTaskStopResult = false;
+
+    SYSTEM::ShutdownSequence::execute(registry);
+
+    TEST_ASSERT_EQUAL_INT(2, TEST_SHUTDOWN::matrixTaskStopCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->setThermalBrightnessLimitCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->clearCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->blackoutForShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_STUBS::WIFI::modeCalls);
+    TEST_ASSERT_EQUAL_INT(WIFI_MODE_NULL, TEST_STUBS::WIFI::mode);
+    TEST_ASSERT_EQUAL_INT(1, TEST_STUBS::SERIAL::flushCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_STUBS::SERIAL::endCalls);
+}
+
+void test_execute_retries_matrix_stop_before_network_shutdown() {
+    auto& registry = TEST_SHUTDOWN::rawObject<ServiceRegistry>();
+    TEST_SHUTDOWN::wirePowerManager(registry);
+    TEST_SHUTDOWN::wireMatrixService(registry);
+    TEST_SHUTDOWN::matrixTaskStopFailuresRemaining = 1;
+
+    SYSTEM::ShutdownSequence::execute(registry);
+
+    TEST_ASSERT_EQUAL_INT(2, TEST_SHUTDOWN::matrixTaskStopCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->setThermalBrightnessLimitCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->clearCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, registry.getMatrixService()->blackoutForShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(WIFI_MODE_NULL, TEST_STUBS::WIFI::mode);
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -575,5 +617,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_execute_prefers_explicit_reason_over_power_manager_reason);
     RUN_TEST(test_execute_stops_runtime_services_before_network_and_hardware_shutdown);
     RUN_TEST(test_execute_retries_reconciler_and_rssi_cleanup_before_network_shutdown);
+    RUN_TEST(test_execute_continues_without_cross_owner_matrix_write_when_stop_is_pending);
+    RUN_TEST(test_execute_retries_matrix_stop_before_network_shutdown);
     return UNITY_END();
 }

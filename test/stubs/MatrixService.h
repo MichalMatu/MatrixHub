@@ -83,9 +83,18 @@ public:
         clearBackgroundDataVisualizationCalls++;
     }
     void setBrightness(uint8_t brightness) {}
+    void blackoutForShutdown() {
+        blackoutForShutdownCalls++;
+        if (blackoutForShutdownHook) {
+            blackoutForShutdownHook();
+        }
+    }
     void setScrollSpeed(uint16_t speed) { lastScrollSpeed = speed; }
     uint8_t lastLimit = 255;
-    void setThermalBrightnessLimit(uint8_t limit) { lastLimit = limit; }
+    void setThermalBrightnessLimit(uint8_t limit) {
+        lastLimit = limit;
+        setThermalBrightnessLimitCalls++;
+    }
     void setRotation(uint8_t rotation) {
         lastRotation = rotation;
         setRotationCalls++;
@@ -114,6 +123,9 @@ public:
     uint32_t clearCalls = 0;
     uint32_t clearBackgroundEffectCalls = 0;
     uint32_t clearBackgroundDataVisualizationCalls = 0;
+    uint32_t blackoutForShutdownCalls = 0;
+    uint32_t setThermalBrightnessLimitCalls = 0;
+    void (*blackoutForShutdownHook)() = nullptr;
     bool lastClearStopBackground = false;
     uint8_t lastEffectMode = 0;
     uint32_t lastEffectSpeed = 0;

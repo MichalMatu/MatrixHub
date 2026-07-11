@@ -114,6 +114,12 @@ bool g_csiConsumerApplySticks = true;
 char g_lastBleRequestedMac[18] = {};
 uint32_t g_bleSelectedLookupCalls = 0;
 uint32_t g_bleSlotLookupCalls = 0;
+bool g_blackoutSawStopAckAvailable = false;
+
+void observeStopAckDuringBlackout() {
+    g_blackoutSawStopAckAvailable =
+        xSemaphoreTake(MATRIX::MatrixTask::_stopAck, 0) == pdTRUE;
+}
 
 }  // namespace
 
@@ -272,6 +278,10 @@ void MatrixManagerService::update() {}
 namespace {
 
 void resetState() {
+    MATRIX::MatrixTask::_lifecycleInProgress.store(false);
+    MATRIX::MatrixTask::destroyTaskResources();
+    TEST_STUBS::FREERTOS::resetTaskCreateStub();
+    TEST_STUBS::FREERTOS::resetSemaphoreTakeStats();
     memset(&RTC::mockStore, 0, sizeof(RTC::mockStore));
     TEST_STUBS::ARDUINO::millisValue = 0;
     g_hasAccel = false;
@@ -294,7 +304,9 @@ void resetState() {
     std::memset(g_lastBleRequestedMac, 0, sizeof(g_lastBleRequestedMac));
     g_bleSelectedLookupCalls = 0;
     g_bleSlotLookupCalls = 0;
+    g_blackoutSawStopAckAvailable = false;
     TEST_STUBS::WIFI::reset();
+    MATRIX::MatrixTask::_shutdownEpilogueComplete.store(false);
     MATRIX::MatrixTask::resetAutoRotationState();
     MATRIX::MatrixTask::_lastDataVisualizationInputMs = 0;
     MATRIX::MatrixTask::_lastMatrixDataVizCsiEnabled = false;
@@ -306,7 +318,173 @@ void setUp() {
     resetState();
 }
 
-void tearDown() {}
+void tearDown() {
+    MATRIX::MatrixTask::_lifecycleInProgress.store(false);
+    MATRIX::MatrixTask::destroyTaskResources();
+}
+
+void test_start_without_matrix_service_cannot_claim_blackout_completion() {
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::_isRunning.load());
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::_shutdownEpilogueComplete.load());
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastTaskFunction);
+}
+
+void test_start_does_not_touch_resources_while_lifecycle_owner_is_active() {
+    MatrixService matrix;
+    MATRIX::MatrixTask::_lifecycleInProgress.store(true);
+
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_stopAck);
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastTaskFunction);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::_lifecycleInProgress.load());
+    MATRIX::MatrixTask::_lifecycleInProgress.store(false);
+}
+
+void test_shutdown_epilogue_blacks_out_before_ack_and_reaps_resources() {
+    MatrixService matrix;
+    matrix.blackoutForShutdownHook = observeStopAckDuringBlackout;
+
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    const TaskHandle_t taskHandle = MATRIX::MatrixTask::_taskHandle.load();
+    TEST_ASSERT_NOT_NULL(taskHandle);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_stopAck);
+
+    MATRIX::MatrixTask::_isRunning.store(false);
+    TEST_STUBS::FREERTOS::lastTaskFunction(TEST_STUBS::FREERTOS::lastTaskParameter);
+
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.blackoutForShutdownCalls);
+    TEST_ASSERT_FALSE(g_blackoutSawStopAckAvailable);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::_shutdownEpilogueComplete.load());
+    TEST_ASSERT_EQUAL(eSuspended, TEST_STUBS::FREERTOS::taskState.load());
+    TEST_ASSERT_EQUAL(pdTRUE, xSemaphoreTake(MATRIX::MatrixTask::_stopAck, 0));
+
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, TEST_STUBS::FREERTOS::lastDeletedTask);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_stopAck);
+}
+
+void test_stop_from_worker_requests_exit_without_self_delete() {
+    MatrixService matrix;
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    const TaskHandle_t taskHandle = MATRIX::MatrixTask::_taskHandle.load();
+    TEST_STUBS::FREERTOS::currentTaskHandle = taskHandle;
+
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::_isRunning.load());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastDeletedTask);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_stopAck);
+
+    TEST_STUBS::FREERTOS::lastTaskFunction(TEST_STUBS::FREERTOS::lastTaskParameter);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.blackoutForShutdownCalls);
+    TEST_ASSERT_EQUAL(eSuspended, TEST_STUBS::FREERTOS::taskState.load());
+
+    TEST_STUBS::FREERTOS::currentTaskHandle = reinterpret_cast<TaskHandle_t>(2);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, TEST_STUBS::FREERTOS::lastDeletedTask);
+}
+
+void test_stop_timeout_retains_resources_until_late_epilogue_can_be_reaped() {
+    MatrixService matrix;
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    const TaskHandle_t taskHandle = MATRIX::MatrixTask::_taskHandle.load();
+    TEST_STUBS::FREERTOS::resetSemaphoreTakeStats();
+    TEST_STUBS::FREERTOS::failNextSemaphoreTake();
+
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_UINT32(1, TEST_STUBS::FREERTOS::semaphoreTakeCount);
+    TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(TIMEOUT::TASK_SHUTDOWN_MS),
+                             TEST_STUBS::FREERTOS::lastSemaphoreTakeTimeout);
+    TEST_ASSERT_EQUAL_PTR(taskHandle, MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_stopAck);
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastDeletedTask);
+
+    TEST_STUBS::FREERTOS::lastTaskFunction(TEST_STUBS::FREERTOS::lastTaskParameter);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.blackoutForShutdownCalls);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::_shutdownEpilogueComplete.load());
+    TEST_ASSERT_EQUAL(eSuspended, TEST_STUBS::FREERTOS::taskState.load());
+
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, TEST_STUBS::FREERTOS::lastDeletedTask);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NULL(MATRIX::MatrixTask::_stopAck);
+}
+
+void test_externally_suspended_task_without_epilogue_is_not_reaped() {
+    MatrixService matrix;
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    const TaskHandle_t taskHandle = MATRIX::MatrixTask::_taskHandle.load();
+    MATRIX::MatrixTask::_isRunning.store(false);
+    TEST_STUBS::FREERTOS::taskState.store(eSuspended);
+
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::_shutdownEpilogueComplete.load());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_stopAck);
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastDeletedTask);
+
+    TEST_STUBS::FREERTOS::lastTaskFunction(TEST_STUBS::FREERTOS::lastTaskParameter);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix.blackoutForShutdownCalls);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, TEST_STUBS::FREERTOS::lastDeletedTask);
+}
+
+void test_concurrent_stop_waits_for_owner_without_touching_task_resources() {
+    MatrixService matrix;
+    MATRIX::MatrixTask::start(
+        nullptr, nullptr, nullptr, &matrix, nullptr, nullptr, nullptr, nullptr);
+
+    const TaskHandle_t taskHandle = MATRIX::MatrixTask::_taskHandle.load();
+    MATRIX::MatrixTask::_lifecycleInProgress.store(true);
+    TEST_STUBS::FREERTOS::tickCount = 0;
+
+    TEST_ASSERT_FALSE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_UINT32(pdMS_TO_TICKS(TIMEOUT::TASK_SHUTDOWN_MS),
+                             TEST_STUBS::FREERTOS::tickCount);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::_isRunning.load());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, MATRIX::MatrixTask::_taskHandle.load());
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskStack);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_taskBuffer);
+    TEST_ASSERT_NOT_NULL(MATRIX::MatrixTask::_stopAck);
+    TEST_ASSERT_NULL(TEST_STUBS::FREERTOS::lastDeletedTask);
+
+    MATRIX::MatrixTask::_lifecycleInProgress.store(false);
+    MATRIX::MatrixTask::_isRunning.store(false);
+    TEST_STUBS::FREERTOS::lastTaskFunction(TEST_STUBS::FREERTOS::lastTaskParameter);
+    TEST_ASSERT_TRUE(MATRIX::MatrixTask::stop());
+    TEST_ASSERT_EQUAL_PTR(taskHandle, TEST_STUBS::FREERTOS::lastDeletedTask);
+}
 
 void test_auto_rotate_reapplies_rotation_after_toggle() {
     MatrixService matrix;
@@ -622,6 +800,13 @@ int main(int argc, char** argv) {
     (void)argv;
 
     UNITY_BEGIN();
+    RUN_TEST(test_start_without_matrix_service_cannot_claim_blackout_completion);
+    RUN_TEST(test_start_does_not_touch_resources_while_lifecycle_owner_is_active);
+    RUN_TEST(test_shutdown_epilogue_blacks_out_before_ack_and_reaps_resources);
+    RUN_TEST(test_stop_from_worker_requests_exit_without_self_delete);
+    RUN_TEST(test_stop_timeout_retains_resources_until_late_epilogue_can_be_reaped);
+    RUN_TEST(test_externally_suspended_task_without_epilogue_is_not_reaped);
+    RUN_TEST(test_concurrent_stop_waits_for_owner_without_touching_task_resources);
     RUN_TEST(test_auto_rotate_reapplies_rotation_after_toggle);
     RUN_TEST(test_effect_input_activates_imu_consumer_for_native_3d_provider);
     RUN_TEST(test_effect_input_disables_imu_consumer_when_provider_no_longer_needs_it);

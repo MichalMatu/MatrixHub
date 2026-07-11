@@ -238,6 +238,10 @@ void MatrixService::setBrightness(uint8_t brightness) {
     _state.setBrightness(brightness);
 }
 
+void MatrixService::blackoutForShutdown() {
+    _renderer.setBrightness(UI::MATRIX::BRIGHTNESS_OFF);
+}
+
 void MatrixService::setThermalBrightnessLimit(uint8_t limit) {
     ESP_LOGD(TAG, "Thermal limit set to %u", limit);
     _state.setThermalBrightnessLimit(limit);

@@ -31,7 +31,7 @@ public:
                       BLE::BleService* bleService,
                       WIFISENSING::WifiSensingService* wifiSensingService,
                       WIFISENSING::CSI::CsiService* csiService);
-    static void stop();
+    static bool stop();
 
 private:
     static void taskLoop(void* param);
@@ -42,14 +42,17 @@ private:
                                                WIFISENSING::CSI::CsiService* csiService,
                                                MatrixService* matrixService);
     static void resetAutoRotationState();
+    static bool acquireLifecycleOwnership(TickType_t waitTicks);
     static bool reapStoppedTask(TickType_t waitTicks);
     static void destroyTaskResources();
     
-    static TaskHandle_t _taskHandle;
+    static std::atomic<TaskHandle_t> _taskHandle;
     static StackType_t* _taskStack;
     static StaticTask_t* _taskBuffer;
     static SemaphoreHandle_t _stopAck;
     static std::atomic<bool> _isRunning;
+    static std::atomic<bool> _lifecycleInProgress;
+    static std::atomic<bool> _shutdownEpilogueComplete;
     static uint32_t _lastImuCheckMs;
     static bool _lastAutoRotateEnabled;
     static uint8_t _lastAppliedAutoRotation;

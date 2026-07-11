@@ -9,6 +9,9 @@
 #include "esp_system.h"
 #include "esp_attr.h"
 #define PROGMEM
+#ifndef pgm_read_byte
+#define pgm_read_byte(address) (*reinterpret_cast<const uint8_t*>(address))
+#endif
 #ifndef configASSERT
 #define configASSERT(x) do { if(!(x)) {} } while(0)
 #endif

@@ -29,11 +29,13 @@
 
 namespace MATRIX {
 
-TaskHandle_t MatrixTask::_taskHandle = nullptr;
+std::atomic<TaskHandle_t> MatrixTask::_taskHandle(nullptr);
 StackType_t* MatrixTask::_taskStack = nullptr;
 StaticTask_t* MatrixTask::_taskBuffer = nullptr;
 SemaphoreHandle_t MatrixTask::_stopAck = nullptr;
 std::atomic<bool> MatrixTask::_isRunning(false);
+std::atomic<bool> MatrixTask::_lifecycleInProgress(false);
+std::atomic<bool> MatrixTask::_shutdownEpilogueComplete(false);
 uint32_t MatrixTask::_lastImuCheckMs = 0;
 bool MatrixTask::_lastAutoRotateEnabled = false;
 uint8_t MatrixTask::_lastAppliedAutoRotation = 0xFF;
@@ -72,6 +74,19 @@ bool waitForTaskSuspended(TaskHandle_t taskHandle, SemaphoreHandle_t stopAck, Ti
 
     return eTaskGetState(taskHandle) == eSuspended;
 }
+
+class LifecycleOwnershipRelease {
+public:
+    explicit LifecycleOwnershipRelease(std::atomic<bool>& lifecycleInProgress)
+        : _lifecycleInProgress(lifecycleInProgress) {}
+
+    ~LifecycleOwnershipRelease() {
+        _lifecycleInProgress.store(false, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool>& _lifecycleInProgress;
+};
 
 float clampf(float value, float minValue, float maxValue) {
     if (!std::isfinite(value)) {
@@ -231,11 +246,22 @@ void MatrixTask::start(MatrixMenuService* menu,
                        BLE::BleService* bleService,
                        WIFISENSING::WifiSensingService* wifiSensingService,
                        WIFISENSING::CSI::CsiService* csiService) {
-    if (_taskHandle) {
+    if (!acquireLifecycleOwnership(0)) {
+        LOGW("Cannot start MatrixTask during another lifecycle transition");
+        return;
+    }
+    LifecycleOwnershipRelease releaseLifecycleOwnership(_lifecycleInProgress);
+
+    if (!matrixService) {
+        LOGE("Cannot start MatrixTask without MatrixService");
+        return;
+    }
+
+    if (_taskHandle.load(std::memory_order_acquire)) {
         if (!_isRunning.load()) {
             (void)reapStoppedTask(0);
         }
-        if (_taskHandle) {
+        if (_taskHandle.load(std::memory_order_acquire)) {
             LOGW("MatrixTask already running or still stopping");
             return;
         }
@@ -267,10 +293,11 @@ void MatrixTask::start(MatrixMenuService* menu,
     }
 
     resetAutoRotationState();
+    _shutdownEpilogueComplete.store(false, std::memory_order_release);
     _isRunning.store(true);
 
     if (_taskStack && _taskBuffer) {
-        _taskHandle = xTaskCreateStaticPinnedToCore(
+        _taskHandle.store(xTaskCreateStaticPinnedToCore(
             taskLoop,
             "MatrixTask",
             CONFIG::TASKS::STACK_MATRIX_TASK,
@@ -279,62 +306,103 @@ void MatrixTask::start(MatrixMenuService* menu,
             _taskStack,
             _taskBuffer,
             CONFIG::TASKS::CORE_MATRIX_TASK
-        );
+        ), std::memory_order_release);
     }
 
-    if (!_taskHandle) {
+    if (!_taskHandle.load(std::memory_order_acquire)) {
         LOGE("Failed to create MatrixTask");
         destroyTaskResources();
     }
 }
 
-void MatrixTask::stop() {
-    if (!_taskHandle && !_isRunning.load()) {
-        return;
-    }
+bool MatrixTask::stop() {
+    const TaskHandle_t observedTaskHandle = _taskHandle.load(std::memory_order_acquire);
 
-    if (_taskHandle && xTaskGetCurrentTaskHandle() == _taskHandle) {
+    if (observedTaskHandle && xTaskGetCurrentTaskHandle() == observedTaskHandle) {
         LOGW("MatrixTask::stop() called from worker context; requesting graceful exit only");
         _isRunning.store(false);
-        return;
+        return false;
     }
 
-    const bool wasRunning = _isRunning.exchange(false);
+    const TickType_t shutdownWaitTicks = pdMS_TO_TICKS(TIMEOUT::TASK_SHUTDOWN_MS);
+    if (!acquireLifecycleOwnership(shutdownWaitTicks)) {
+        LOGE("Timed out waiting for another MatrixTask lifecycle owner");
+        return false;
+    }
+    LifecycleOwnershipRelease releaseLifecycleOwnership(_lifecycleInProgress);
 
-    if (_taskHandle) {
-        (void)xTaskAbortDelay(_taskHandle);
+    const TaskHandle_t taskHandle = _taskHandle.load(std::memory_order_acquire);
+    if (!taskHandle) {
+        _isRunning.store(false);
+        return _shutdownEpilogueComplete.load(std::memory_order_acquire);
     }
 
-    const TickType_t waitTicks = wasRunning ? pdMS_TO_TICKS(TIMEOUT::TASK_SHUTDOWN_MS) : 0;
-    if (!reapStoppedTask(waitTicks)) {
-        LOGE("MatrixTask did not suspend cleanly - skipping delete/free to avoid UAF");
-        return;
+    _isRunning.store(false);
+
+    (void)xTaskAbortDelay(taskHandle);
+
+    // A retry after self-stop or an earlier timeout still gets a full bounded
+    // wait. Using zero here can race the worker's blackout/ACK epilogue.
+    if (!reapStoppedTask(shutdownWaitTicks)) {
+        LOGE("MatrixTask did not complete its shutdown epilogue - skipping delete/free to avoid UAF");
+        return false;
     }
 
     LOGI("MatrixTask stopped");
+    return true;
+}
+
+bool MatrixTask::acquireLifecycleOwnership(TickType_t waitTicks) {
+    const TickType_t pollTicks =
+        TIMEOUT::TASK_SHUTDOWN_POLL_TICKS > 0 ? TIMEOUT::TASK_SHUTDOWN_POLL_TICKS : 1;
+    TickType_t waited = 0;
+
+    while (true) {
+        bool expected = false;
+        if (_lifecycleInProgress.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return true;
+        }
+
+        if (waited >= waitTicks) {
+            return false;
+        }
+
+        const TickType_t remaining = waitTicks - waited;
+        const TickType_t delayTicks = remaining < pollTicks ? remaining : pollTicks;
+        vTaskDelay(delayTicks);
+        waited += delayTicks;
+    }
 }
 
 bool MatrixTask::reapStoppedTask(TickType_t waitTicks) {
-    if (!_taskHandle) {
+    const TaskHandle_t taskHandle = _taskHandle.load(std::memory_order_acquire);
+    if (!taskHandle) {
         destroyTaskResources();
-        return true;
+        return _shutdownEpilogueComplete.load(std::memory_order_acquire);
     }
 
     if (_isRunning.load()) {
         return false;
     }
 
-    if (!waitForTaskSuspended(_taskHandle, _stopAck, waitTicks)) {
+    if (!waitForTaskSuspended(taskHandle, _stopAck, waitTicks)) {
+        return false;
+    }
+    if (!_shutdownEpilogueComplete.load(std::memory_order_acquire)) {
         return false;
     }
 
-    vTaskDelete(_taskHandle);
+    vTaskDelete(taskHandle);
     destroyTaskResources();
     return true;
 }
 
 void MatrixTask::destroyTaskResources() {
-    _taskHandle = nullptr;
+    _taskHandle.store(nullptr, std::memory_order_release);
     _isRunning.store(false);
     resetAutoRotationState();
 
@@ -409,7 +477,19 @@ void MatrixTask::taskLoop(void* param) {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 
+    // MatrixTask is the sole renderer owner. Commit the terminal frame here,
+    // before acknowledging shutdown, because deferred MatrixState commands can
+    // no longer be consumed after this loop exits.
+    bool blackoutSubmitted = false;
+    if (matrixService) {
+        matrixService->blackoutForShutdown();
+        blackoutSubmitted = true;
+    } else {
+        LOGE("MatrixTask shutdown epilogue missing MatrixService");
+    }
+
     SYSTEM::TaskWatchdog::instance().unregisterCurrentTask();
+    _shutdownEpilogueComplete.store(blackoutSubmitted, std::memory_order_release);
 
     if (_stopAck) {
         xSemaphoreGive(_stopAck);

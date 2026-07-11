@@ -49,6 +49,15 @@ public:
     void clearBackgroundEffect();
     void clearBackgroundDataVisualization();
     void setBrightness(uint8_t brightness);
+    /**
+     * @brief Submit the terminal black frame before MatrixTask exits.
+     *
+     * This bypasses the deferred MatrixState mailbox because the worker is
+     * already leaving its loop. It is destructive renderer cleanup intended
+     * only for restart/deep-sleep shutdown; runtime callers must use the
+     * normal brightness/layer paths so visible content can be replayed.
+     */
+    void blackoutForShutdown();
     void setThermalBrightnessLimit(uint8_t limit);
     void setRotation(uint8_t rotation);
     void setScrollSpeed(uint16_t ms);

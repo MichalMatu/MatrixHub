@@ -130,4 +130,28 @@ forgetting whether the manager currently owns visible output. If invalidation
 follows removal of the final layer, the next update clears the renderer and
 cannot leave a disabled background effect running.
 
+### 5. Terminal shutdown blackout
+
+`MatrixTask` is the only runtime owner allowed to commit frames to the physical
+matrix. When restart or deep sleep stops that task, its epilogue calls
+`MatrixService::blackoutForShutdown()` synchronously before the stop ACK and
+before suspending. The ACK therefore means that renderer modes were stopped and
+the black frame was submitted to the LED driver. The underlying RMT API returns
+no transmission status, so this is a software completion guarantee, not an
+electrical confirmation; the release gate still requires a physical LED/current
+test on the target board.
+
+Task start and stop share one lifecycle ownership gate. A concurrent start is
+rejected, while concurrent stop callers wait for the active owner within the
+bounded shutdown budget. This prevents either path from reaping the task,
+semaphore, stack, or TCB underneath another caller.
+
+Do not enqueue `MatrixState` brightness or clear commands after `MatrixTask`
+has stopped: there is no consumer left to apply them. The shutdown blackout is
+terminal and intentionally bypasses `MatrixState`, so it neither changes the
+persisted brightness configuration nor serves as a general runtime mute. A
+runtime zero-brightness transition destroys renderer state and requires the
+manager to invalidate and replay the top layer when output becomes visible
+again.
+
 Navigation: [Project README](../../../README.md) · [Engineering Reference](../README.md) · [Architecture](../README.md#runtime-and-architecture)

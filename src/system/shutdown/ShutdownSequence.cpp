@@ -288,7 +288,14 @@ void ShutdownSequence::stopBackgroundTasks(ServiceRegistry& registry) {
     
     // [FIX] Explicitly stop background tasks that might span logs
     LOGI("Stopping MatrixTask...");
-    MATRIX::MatrixTask::stop();
+    bool matrixStopped = MATRIX::MatrixTask::stop();
+    if (!matrixStopped) {
+        LOGW("MatrixTask software blackout epilogue is pending; retrying once");
+        matrixStopped = MATRIX::MatrixTask::stop();
+    }
+    if (!matrixStopped) {
+        LOGE("MatrixTask software blackout epilogue did not complete");
+    }
 
     // Matrix visualization is an RSSI sampler reader. If it held the buffer
     // across the first bounded stop budget, retry once after that final reader
@@ -350,14 +357,11 @@ void ShutdownSequence::stopNetworkServices(ServiceRegistry& registry) {
 
 void ShutdownSequence::stopHardware(ServiceRegistry& registry) {
     LOGI("Stopping hardware peripherals...");
-    
-    // Failsafe: Ensure Matrix is OFF even if ThermalMonitor logic failed
-    if (registry.getMatrixService()) {
-        registry.getMatrixService()->setThermalBrightnessLimit(UI::MATRIX::BRIGHTNESS_OFF);
-        registry.getMatrixService()->clear(true); // Stop bg effects
-    }
-    // Send empty frame to hardware immediately if possible - rely on task delay below
-    
+
+    // MatrixTask submits the terminal black frame before a successful stop ACK.
+    // Do not enqueue deferred MatrixState commands here even after a timeout:
+    // only that task may own the renderer, so a cross-owner write is unsafe.
+
     // Give tasks a moment to realize they should stop before killing I2C
     vTaskDelay(pdMS_TO_TICKS(SHUTDOWN::HARDWARE_SETTLE_DELAY_MS));
 

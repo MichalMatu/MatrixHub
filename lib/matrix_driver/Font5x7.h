@@ -8,10 +8,10 @@
  */
 namespace Font5x7 {
 
-constexpr uint8_t CHAR_WIDTH = 5;
+constexpr uint8_t CHAR_PIXEL_WIDTH = 5;
 constexpr uint8_t CHAR_HEIGHT = 7;
 constexpr uint8_t CHAR_SPACING = 1;
-constexpr uint8_t GLYPH_WIDTH = CHAR_WIDTH + CHAR_SPACING; // 6 pixels total
+constexpr uint8_t GLYPH_WIDTH = CHAR_PIXEL_WIDTH + CHAR_SPACING; // 6 pixels total
 
 // Font data: each character is 5 bytes (columns), LSB = top row
 // Characters 32-126 (95 characters * 5 bytes = 475 bytes)
@@ -215,7 +215,7 @@ static const uint8_t PROGMEM fontData[] = {
  */
 inline const uint8_t* getGlyph(char c) {
     if (c < 32 || c > 126) return nullptr;
-    return &fontData[(c - 32) * CHAR_WIDTH];
+    return &fontData[(c - 32) * CHAR_PIXEL_WIDTH];
 }
 
 } // namespace Font5x7

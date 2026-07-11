@@ -158,22 +158,121 @@ void test_data_visualization_renders_bitmap_without_starting_legacy_fx() {
 void test_brightness_zero_blacks_out_and_blocks_effect_rendering() {
     MatrixRenderer renderer;
     renderer.begin(5);
+    renderer.showEffect(11, 1000, 0x123456, 0x234567, 0x345678);
+    TEST_ASSERT_TRUE(renderer.isActive());
     matrix().resetCounters();
 
     renderer.setBrightness(0);
 
     TEST_ASSERT_EQUAL_UINT8(0, matrix().lastBrightness);
+    TEST_ASSERT_FALSE(renderer.isActive());
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().stopCalls);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
     TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
 
     matrix().resetCounters();
+    renderer.loop();
+
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().serviceCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawBitmapCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawStringCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
 
     renderer.showEffect(11, 1000, 0x123456, 0x234567, 0x345678);
     renderer.loop();
 
     TEST_ASSERT_EQUAL_UINT32(0, matrix().startCalls);
     TEST_ASSERT_EQUAL_UINT32(0, matrix().serviceCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+}
+
+void test_brightness_zero_stops_active_native_3d_effect() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showNative3DEffect(2, 900, 0x123456, 0x234567, 0x345678, 1, 125);
+    TEST_ASSERT_TRUE(renderer.isActive());
+    matrix().resetCounters();
+
+    renderer.setBrightness(0);
+
+    TEST_ASSERT_FALSE(renderer.isActive());
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+
+    matrix().resetCounters();
+    renderer.loop();
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawBitmapCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+}
+
+void test_brightness_zero_stops_active_data_visualization() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    MATRIX::MatrixDataVisualizationConfig config;
+    config.enabled = true;
+    renderer.showDataVisualization(config);
+    TEST_ASSERT_TRUE(renderer.isActive());
+    matrix().resetCounters();
+
+    renderer.setBrightness(0);
+
+    TEST_ASSERT_FALSE(renderer.isActive());
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+
+    matrix().resetCounters();
+    renderer.loop();
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawBitmapCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+}
+
+void test_brightness_zero_stops_active_scrolling_text() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showText("SHUTDOWN", 0xFFFFFF);
+    TEST_ASSERT_TRUE(renderer.isActive());
+    matrix().resetCounters();
+
+    renderer.setBrightness(0);
+
+    TEST_ASSERT_FALSE(renderer.isActive());
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+
+    matrix().resetCounters();
+    TEST_STUBS::ARDUINO::millisValue = 1000;
+    renderer.loop();
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().drawStringCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, matrix().showCalls);
+}
+
+void test_brightness_zero_replaces_static_content_with_black() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showSolid(0xABCDEF);
+    matrix().resetCounters();
+
+    renderer.setBrightness(0);
+
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
+    TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
+    TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
+}
+
+void test_brightness_zero_replaces_static_icon_with_black() {
+    MatrixRenderer renderer;
+    renderer.begin(5);
+    renderer.showIcon(IconType::ALARM_CRITICAL);
+    matrix().resetCounters();
+
+    renderer.setBrightness(0);
+
     TEST_ASSERT_EQUAL_UINT32(1, matrix().fillCalls);
     TEST_ASSERT_EQUAL_HEX32(0x000000, matrix().lastFillColor);
     TEST_ASSERT_EQUAL_UINT32(1, matrix().showCalls);
@@ -189,5 +288,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_native_3d_effect_renders_bitmap_without_starting_legacy_fx);
     RUN_TEST(test_data_visualization_renders_bitmap_without_starting_legacy_fx);
     RUN_TEST(test_brightness_zero_blacks_out_and_blocks_effect_rendering);
+    RUN_TEST(test_brightness_zero_stops_active_native_3d_effect);
+    RUN_TEST(test_brightness_zero_stops_active_data_visualization);
+    RUN_TEST(test_brightness_zero_stops_active_scrolling_text);
+    RUN_TEST(test_brightness_zero_replaces_static_content_with_black);
+    RUN_TEST(test_brightness_zero_replaces_static_icon_with_black);
     return UNITY_END();
 }
