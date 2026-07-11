@@ -192,10 +192,25 @@ Candidate findings addressed:
   and reconciliation state; the UI does not offer calibration before the same
   fail-safe prerequisites used by firmware,
 - firmware builds expose embedded Git SHA/dirty identity and the collector
-  verifies it against the expected flashed commit before creating evidence.
+  verifies it against the expected flashed commit before creating evidence,
 - promotion preserves the collector-verified clean firmware identity fields
   required by the native release parser; Python workflow and native parser
-  contract tests fail if that provenance handoff regresses.
+  contract tests fail if that provenance handoff regresses,
+- every committed alarm transition now carries a per-rule, boot-scoped
+  `transition_seq`, `device_millis`, and nonzero random 64-bit `boot_id`; the
+  fields share the retained runtime transaction and rollback, reset with the
+  boot clock domain, appear in REST and snapshots, and extend the legacy
+  39-byte alarm packet with an append-only 16-byte suffix,
+- the frontend orders alarm snapshots/events by that serial-number contract,
+  rejects stale or metadata-less frames after a sequenced baseline, and latches
+  equal-sequence state conflicts instead of visually rolling an alarm back,
+- real capture finalization now requires a bounded post-WebSocket cleanup proof
+  plus a first-frame `CAPTURE_ORIGIN`; promotion independently rejects missing,
+  mistyped, active, timed-out, or mismatched lifecycle evidence,
+- the host CSI-to-alarm gate records private timestamped REST evidence and
+  operator markers, gates exact firmware/rule/runtime identity, transition
+  continuity, reconnect gaps, restarts, queue/capture/WS drops and lock
+  timeouts, and emits deterministic allow-listed closure summaries.
 
 Remaining evidence gates:
 

@@ -149,9 +149,13 @@ python scripts/diagnostics/check_macros.py
 python scripts/diagnostics/check_macros.py --safe-writes
 ```
 
-CSI should be treated as an opt-in diagnostic stream. Use `/ws/csi` only when
-WiFi sensing/CSI is enabled and the host can tolerate the extra traffic. CSI is
-not a production alarm source in the current release.
+The legacy `/ws/csi` visualization stream remains opt-in and is not required by
+alarm evaluation. `wifi_csi_motion` is a production alarm source when its rule
+and CSI detector are enabled; the alarm consumer keeps CSI alive independently
+of UI subscribers. Use the separate admin-only `/ws/csi-capture/v1` workflow
+for lossless evidence, and run
+`scripts/tests/csi_alarm_hardware_gate.py` for the timestamped CSI-to-alarm
+release gate. Do not infer alarm correctness from `/ws/csi` rendering traffic.
 
 Notification delivery endpoints are not part of the shared-device release
 checklist. Reading `/api/notifications/settings` is fine; do not call live
