@@ -1,5 +1,6 @@
 import { normalizeMac } from '$lib/utils/ble';
 import type { SystemEventBusLike } from './packetTypes';
+import type { AlarmEventData } from '../types';
 
 export function parseAirMouseBinary(buffer: ArrayBuffer, systemEvents: SystemEventBusLike) {
 	if (buffer.byteLength < 33) return;
@@ -127,6 +128,7 @@ export function parseAlarmBinary(buffer: ArrayBuffer, systemEvents: SystemEventB
 	const headerSize = 1;
 	const payloadOffset = headerSize + ruleIdBytes;
 	const minPacketSize = payloadOffset + 1 + 1 + 4;
+	const transitionMetadataSize = 4 + 4;
 
 	if (buffer.byteLength < minPacketSize) return;
 	const view = new DataView(buffer);
@@ -141,14 +143,31 @@ export function parseAlarmBinary(buffer: ArrayBuffer, systemEvents: SystemEventB
 	const severity = view.getUint8(payloadOffset + 1);
 	const currentValue = view.getFloat32(payloadOffset + 2, true);
 
+	const data: AlarmEventData = {
+		id,
+		triggered,
+		current_value: currentValue,
+		severity
+	};
+
+	// Firmware extends the legacy 39-byte packet with an append-only transition
+	// pair and then a 64-bit boot epoch. Keep old/intermediate devices display-compatible
+	// and expose only suffix fields that are completely present.
+	if (buffer.byteLength >= minPacketSize + transitionMetadataSize) {
+		data.transition_seq = view.getUint32(minPacketSize, true);
+		data.device_millis = view.getUint32(minPacketSize + 4, true);
+	}
+	if (buffer.byteLength >= minPacketSize + transitionMetadataSize + 8) {
+		const bootIdLow = view.getUint32(minPacketSize + transitionMetadataSize, true);
+		const bootIdHigh = view.getUint32(minPacketSize + transitionMetadataSize + 4, true);
+		data.boot_id = `${bootIdHigh.toString(16).padStart(8, '0')}${bootIdLow
+			.toString(16)
+			.padStart(8, '0')}`;
+	}
+
 	systemEvents.set({
 		type: 'alarm',
-		data: {
-			id,
-			triggered,
-			current_value: currentValue,
-			severity
-		}
+		data
 	});
 }
 

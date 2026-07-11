@@ -142,6 +142,58 @@ describe('parseBinaryPacket', () => {
 		});
 	});
 
+	it('parses append-only alarm transition metadata when the full suffix is present', () => {
+		const alarmId = new TextEncoder().encode('alarm-extended');
+		const buf = new Uint8Array(55);
+		const view = new DataView(buf.buffer);
+		buf[0] = 0x41;
+		buf.set(alarmId, 1);
+		buf[33] = 0;
+		buf[34] = 1;
+		view.setFloat32(35, 7.25, true);
+		view.setUint32(39, 0x78563412, true);
+		view.setUint32(43, 0xefcdab90, true);
+		view.setUint32(47, 0x89abcdef, true);
+		view.setUint32(51, 0x01234567, true);
+
+		expect(captureSystemEvent(buf.buffer)).toEqual({
+			type: 'alarm',
+			data: {
+				id: 'alarm-extended',
+				triggered: false,
+				current_value: 7.25,
+				severity: 1,
+				transition_seq: 0x78563412,
+				device_millis: 0xefcdab90,
+				boot_id: '0123456789abcdef'
+			}
+		});
+	});
+
+	it('keeps the transition pair when an intermediate alarm packet has no boot epoch', () => {
+		const buf = new Uint8Array(47);
+		const view = new DataView(buf.buffer);
+		buf[0] = 0x41;
+		buf.set(new TextEncoder().encode('alarm-pair'), 1);
+		buf[33] = 1;
+		buf[34] = 0;
+		view.setFloat32(35, 1, true);
+		view.setUint32(39, 4, true);
+		view.setUint32(43, 500, true);
+
+		expect(captureSystemEvent(buf.buffer)).toEqual({
+			type: 'alarm',
+			data: {
+				id: 'alarm-pair',
+				triggered: true,
+				current_value: 1,
+				severity: 0,
+				transition_seq: 4,
+				device_millis: 500
+			}
+		});
+	});
+
 	it('parses Shelly packets', () => {
 		const encoder = new TextEncoder();
 		const id = encoder.encode('plug-1');

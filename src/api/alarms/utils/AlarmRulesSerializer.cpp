@@ -5,6 +5,7 @@
 
 #include "AlarmRulesSerializer.h"
 #include "../../../config/App.h"
+#include "../../../system/boot/BootId.h"
 #include "../../../system/utils/json/JsonResponseWriter.h"
 #include <Arduino.h>
 #include <cmath>
@@ -61,9 +62,17 @@ bool AlarmRulesSerializer::serialize(Utils::JsonResponseWriter& w,
             const bool triggered = hasStatus ? status->triggered : false;
             const uint32_t lastTriggered = hasStatus ? status->lastTriggered : 0;
             const float currentValue = hasStatus ? status->currentValue : NAN;
+            const uint32_t transitionSeq = hasStatus ? status->transitionSeq : 0;
+            const uint32_t deviceMillis = hasStatus ? status->deviceMillis : 0;
+            const uint64_t bootId = hasStatus ? status->bootId : 0;
+            char bootIdHex[SYSTEM::kBootIdHexLength + 1];
+            SYSTEM::formatBootIdHex(bootId, bootIdHex);
 
             if (!w.raw(",") || !w.key("triggered") || !w.value(triggered)) return false;
             if (!w.raw(",") || !w.key("last_triggered") || !w.value((unsigned long)lastTriggered)) return false;
+            if (!w.raw(",") || !w.key("transition_seq") || !w.value((unsigned long)transitionSeq)) return false;
+            if (!w.raw(",") || !w.key("device_millis") || !w.value((unsigned long)deviceMillis)) return false;
+            if (!w.raw(",") || !w.key("boot_id") || !w.string(bootIdHex)) return false;
             
             // Add current sensor value for this rule
             if (!std::isnan(currentValue)) {

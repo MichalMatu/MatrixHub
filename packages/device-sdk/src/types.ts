@@ -870,6 +870,9 @@ export interface AlarmRule {
   triggered?: boolean;
   last_triggered?: number;
   current_value?: number;
+  transition_seq?: number;
+  device_millis?: number;
+  boot_id?: string;
 }
 
 export interface AlarmRulesConfig {

@@ -6,6 +6,7 @@
 #include "AlarmsApiService.h"
 #include "../../system/power/PowerManager.h"
 #include "../../system/logging/Logging.h"
+#include "../../system/boot/BootTracker.h"
 
 // Includes needed for endpoints
 #include <vector>
@@ -144,6 +145,9 @@ esp_err_t AlarmsApiService::handleGetRules(PsychicRequest* request) {
             RuleStatus& item = statuses[i];
             item.triggered = statesCopy[i].previouslyTriggered;
             item.lastTriggered = statesCopy[i].lastTriggeredMs;
+            item.transitionSeq = statesCopy[i].transitionSeq;
+            item.deviceMillis = statesCopy[i].transitionDeviceMillis;
+            item.bootId = SYSTEM::BootTracker::getBootId();
             if (rulesCopy[i].isBleSource()) {
                 item.currentValue = ALARMS::getBleValue(
                     rulesCopy[i].source,

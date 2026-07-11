@@ -2,6 +2,7 @@
 #include <esp_attr.h>
 #include "../logging/Logging.h"
 #include "../health/heap/HeapMonitor.h"
+#include "../utils/Random.h"
 #include <esp_system.h>
 
 #undef LOG_TAG
@@ -18,6 +19,7 @@ BootState BootTracker::_state = {};
 BootState BootTracker::_lastSessionState = {};
 bool BootTracker::_initialized = false;
 bool BootTracker::_lastBootUnexpected = false;
+uint64_t BootTracker::_bootId = 0;
 
 namespace {
 
@@ -63,6 +65,14 @@ const char* resetReasonToString(esp_reset_reason_t resetReason) {
 void BootTracker::begin() {
     if (_initialized) {
         return;
+    }
+
+    // This identifier deliberately lives only in RAM. Unlike the RTC-backed
+    // diagnostic counter, it remains unambiguous after a cold boot clears RTC
+    // state. Zero is reserved for missing/legacy alarm ordering metadata.
+    _bootId = UTILS::RNG::randomU64();
+    if (_bootId == 0) {
+        _bootId = 1;
     }
     
     loadFromRtc();
@@ -150,6 +160,10 @@ void BootTracker::recordShutdown(ShutdownReason reason) {
 
 uint32_t BootTracker::getBootCount() {
     return _state.bootCount;
+}
+
+uint64_t BootTracker::getBootId() {
+    return _bootId;
 }
 
 uint16_t BootTracker::getUnexpectedRestarts() {

@@ -23,6 +23,9 @@ struct AlarmStateChange {
     bool triggered;         // Current triggered state
     float currentValue;     // Current sensor value
     AlarmSeverity severity; // Alarm severity
+    uint32_t transitionSeq; // Per-rule, boot-scoped transition sequence
+    uint32_t deviceMillis;  // millis() captured for this transition
+    uint64_t bootId;        // Random boot epoch for ordering reconnect traffic
 };
 
 using AlarmStateCallback = std::function<void(const AlarmStateChange&)>;

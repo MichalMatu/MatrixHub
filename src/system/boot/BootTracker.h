@@ -63,6 +63,11 @@ public:
      * Get current boot count
      */
     static uint32_t getBootCount();
+
+    /**
+     * Get the random, non-persistent identifier generated for this boot.
+     */
+    static uint64_t getBootId();
     
     /**
      * Get count of unexpected restarts
@@ -104,6 +109,7 @@ private:
     static BootState _lastSessionState;
     static bool _initialized;
     static bool _lastBootUnexpected;
+    static uint64_t _bootId;
     
     static constexpr uint32_t kMagic = 0xB007CAFE;  // Validation marker
     

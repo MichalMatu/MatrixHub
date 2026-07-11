@@ -49,6 +49,9 @@ export interface AlarmRule {
 	triggered?: boolean;
 	last_triggered?: number;
 	current_value?: number; // Current sensor value for this rule's source
+	transition_seq?: number; // Per-rule, boot-scoped transition sequence
+	device_millis?: number; // Device millis() captured for the last transition
+	boot_id?: string; // Exact 16-character lowercase hexadecimal boot epoch
 }
 
 /** Configuration containing all alarm rules */

@@ -24,6 +24,9 @@ export type AlarmEventData = {
 	triggered: boolean;
 	current_value: number;
 	severity: number;
+	transition_seq?: number;
+	device_millis?: number;
+	boot_id?: string;
 };
 
 export type TelegramEventData = {

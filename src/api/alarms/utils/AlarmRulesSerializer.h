@@ -9,6 +9,9 @@ struct RuleStatus {
     bool triggered = false;
     uint32_t lastTriggered = 0;
     float currentValue = NAN;
+    uint32_t transitionSeq = 0;
+    uint32_t deviceMillis = 0;
+    uint64_t bootId = 0;
     bool valid = false;
 };
 

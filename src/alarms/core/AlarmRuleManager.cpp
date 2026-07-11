@@ -162,6 +162,10 @@ bool AlarmRuleManager::begin() {
     }
     for (uint8_t i = 0; i < _state.ruleCount; ++i) {
         _state.runtimeStates[i].lastTriggeredMs = 0;
+        // Both fields use the current millis() clock domain. Reset them on
+        // every boot instead of presenting retained values as cross-boot
+        // continuity evidence.
+        _state.runtimeStates[i].resetTransitionObservation();
     }
     if (!commitLocked()) {
         LOGE("Failed to persist alarm boot epoch reset");

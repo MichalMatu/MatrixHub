@@ -234,6 +234,44 @@ describe('SystemStatusStore', () => {
 		expect(secondSocket.send).toHaveBeenCalledWith(JSON.stringify({ snapshot: 'telemetry' }));
 	});
 
+	it('invalidates only cached alarm ordering on every quick socket reconnect', async () => {
+		const store = createStore();
+		const eventSubscriber = vi.fn();
+		store.subscribeEvents(eventSubscriber);
+		store.subscribeChannel('alarms');
+		store.subscribeChannel('telemetry');
+
+		await vi.advanceTimersByTimeAsync(10);
+		const firstSocket = store.ws as unknown as MockWebSocket;
+		firstSocket.onmessage?.({
+			data: JSON.stringify({
+				type: 'snapshot',
+				channel: 'alarms',
+				data: {
+					rules: [{ id: 'alarm-1', boot_id: '0000000000000001', transition_seq: 9 }]
+				}
+			})
+		} as MessageEvent);
+		firstSocket.onmessage?.({
+			data: JSON.stringify({
+				type: 'snapshot',
+				channel: 'telemetry',
+				data: { uptime_ms: 500 }
+			})
+		} as MessageEvent);
+		expect(store.getSnapshot('alarms')).not.toBeNull();
+		expect(store.getSnapshot('telemetry')).toEqual({ uptime_ms: 500 });
+		eventSubscriber.mockClear();
+
+		firstSocket.close();
+		await vi.advanceTimersByTimeAsync(1010);
+
+		expect(MockWebSocket.instances[1]).toBeDefined();
+		expect(store.getSnapshot('alarms')).toBeNull();
+		expect(store.getSnapshot('telemetry')).toEqual({ uptime_ms: 500 });
+		expect(eventSubscriber).toHaveBeenCalledWith(null);
+	});
+
 	it('should update status from binary packet', async () => {
 		const store = createStore();
 		store.connect();

@@ -8,6 +8,8 @@
 #include "../../../../config/System.h"
 #include "../../../../sensors/runtime/SensorState.h"
 #include "../../../../system/memory/PsramAllocator.h"
+#include "../../../../system/boot/BootId.h"
+#include "../../../../system/boot/BootTracker.h"
 #include "../../../../system/utils/ScopeLock.h"
 #include "../../../../wifisensing/WifiSensingService.h"
 #include "../../../alarms/utils/AlarmRulesSerializer.h"
@@ -65,6 +67,9 @@ void sendAlarmsSnapshot(const SnapshotContext& ctx) {
             API::RuleStatus& item = statuses[i];
             item.triggered = statesCopy[i].previouslyTriggered;
             item.lastTriggered = statesCopy[i].lastTriggeredMs;
+            item.transitionSeq = statesCopy[i].transitionSeq;
+            item.deviceMillis = statesCopy[i].transitionDeviceMillis;
+            item.bootId = SYSTEM::BootTracker::getBootId();
             if (rulesCopy[i].isBleSource()) {
                 item.currentValue = ALARMS::getBleValue(
                     rulesCopy[i].source, rulesCopy[i].bleDeviceMac, nowMs, ctx.bleService);
@@ -104,6 +109,9 @@ void sendAlarmsSnapshot(const SnapshotContext& ctx) {
         if (rule.isBleSource() && rule.bleDeviceMac[0] != '\0') {
             obj["ble_device_mac"] = rule.bleDeviceMac;
         }
+        if (rule.isGpioSource() && rule.gpioId[0] != '\0') {
+            obj[CONFIG::Keys::kGpioId] = rule.gpioId;
+        }
 
         if (!statuses.empty()) {
             const API::RuleStatus& status = statuses[i];
@@ -111,9 +119,17 @@ void sendAlarmsSnapshot(const SnapshotContext& ctx) {
             const bool triggered = hasStatus ? status.triggered : false;
             const uint32_t lastTriggered = hasStatus ? status.lastTriggered : 0;
             const float currentValue = hasStatus ? status.currentValue : NAN;
+            const uint32_t transitionSeq = hasStatus ? status.transitionSeq : 0;
+            const uint32_t deviceMillis = hasStatus ? status.deviceMillis : 0;
+            const uint64_t bootId = hasStatus ? status.bootId : 0;
+            char bootIdHex[SYSTEM::kBootIdHexLength + 1];
+            SYSTEM::formatBootIdHex(bootId, bootIdHex);
 
             obj["triggered"] = triggered;
             obj["last_triggered"] = static_cast<unsigned long>(lastTriggered);
+            obj["transition_seq"] = static_cast<unsigned long>(transitionSeq);
+            obj["device_millis"] = static_cast<unsigned long>(deviceMillis);
+            obj["boot_id"] = bootIdHex;
             if (!std::isnan(currentValue)) {
                 obj["current_value"] = currentValue;
             }

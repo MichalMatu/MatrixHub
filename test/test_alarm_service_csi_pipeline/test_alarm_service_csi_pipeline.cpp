@@ -41,6 +41,9 @@ std::vector<ShellyCommand> gShellyCommands;
 struct ObservedChange {
     bool triggered = false;
     float currentValue = NAN;
+    uint32_t transitionSeq = 0;
+    uint32_t deviceMillis = 0;
+    uint64_t bootId = 0;
 };
 
 ALARMS::AlarmRule makeCsiRule() {
@@ -99,7 +102,11 @@ void configureService(
     const ALARMS::AlarmRule rule = makeCsiRule();
     TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
     service.setStateChangeCallback([&observed](const ALARMS::AlarmStateChange& change) {
-        observed.push_back({change.triggered, change.currentValue});
+        observed.push_back({change.triggered,
+                            change.currentValue,
+                            change.transitionSeq,
+                            change.deviceMillis,
+                            change.bootId});
     });
 }
 
@@ -158,6 +165,14 @@ namespace LOG {
 void Logging::log(esp_log_level_t, const char*, const char*, ...) {}
 
 }  // namespace LOG
+
+namespace SYSTEM {
+
+uint64_t BootTracker::getBootId() {
+    return 0x0123456789ABCDEFULL;
+}
+
+}  // namespace SYSTEM
 
 namespace RTC {
 
@@ -293,16 +308,47 @@ void test_true_then_false_before_processing_runs_rising_and_clear_passes_in_orde
     TEST_ASSERT_EQUAL_UINT32(1, observed.size());
     TEST_ASSERT_TRUE(observed[0].triggered);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, observed[0].currentValue);
+    TEST_ASSERT_EQUAL_UINT32(1, observed[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(1000, observed[0].deviceMillis);
+    TEST_ASSERT_EQUAL_UINT64(0x0123456789ABCDEFULL, observed[0].bootId);
     TEST_ASSERT_TRUE(service.isSourceTriggered(ALARMS::AlarmSource::WifiCsiMotion));
 
+    TEST_STUBS::ARDUINO::millisValue = 1100;
     service.processPending();
     TEST_ASSERT_EQUAL_UINT32(2, observed.size());
     TEST_ASSERT_FALSE(observed[1].triggered);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, observed[1].currentValue);
+    TEST_ASSERT_EQUAL_UINT32(2, observed[1].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(1100, observed[1].deviceMillis);
     TEST_ASSERT_FALSE(service.isSourceTriggered(ALARMS::AlarmSource::WifiCsiMotion));
 
     service.processPending();
     TEST_ASSERT_EQUAL_UINT32(2, observed.size());
+}
+
+void test_transition_metadata_commits_without_callback_and_wraps_to_one() {
+    ALARMS::AlarmService service(nullptr, nullptr);
+    const ALARMS::AlarmRule rule = makeCsiRule();
+    TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
+
+    ALARMS::AlarmRuntimeState& state = service.getManager().getStates()[0];
+    state.transitionSeq = UINT32_MAX;
+    state.transitionDeviceMillis = 700;
+    TEST_ASSERT_TRUE(service.getManager().persistRuntimeState());
+
+    TEST_STUBS::ARDUINO::millisValue = 1234;
+    TEST_ASSERT_TRUE(service.submitInput(csiInput(true)));
+    service.processPending();
+
+    TEST_ASSERT_TRUE(state.previouslyTriggered);
+    TEST_ASSERT_EQUAL_UINT32(1, state.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(1234, state.transitionDeviceMillis);
+    TEST_ASSERT_EQUAL_UINT32(1, gRtcConfig.alarms.runtimeStates[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(
+        1234, gRtcConfig.alarms.runtimeStates[0].transitionDeviceMillis);
+
+    service.processPending();
+    TEST_ASSERT_EQUAL_UINT32(1, state.transitionSeq);
 }
 
 void test_imu_true_then_false_before_processing_preserves_tamper_edge() {
@@ -311,7 +357,11 @@ void test_imu_true_then_false_before_processing_preserves_tamper_edge() {
     TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
     std::vector<ObservedChange> observed;
     service.setStateChangeCallback([&observed](const ALARMS::AlarmStateChange& change) {
-        observed.push_back({change.triggered, change.currentValue});
+        observed.push_back({change.triggered,
+                            change.currentValue,
+                            change.transitionSeq,
+                            change.deviceMillis,
+                            change.bootId});
     });
 
     TEST_ASSERT_TRUE(service.submitInput(imuInput(true)));
@@ -331,7 +381,11 @@ void test_gpio_pulse_between_alarm_passes_runs_rising_then_clear_in_order() {
     TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
     std::vector<ObservedChange> observed;
     service.setStateChangeCallback([&observed](const ALARMS::AlarmStateChange& change) {
-        observed.push_back({change.triggered, change.currentValue});
+        observed.push_back({change.triggered,
+                            change.currentValue,
+                            change.transitionSeq,
+                            change.deviceMillis,
+                            change.bootId});
     });
 
     TEST_ASSERT_TRUE(service.submitGpioInput("gpio1", true));
@@ -419,7 +473,11 @@ void test_rising_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
     clearShellyCommands();
     service.setStateChangeCallback([&observed](const ALARMS::AlarmStateChange& change) {
-        observed.push_back({change.triggered, change.currentValue});
+        observed.push_back({change.triggered,
+                            change.currentValue,
+                            change.transitionSeq,
+                            change.deviceMillis,
+                            change.bootId});
     });
     gMatrixUpdateCalls = 0;
 
@@ -430,6 +488,8 @@ void test_rising_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     const ALARMS::AlarmRuntimeState& rolledBack = service.getManager().getStates()[0];
     TEST_ASSERT_FALSE(rolledBack.previouslyTriggered);
     TEST_ASSERT_FALSE(rolledBack.initialized);
+    TEST_ASSERT_EQUAL_UINT32(0, rolledBack.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(0, rolledBack.transitionDeviceMillis);
     TEST_ASSERT_EQUAL_UINT32(0, observed.size());
     TEST_ASSERT_EQUAL_UINT32(0, shellyCommandCount());
     TEST_ASSERT_EQUAL_UINT32(0, gMatrixUpdateCalls);
@@ -440,8 +500,15 @@ void test_rising_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     const ALARMS::AlarmRuntimeState& recovered = service.getManager().getStates()[0];
     TEST_ASSERT_TRUE(recovered.previouslyTriggered);
     TEST_ASSERT_TRUE(recovered.initialized);
+    TEST_ASSERT_EQUAL_UINT32(1, recovered.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(1000, recovered.transitionDeviceMillis);
+    TEST_ASSERT_EQUAL_UINT32(1, gRtcConfig.alarms.runtimeStates[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(
+        1000, gRtcConfig.alarms.runtimeStates[0].transitionDeviceMillis);
     TEST_ASSERT_EQUAL_UINT32(1, observed.size());
     TEST_ASSERT_TRUE(observed[0].triggered);
+    TEST_ASSERT_EQUAL_UINT32(1, observed[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(1000, observed[0].deviceMillis);
     TEST_ASSERT_TRUE(hasShellyCommand("relay-rising-retry", true));
     TEST_ASSERT_EQUAL_UINT32(1, shellyCommandCount());
     TEST_ASSERT_EQUAL_UINT32(1, gMatrixUpdateCalls);
@@ -462,7 +529,11 @@ void test_clear_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     TEST_ASSERT_TRUE(service.updateRules(&rule, 1));
     clearShellyCommands();
     service.setStateChangeCallback([&observed](const ALARMS::AlarmStateChange& change) {
-        observed.push_back({change.triggered, change.currentValue});
+        observed.push_back({change.triggered,
+                            change.currentValue,
+                            change.transitionSeq,
+                            change.deviceMillis,
+                            change.bootId});
     });
 
     ALARMS::AlarmRuntimeState& active = service.getManager().getStates()[0];
@@ -470,6 +541,8 @@ void test_clear_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     active.initialized = true;
     active.lastTriggeredMs = 900;
     active.lastValue = 1.0f;
+    active.transitionSeq = 7;
+    active.transitionDeviceMillis = 900;
     TEST_ASSERT_TRUE(service.getManager().persistRuntimeState());
     TEST_ASSERT_TRUE(gRtcConfig.alarms.runtimeStates[0].previouslyTriggered);
     gMatrixUpdateCalls = 0;
@@ -482,21 +555,29 @@ void test_clear_edge_rtc_failure_rolls_back_and_retries_exactly_once() {
     TEST_ASSERT_TRUE(rolledBack.previouslyTriggered);
     TEST_ASSERT_TRUE(rolledBack.initialized);
     TEST_ASSERT_EQUAL_UINT32(900, rolledBack.lastTriggeredMs);
+    TEST_ASSERT_EQUAL_UINT32(7, rolledBack.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(900, rolledBack.transitionDeviceMillis);
     TEST_ASSERT_TRUE(gRtcConfig.alarms.runtimeStates[0].previouslyTriggered);
     TEST_ASSERT_EQUAL_UINT32(0, observed.size());
     TEST_ASSERT_EQUAL_UINT32(0, shellyCommandCount());
     TEST_ASSERT_EQUAL_UINT32(0, gMatrixUpdateCalls);
 
     gRtcUpdateSucceeds = true;
+    TEST_STUBS::ARDUINO::millisValue = 2000;
     service.processPending();
 
     const ALARMS::AlarmRuntimeState& recovered = service.getManager().getStates()[0];
     TEST_ASSERT_FALSE(recovered.previouslyTriggered);
     TEST_ASSERT_TRUE(recovered.initialized);
     TEST_ASSERT_EQUAL_UINT32(0, recovered.lastTriggeredMs);
+    TEST_ASSERT_EQUAL_UINT32(8, recovered.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(2000, recovered.transitionDeviceMillis);
     TEST_ASSERT_FALSE(gRtcConfig.alarms.runtimeStates[0].previouslyTriggered);
+    TEST_ASSERT_EQUAL_UINT32(8, gRtcConfig.alarms.runtimeStates[0].transitionSeq);
     TEST_ASSERT_EQUAL_UINT32(1, observed.size());
     TEST_ASSERT_FALSE(observed[0].triggered);
+    TEST_ASSERT_EQUAL_UINT32(8, observed[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(2000, observed[0].deviceMillis);
     TEST_ASSERT_TRUE(hasShellyCommand("relay-clear-retry", false));
     TEST_ASSERT_EQUAL_UINT32(1, shellyCommandCount());
     TEST_ASSERT_EQUAL_UINT32(1, gMatrixUpdateCalls);
@@ -539,6 +620,8 @@ void test_begin_reanchors_retained_active_cooldown_without_boot_reminder() {
     rtcState.previouslyTriggered = true;
     rtcState.initialized = true;
     rtcState.lastTriggeredMs = 0xFFFFFF00;
+    rtcState.transitionSeq = 41;
+    rtcState.transitionDeviceMillis = 0xFFFFFE00;
     gRtcConfig.alarms.ruleCount = 1;
     gRtcConfig.alarms.ruleRuntimeIdentityHashes[0] =
         ALARMS::stableAlarmRuntimeIdentityHash(rule);
@@ -553,7 +636,12 @@ void test_begin_reanchors_retained_active_cooldown_without_boot_reminder() {
     TEST_ASSERT_TRUE(restored.previouslyTriggered);
     TEST_ASSERT_TRUE(restored.initialized);
     TEST_ASSERT_EQUAL_UINT32(0, restored.lastTriggeredMs);
+    TEST_ASSERT_EQUAL_UINT32(0, restored.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(0, restored.transitionDeviceMillis);
     TEST_ASSERT_EQUAL_UINT32(0, gRtcConfig.alarms.runtimeStates[0].lastTriggeredMs);
+    TEST_ASSERT_EQUAL_UINT32(0, gRtcConfig.alarms.runtimeStates[0].transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(
+        0, gRtcConfig.alarms.runtimeStates[0].transitionDeviceMillis);
     TEST_ASSERT_EQUAL_UINT32(1, gMatrixUpdateCalls);
     TEST_ASSERT_TRUE(gLastMatrixAggregate.active);
 
@@ -708,6 +796,8 @@ void test_unrelated_edit_and_reorder_preserve_retained_csi_state_by_id() {
     retained.initialized = true;
     retained.lastTriggeredMs = 777;
     retained.lastValue = 1.0f;
+    retained.transitionSeq = 12;
+    retained.transitionDeviceMillis = 765;
     TEST_ASSERT_EQUAL(pdTRUE, xSemaphoreGive(managerMutex));
 
     ALARMS::AlarmRule editedTemperature = makeTemperatureRule();
@@ -735,6 +825,8 @@ void test_unrelated_edit_and_reorder_preserve_retained_csi_state_by_id() {
     TEST_ASSERT_TRUE(migrated.initialized);
     TEST_ASSERT_EQUAL_UINT32(777, migrated.lastTriggeredMs);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, migrated.lastValue);
+    TEST_ASSERT_EQUAL_UINT32(12, migrated.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(765, migrated.transitionDeviceMillis);
     TEST_ASSERT_EQUAL(ALARMS::AlarmOperator::Above,
                       service.getManager().getRules()[1].op);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f,
@@ -759,6 +851,8 @@ void test_explicit_csi_disable_resets_runtime_and_clears_aggregate() {
     retained.previouslyTriggered = true;
     retained.initialized = true;
     retained.lastTriggeredMs = 900;
+    retained.transitionSeq = 9;
+    retained.transitionDeviceMillis = 850;
     TEST_ASSERT_EQUAL(pdTRUE, xSemaphoreGive(managerMutex));
 
     rule.enabled = false;
@@ -769,6 +863,8 @@ void test_explicit_csi_disable_resets_runtime_and_clears_aggregate() {
     TEST_ASSERT_FALSE(reset.previouslyTriggered);
     TEST_ASSERT_FALSE(reset.initialized);
     TEST_ASSERT_EQUAL_UINT32(0, reset.lastTriggeredMs);
+    TEST_ASSERT_EQUAL_UINT32(0, reset.transitionSeq);
+    TEST_ASSERT_EQUAL_UINT32(0, reset.transitionDeviceMillis);
     TEST_ASSERT_FALSE(service.isSourceTriggered(ALARMS::AlarmSource::WifiCsiMotion));
     TEST_ASSERT_EQUAL_UINT32(1, gMatrixUpdateCalls);
     TEST_ASSERT_FALSE(gLastMatrixAggregate.active);
@@ -1145,6 +1241,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_begin_fails_closed_when_pending_event_buffer_is_unavailable);
     RUN_TEST(test_begin_fails_closed_when_boot_shelly_buffer_is_unavailable);
     RUN_TEST(test_true_then_false_before_processing_runs_rising_and_clear_passes_in_order);
+    RUN_TEST(test_transition_metadata_commits_without_callback_and_wraps_to_one);
     RUN_TEST(test_imu_true_then_false_before_processing_preserves_tamper_edge);
     RUN_TEST(test_gpio_pulse_between_alarm_passes_runs_rising_then_clear_in_order);
     RUN_TEST(test_gpio_edges_only_override_rules_with_matching_selector);

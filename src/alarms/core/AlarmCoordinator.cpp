@@ -5,6 +5,7 @@
 #include "../../gpio/GpioService.h"
 #include "../../system/logging/Logging.h"
 #include "../../system/memory/SystemAllocator.h"
+#include "../../system/boot/BootTracker.h"
 #include "../../system/rtc/RtcConfig.h"
 #include "../../system/utils/ScopeLock.h"
 #include <esp_heap_caps.h>
@@ -19,6 +20,8 @@ namespace {
 
 bool shouldPersistRuntimeState(const AlarmRuntimeState& before, const AlarmRuntimeState& after) {
     return before.lastTriggeredMs != after.lastTriggeredMs ||
+           before.transitionSeq != after.transitionSeq ||
+           before.transitionDeviceMillis != after.transitionDeviceMillis ||
            before.previouslyTriggered != after.previouslyTriggered ||
            before.initialized != after.initialized;
 }
@@ -394,6 +397,14 @@ AlarmCoordinator::EvaluationPassResult AlarmCoordinator::collectPendingEvents(
         EvaluationResult result = AlarmEvaluator::evaluate(rule, currentInput, state, now);
         const float valueForLogging = getValueForLogging(rule, currentInput);
 
+        // Transition metadata belongs to the committed runtime state, not to
+        // WebSocket delivery. Record it even with no callback/subscriber so a
+        // later snapshot can prove whether an edge was missed. The before-image
+        // rollback below restores these fields if the RTC commit fails.
+        if (result.stateChanged) {
+            state.recordTransition(now);
+        }
+
         char safeName[kMaxAlarmNameLen] = {0};
         safeCopyAlarmName(safeName, rule.name);
 
@@ -413,6 +424,9 @@ AlarmCoordinator::EvaluationPassResult AlarmCoordinator::collectPendingEvents(
             changeMsg.triggered = result.triggered;
             changeMsg.currentValue = result.currentValue;
             changeMsg.severity = rule.severity;
+            changeMsg.transitionSeq = state.transitionSeq;
+            changeMsg.deviceMillis = state.transitionDeviceMillis;
+            changeMsg.bootId = SYSTEM::BootTracker::getBootId();
         }
 
         AlarmLogic::updateAggregate(rule, state, passResult.ledState);

@@ -68,10 +68,16 @@ void test_serializer_uses_parallel_status_index() {
     statuses[0].triggered = false;
     statuses[0].lastTriggered = 11;
     statuses[0].currentValue = 21.0f;
+    statuses[0].transitionSeq = 5;
+    statuses[0].deviceMillis = 101;
+    statuses[0].bootId = 0x0000000000000017ULL;
     statuses[1].valid = true;
     statuses[1].triggered = true;
     statuses[1].lastTriggered = 22;
     statuses[1].currentValue = 32.5f;
+    statuses[1].transitionSeq = 6;
+    statuses[1].deviceMillis = 202;
+    statuses[1].bootId = 0x0123456789ABCDEFULL;
 
     httpd_req_t req{};
     req.uri = "/api/alarms/rules";
@@ -89,9 +95,18 @@ void test_serializer_uses_parallel_status_index() {
     const size_t firstTriggered = g_responseBuffer.find("\"triggered\":false", firstRule);
     const size_t secondTriggered = g_responseBuffer.find("\"triggered\":true", secondRule);
     const size_t secondValue = g_responseBuffer.find("\"current_value\":32.50", secondRule);
+    const size_t firstTransitionSeq =
+        g_responseBuffer.find("\"transition_seq\":5", firstRule);
+    const size_t secondDeviceMillis =
+        g_responseBuffer.find("\"device_millis\":202", secondRule);
+    const size_t secondBootId =
+        g_responseBuffer.find("\"boot_id\":\"0123456789abcdef\"", secondRule);
     TEST_ASSERT_NOT_EQUAL(std::string::npos, firstTriggered);
     TEST_ASSERT_NOT_EQUAL(std::string::npos, secondTriggered);
     TEST_ASSERT_NOT_EQUAL(std::string::npos, secondValue);
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, firstTransitionSeq);
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, secondDeviceMillis);
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, secondBootId);
     TEST_ASSERT_TRUE(firstTriggered < secondRule);
     TEST_ASSERT_TRUE(secondTriggered > secondRule);
 }
@@ -115,6 +130,15 @@ void test_serializer_defaults_missing_parallel_status() {
     TEST_ASSERT_NOT_EQUAL(
         std::string::npos,
         g_responseBuffer.find("\"last_triggered\":0"));
+    TEST_ASSERT_NOT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"transition_seq\":0"));
+    TEST_ASSERT_NOT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"device_millis\":0"));
+    TEST_ASSERT_NOT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"boot_id\":\"0000000000000000\""));
     TEST_ASSERT_EQUAL(std::string::npos, g_responseBuffer.find("\"current_value\""));
 }
 
@@ -136,6 +160,15 @@ void test_serializer_includes_ble_mac_for_battery_source() {
     TEST_ASSERT_NOT_EQUAL(
         std::string::npos,
         g_responseBuffer.find("\"ble_device_mac\":\"aa:bb:cc:dd:ee:ff\""));
+    TEST_ASSERT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"transition_seq\""));
+    TEST_ASSERT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"device_millis\""));
+    TEST_ASSERT_EQUAL(
+        std::string::npos,
+        g_responseBuffer.find("\"boot_id\""));
 }
 
 void test_serializer_includes_gpio_id_for_gpio_source() {

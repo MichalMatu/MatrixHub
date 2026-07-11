@@ -87,8 +87,9 @@ constexpr uint32_t kMagicValid = 0xC0FFEE42;
  *  46 - Added Matrix data visualization background settings (June 2026)
  *  47 - Added configurable deep-sleep wake sources/windows to PowerData (July 2026)
  *  48 - Added semantic alarm runtime identities to retained state (July 2026)
+ *  49 - Added boot-scoped alarm transition observability fields (July 2026)
  */
-constexpr uint32_t kSchemaVersion = 48;
+constexpr uint32_t kSchemaVersion = 49;
 
 // Shelly Constants moved to types/RtcShellyTypes.h
 

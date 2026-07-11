@@ -11,7 +11,7 @@ import { DeviceLogsApi } from "./logs";
 import { DeviceMacrosApi } from "./macros";
 import { DeviceNotificationsApi } from "./notifications";
 import { DevicePowerApi } from "./power";
-import type { WifiSensingSettings } from "./types";
+import type { AlarmRulesConfig, WifiSensingSettings } from "./types";
 import { DeviceWifiSensingApi } from "./wifisensing";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
@@ -117,7 +117,27 @@ describe("device SDK domain clients", () => {
   });
 
   it("covers power, alarms, WiFi sensing and integration settings", async () => {
-    const alarmConfig = { schema_version: 1, rules: [] };
+    const alarmConfig: AlarmRulesConfig = {
+      schema_version: 1,
+      rules: [
+        {
+          id: "csi-motion",
+          enabled: true,
+          name: "CSI motion",
+          source: "wifi_csi_motion",
+          operator: "above",
+          threshold: 0.5,
+          severity: "warning",
+          notify_channels: ["led"],
+          cooldown_seconds: 60,
+          triggered: true,
+          current_value: 1,
+          transition_seq: 7,
+          device_millis: 1234,
+          boot_id: "0123456789abcdef",
+        },
+      ],
+    };
     const wifiSensingSettings: WifiSensingSettings = {
       enabled: true,
       sample_interval_ms: 250,
@@ -223,8 +243,15 @@ describe("device SDK domain clients", () => {
     await new DevicePowerApi(clientOptions(recording.fetch)).updateConfig({
       sleep_enabled: true,
     });
-    await new DeviceAlarmsApi(clientOptions(recording.fetch)).getRules({
+    const alarmRules = await new DeviceAlarmsApi(
+      clientOptions(recording.fetch),
+    ).getRules({
       includeStatus: true,
+    });
+    expect(alarmRules.rules[0]).toMatchObject({
+      transition_seq: 7,
+      device_millis: 1234,
+      boot_id: "0123456789abcdef",
     });
     await new DeviceWifiSensingApi(
       clientOptions(recording.fetch),

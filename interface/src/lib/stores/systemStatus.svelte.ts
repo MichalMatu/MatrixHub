@@ -168,6 +168,13 @@ export class SystemStatusStore {
 		// leases, so we must resubscribe every currently used channel from scratch.
 		// Reconnect uses the same freshness rule as a normal subscribe: always ask
 		// for one fresh snapshot instead of trying to trust the local cache.
+		if (this.activeSubscriptions.has('alarms')) {
+			// Alarm transition sequences are boot-scoped. Invalidate only this
+			// channel before a quick reconnect so its onReset callback drops the old
+			// ordering epoch even when the generic 10-second grace period never fires.
+			this.lastSnapshots.delete('alarms');
+			this.events.set(null);
+		}
 		this.activeSubscriptions.forEach((_count, channel) => {
 			this.sendChannelMessage('subscribe', channel);
 			this.sendChannelMessage('snapshot', channel);

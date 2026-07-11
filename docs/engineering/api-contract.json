@@ -202,7 +202,7 @@
       "path": "/ws/system",
       "auth": "authenticated via access_token cookie",
       "request": "WebSocket subscription/control messages",
-      "response": "Multiplexed system telemetry, device, alarm, notification, and integration events",
+      "response": "Multiplexed system telemetry, device, alarm, notification, and integration events; alarm packets preserve the 39-byte legacy prefix and may append a 16-byte continuity suffix containing uint32 transition_seq, uint32 device_millis, and uint64 boot_id",
       "restartRequired": false,
       "firmware": ["src/api/system/websocket/SystemWebsocketBroadcaster.cpp"],
       "frontend": ["interface/src/lib/stores/system/socketTransport.ts"],
@@ -670,12 +670,12 @@
       "path": "/api/alarms/rules",
       "auth": "authenticated-read/admin-write",
       "request": "GET optional includeStatus=1; POST alarm rules config JSON",
-      "response": "Alarm rules config and optional runtime status",
+      "response": "Alarm rules config and optional runtime status; includeStatus=1 adds triggered, last_triggered, current_value when available, plus boot-scoped uint32 transition_seq/device_millis and an exact lowercase 16-hex boot_id",
       "restartRequired": false,
       "firmware": ["src/api/alarms/AlarmsApiService.cpp"],
       "frontend": ["interface/src/lib/services/api/monitoring/AlarmsApiService.ts"],
       "sdk": ["packages/device-sdk/src/alarms.ts"],
-      "tests": ["scripts/tests/stress_test.py", "scripts/contract/verify_api_contract.py"]
+      "tests": ["scripts/tests/stress_test.py", "test/test_alarm_rules_serializer/test_alarm_rules_serializer.cpp", "test/test_alarm_state_packet/test_alarm_state_packet.cpp", "interface/src/lib/stores/system/parsers.test.ts", "scripts/contract/verify_api_contract.py"]
     },
     {
       "id": "logs.list",

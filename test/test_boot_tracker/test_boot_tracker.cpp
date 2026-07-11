@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdint>
+#include <cstdlib>
 
 #define private public
 #include "../../src/system/boot/BootTracker.cpp"
@@ -46,6 +47,8 @@ void resetBootTrackerState() {
     SYSTEM::BootTracker::_lastSessionState = {};
     SYSTEM::BootTracker::_initialized = false;
     SYSTEM::BootTracker::_lastBootUnexpected = false;
+    SYSTEM::BootTracker::_bootId = 0;
+    std::srand(1);
 }
 
 SYSTEM::BootState makeValidRtcState() {
@@ -87,6 +90,7 @@ void test_begin_is_idempotent_after_first_initialization() {
 
     SYSTEM::BootTracker::begin();
     const uint32_t bootCountAfterFirstBegin = SYSTEM::BootTracker::getBootCount();
+    const uint64_t bootIdAfterFirstBegin = SYSTEM::BootTracker::getBootId();
     const uint16_t unexpectedAfterFirstBegin = SYSTEM::BootTracker::getUnexpectedRestarts();
     const uint8_t resetReasonAfterFirstBegin = SYSTEM::rtcBootState.lastResetReason;
 
@@ -94,8 +98,23 @@ void test_begin_is_idempotent_after_first_initialization() {
     SYSTEM::BootTracker::begin();
 
     TEST_ASSERT_EQUAL_UINT32(bootCountAfterFirstBegin, SYSTEM::BootTracker::getBootCount());
+    TEST_ASSERT_EQUAL_UINT64(bootIdAfterFirstBegin, SYSTEM::BootTracker::getBootId());
+    TEST_ASSERT_NOT_EQUAL_UINT64(0, SYSTEM::BootTracker::getBootId());
     TEST_ASSERT_EQUAL_UINT16(unexpectedAfterFirstBegin, SYSTEM::BootTracker::getUnexpectedRestarts());
     TEST_ASSERT_EQUAL_UINT8(resetReasonAfterFirstBegin, SYSTEM::rtcBootState.lastResetReason);
+}
+
+void test_begin_generates_a_new_nonzero_id_for_a_simulated_new_boot() {
+    SYSTEM::BootTracker::begin();
+    const uint64_t firstBootId = SYSTEM::BootTracker::getBootId();
+
+    SYSTEM::BootTracker::_initialized = false;
+    SYSTEM::BootTracker::begin();
+    const uint64_t secondBootId = SYSTEM::BootTracker::getBootId();
+
+    TEST_ASSERT_NOT_EQUAL_UINT64(0, firstBootId);
+    TEST_ASSERT_NOT_EQUAL_UINT64(0, secondBootId);
+    TEST_ASSERT_NOT_EQUAL_UINT64(firstBootId, secondBootId);
 }
 
 void test_begin_counts_unexpected_restart_without_shutdown_marker() {
@@ -187,6 +206,7 @@ int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_begin_starts_fresh_when_rtc_magic_is_invalid);
     RUN_TEST(test_begin_is_idempotent_after_first_initialization);
+    RUN_TEST(test_begin_generates_a_new_nonzero_id_for_a_simulated_new_boot);
     RUN_TEST(test_begin_counts_unexpected_restart_without_shutdown_marker);
     RUN_TEST(test_begin_does_not_count_restart_when_shutdown_marker_exists);
     RUN_TEST(test_begin_treats_restart_command_marker_as_controlled_software_restart);
