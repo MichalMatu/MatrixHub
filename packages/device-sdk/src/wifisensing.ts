@@ -1,5 +1,13 @@
-import { createDeviceApiClient, type DeviceApiClientOptions } from "./api/client";
-import type { WifiSensingSettings, WifiSensingStatus, WifiStatus } from "./types";
+import {
+  createDeviceApiClient,
+  type DeviceApiClientOptions,
+} from "./api/client";
+import type {
+  CsiCalibrationResponse,
+  WifiSensingSettings,
+  WifiSensingStatus,
+  WifiStatus,
+} from "./types";
 import { buildDeviceWebSocketUrl } from "./ws";
 
 export const CSI_WEBSOCKET_PATH = "/ws/csi";
@@ -19,12 +27,24 @@ export class DeviceWifiSensingApi {
     return this.client.get<WifiSensingSettings>("/api/wifisensing/config");
   }
 
-  async saveSettings(settings: Partial<WifiSensingSettings>): Promise<WifiSensingSettings> {
-    return this.client.post<WifiSensingSettings>("/api/wifisensing/config", settings);
+  async saveSettings(
+    settings: Partial<WifiSensingSettings>,
+  ): Promise<WifiSensingSettings> {
+    return this.client.post<WifiSensingSettings>(
+      "/api/wifisensing/config",
+      settings,
+    );
   }
 
   async getStatus(): Promise<WifiSensingStatus> {
     return this.client.get<WifiSensingStatus>("/api/wifisensing/status");
+  }
+
+  async calibrateCsiMotion(): Promise<CsiCalibrationResponse> {
+    return this.client.post<CsiCalibrationResponse>(
+      "/api/wifisensing/csi/calibrate",
+      {},
+    );
   }
 
   async getWifiStatus(): Promise<WifiStatus> {

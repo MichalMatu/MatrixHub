@@ -43,7 +43,10 @@ bool AlarmMatrixController::update(const AlarmAggregateState& ledState) {
         bool shouldRefresh = false;
         
         // Check for state change
-        if (!_active || ledState.maxSeverity != _severity) {
+        if (!_active || ledState.maxSeverity != _severity ||
+            strncmp(_alarmName,
+                    ledState.alarmName,
+                    kAlarmNameBufferLen) != 0) {
             shouldRefresh = true;
         } 
         // Check for periodic refresh (to enforce display over other temporary content)

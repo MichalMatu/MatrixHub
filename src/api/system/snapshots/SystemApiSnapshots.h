@@ -15,6 +15,8 @@ struct SystemInfoSnapshot {
     const char* firmwareVersion = nullptr;
     const char* firmwareName = nullptr;
     const char* buildTarget = nullptr;
+    const char* firmwareCommit = nullptr;
+    bool firmwareDirty = true;
     const char* chipModel = nullptr;
     const char* sdkVersion = nullptr;
     const char* arduinoVersion = nullptr;

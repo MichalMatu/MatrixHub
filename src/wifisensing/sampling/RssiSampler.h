@@ -16,6 +16,7 @@
 #include "freertos/semphr.h"
 #include "esp_wifi.h"
 #include "esp_attr.h"
+#include <atomic>
 
 namespace WIFISENSING {
 
@@ -59,17 +60,24 @@ public:
     /**
      * @brief Initialize buffer (allocate PSRAM)
      */
-    bool init();
+    bool init(TickType_t waitTicks = pdMS_TO_TICKS(100));
 
     /**
      * @brief Deinitialize buffer (free PSRAM)
      */
-    void deinit();
+    bool deinit(TickType_t waitTicks = pdMS_TO_TICKS(100));
+
+    /**
+     * @brief Whether sampler storage still exists, including deferred cleanup.
+     */
+    bool isInitialized() const {
+        return _initialized.load(std::memory_order_acquire);
+    }
 
     /**
      * @brief Clear the ring buffer
      */
-    void clear();
+    bool clear(TickType_t waitTicks = pdMS_TO_TICKS(50));
 
     /**
      * @brief Get current sample count
@@ -93,6 +101,7 @@ public:
 private:
     // PSRAM Buffer (Dynamic)
     RssiSample* _buffer = nullptr;
+    std::atomic<bool> _initialized{false};
     // Managed internally here, no longer dependent on RTC
     
     // Internal state (protected by mutex)

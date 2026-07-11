@@ -5,6 +5,7 @@
 
 #include "CsiCaptureFixtureCodec.h"
 #include "CsiCaptureReplay.h"
+#include "CsiScenarioFixtureRunnerTests.h"
 #include "TinyCsiCaptureV1.h"
 
 #include "../../src/wifisensing/csi/algo/CsiBandMotionDetector.cpp"
@@ -358,6 +359,58 @@ void test_decoder_and_encoder_reject_sequence_gaps() {
         static_cast<uint8_t>(error));
 }
 
+void test_decoder_and_encoder_require_modular_monotonic_process_time() {
+    CsiCaptureFrame wrappingFrames[] = {
+        makeFrame(100),
+        makeFrame(101, 10, false),
+    };
+    wrappingFrames[0].processNowMs = 0xfffffff0u;
+    wrappingFrames[1].processNowMs = 0x00000010u;
+    CsiCaptureError error = CsiCaptureError::None;
+    TEST_ASSERT_NOT_EQUAL(0, encodedCsiCaptureSize(wrappingFrames, 2, error));
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(CsiCaptureError::None),
+        static_cast<uint8_t>(error));
+    std::array<uint8_t, kTestBufferBytes> wrappingEncoded{};
+    size_t wrappingBytes = 0;
+    TEST_ASSERT_TRUE(encodeCsiCapture(
+        7,
+        wrappingFrames,
+        2,
+        wrappingEncoded.data(),
+        wrappingEncoded.size(),
+        wrappingBytes,
+        error));
+    CsiCaptureDecoder wrappingDecoder;
+    TEST_ASSERT_TRUE(wrappingDecoder.open(wrappingEncoded.data(), wrappingBytes));
+
+    CsiCaptureFrame backwardsFrames[] = {
+        makeFrame(200),
+        makeFrame(201, 10, false),
+    };
+    backwardsFrames[0].processNowMs = 1000;
+    backwardsFrames[1].processNowMs = 900;
+    TEST_ASSERT_EQUAL_UINT32(
+        0,
+        encodedCsiCaptureSize(backwardsFrames, 2, error));
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(CsiCaptureError::NonMonotonicProcessTime),
+        static_cast<uint8_t>(error));
+
+    auto malformed = copyTinyFixture<FIXTURES::TINY_CSI_CAPTURE_V1_SIZE>();
+    constexpr size_t secondFrameOffset = 32 + 80;
+    const uint32_t backwardsTime = 900;
+    malformed[secondFrameOffset + 8] = static_cast<uint8_t>(backwardsTime);
+    malformed[secondFrameOffset + 9] = static_cast<uint8_t>(backwardsTime >> 8u);
+    malformed[secondFrameOffset + 10] = static_cast<uint8_t>(backwardsTime >> 16u);
+    malformed[secondFrameOffset + 11] = static_cast<uint8_t>(backwardsTime >> 24u);
+    CsiCaptureDecoder decoder;
+    TEST_ASSERT_FALSE(decoder.open(malformed.data(), malformed.size()));
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(CsiCaptureError::NonMonotonicProcessTime),
+        static_cast<uint8_t>(decoder.error()));
+}
+
 void test_codec_rejects_inconsistent_truncation_and_undersized_output() {
     CsiCaptureFrame frame = makeFrame(1);
     frame.originalLength = 20;
@@ -420,7 +473,13 @@ int main(int argc, char** argv) {
     RUN_TEST(test_decoder_rejects_malformed_record_lengths_flags_and_reserved_bytes);
     RUN_TEST(test_decoder_and_encoder_require_exactly_one_initial_replay_origin);
     RUN_TEST(test_decoder_and_encoder_reject_sequence_gaps);
+    RUN_TEST(test_decoder_and_encoder_require_modular_monotonic_process_time);
     RUN_TEST(test_codec_rejects_inconsistent_truncation_and_undersized_output);
     RUN_TEST(test_decoder_cursor_is_bounded_even_if_caller_tampers_with_it);
+    RUN_TEST(test_scenario_parser_requires_reviewed_real_data_contract);
+    RUN_TEST(test_replay_metrics_measure_errors_latency_hold_and_clear);
+    RUN_TEST(test_replay_metrics_mark_frame_staleness_unavailable);
+    RUN_TEST(test_fixture_runner_sha256_matches_known_vector);
+    RUN_TEST(test_real_csi_fixture_corpus_when_explicitly_enabled);
     return UNITY_END();
 }

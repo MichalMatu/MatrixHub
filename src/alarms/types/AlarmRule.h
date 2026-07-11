@@ -26,7 +26,7 @@ struct __attribute__((packed)) AlarmRule {
     float threshold;              // Trigger value
     AlarmSeverity severity;       // Alert level
     NotifyChannel notifyChannels; // Bitmask of channels
-    uint16_t cooldownSeconds;     // Min time between notifications
+    uint32_t cooldownSeconds;     // Min time between notifications
     uint32_t createdAt;           // Unix timestamp
     uint32_t updatedAt;           // Unix timestamp
     
@@ -88,6 +88,22 @@ struct __attribute__((packed)) AlarmRule {
     bool isGpioSource() const {
         return source == AlarmSource::GpioDigital;
     }
+
+    bool isBooleanLikeSource() const {
+        return source == AlarmSource::WifiCsiMotion ||
+               source == AlarmSource::ImuTamper ||
+               source == AlarmSource::GpioDigital;
+    }
+
+    // Boolean-like sources have one product meaning: true/detected is alarm.
+    // Canonicalizing here prevents stale/API-authored `below 0.5` rules from
+    // silently presenting as "motion detected" while behaving in reverse.
+    void normalizeBooleanSemantics() {
+        if (isBooleanLikeSource()) {
+            op = AlarmOperator::Above;
+            threshold = 0.5f;
+        }
+    }
     
     /** Check if rule has any Shelly devices configured */
     bool hasShellyDevices() const {
@@ -99,11 +115,22 @@ struct __attribute__((packed)) AlarmRule {
         if (shellyDeviceCount >= kMaxShellyPerRule) {
             return false;
         }
-        if (!deviceId || strlen(deviceId) == 0) {
+        if (!deviceId) {
             return false;
         }
-        strncpy(shellyDeviceIds[shellyDeviceCount], deviceId, kShellyIdLen - 1);
-        shellyDeviceIds[shellyDeviceCount][kShellyIdLen - 1] = '\0';
+        size_t length = 0;
+        while (length < kShellyIdLen && deviceId[length] != '\0') {
+            ++length;
+        }
+        if (length == 0 || length >= kShellyIdLen) {
+            return false;
+        }
+        for (uint8_t i = 0; i < shellyDeviceCount; ++i) {
+            if (strncmp(shellyDeviceIds[i], deviceId, kShellyIdLen) == 0) {
+                return false;
+            }
+        }
+        memcpy(shellyDeviceIds[shellyDeviceCount], deviceId, length + 1);
         shellyDeviceCount++;
         return true;
     }

@@ -34,6 +34,7 @@
 				hasChanges={csiAlarm.hasChanges}
 				saving={csiAlarm.saving}
 				calibrating={csiAlarm.calibrating}
+				calibrationAvailable={csiAlarm.calibrationAvailable}
 				subcarriers={csi.subcarriers}
 				bind:selectionMode
 				onSave={csiAlarm.save}

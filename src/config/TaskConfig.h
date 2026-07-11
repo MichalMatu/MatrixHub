@@ -157,11 +157,14 @@ namespace TASKS {
     // CSI processing keeps an internal stack because it drives networking-facing
     // code paths; keep it on the tighter internal budget.
     constexpr uint32_t STACK_WIFI_SENSING_CSI  = STACK_WIFI_SENSING;
+    constexpr uint32_t STACK_WIFI_SENSING_RECONCILE = STACK_WIFI_SENSING;
     constexpr uint32_t STACK_CSI_FRONTEND_STOP = STACK_MEDIUM;
     constexpr uint32_t STACK_CSI_CAPTURE_STOP  = STACK_MEDIUM;
     // Level 3: Shedable background workload (CORE_PRO) — CSI is a non-critical gadget.
     constexpr UBaseType_t PRIO_WIFI_SENSING  = 3;
     constexpr BaseType_t CORE_WIFI_SENSING   = CORE_PRO;
+    constexpr UBaseType_t PRIO_WIFI_SENSING_RECONCILE = 2;
+    constexpr BaseType_t CORE_WIFI_SENSING_RECONCILE = CORE_PRO;
     constexpr UBaseType_t PRIO_CSI_FRONTEND_STOP = PRIO_WIFI_SENSING;
     constexpr BaseType_t CORE_CSI_FRONTEND_STOP = CORE_WIFI_SENSING;
     constexpr UBaseType_t PRIO_CSI_CAPTURE_STOP = PRIO_WIFI_SENSING;

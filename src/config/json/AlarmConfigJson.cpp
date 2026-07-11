@@ -1,11 +1,13 @@
 #include "AlarmConfigJson.h"
 #include "../App.h"
 #include "../../alarms/AlarmRulesStore.h"
+#include "../../alarms/core/AlarmRuleValidation.h"
 #include "../System.h"
 #include "../../system/rtc/RtcConfig.h"
 #include "../../alarms/serialization/AlarmEnumConverters.h"
 #include "../../system/memory/SystemAllocator.h"
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -177,7 +179,8 @@ bool tryParseSeverity(JsonVariantConst value, ALARMS::AlarmSeverity& out) {
 bool tryParseNotifyChannels(JsonVariantConst value, ALARMS::NotifyChannel& out) {
     if (value.is<int>()) {
         const int channelsInt = value.as<int>();
-        if (channelsInt < 0 || (static_cast<uint8_t>(channelsInt) & ~kAllowedNotifyChannelsMask) != 0) {
+        if (channelsInt < 0 || channelsInt > UINT8_MAX ||
+            (channelsInt & ~static_cast<int>(kAllowedNotifyChannelsMask)) != 0) {
             return false;
         }
         out = static_cast<ALARMS::NotifyChannel>(channelsInt);
@@ -321,12 +324,17 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
         return false; // Name is mandatory
     }
 
-    if (const char* mac = rule[Keys::kBleDeviceMac] | (const char*)nullptr) {
+    if (!rule[Keys::kBleDeviceMac].isNull()) {
+        const char* mac =
+            rule[Keys::kBleDeviceMac] | static_cast<const char*>(nullptr);
+        if (!mac || strlen(mac) >= ALARMS::kBleMacLen) return false;
         strlcpy(r.bleDeviceMac, mac, sizeof(r.bleDeviceMac));
     }
 
-    if (const char* gpioId = rule[Keys::kGpioId] | (const char*)nullptr) {
-        if (strlen(gpioId) >= ALARMS::kGpioIdLen) return false;
+    if (!rule[Keys::kGpioId].isNull()) {
+        const char* gpioId =
+            rule[Keys::kGpioId] | static_cast<const char*>(nullptr);
+        if (!gpioId || strlen(gpioId) >= ALARMS::kGpioIdLen) return false;
         strlcpy(r.gpioId, gpioId, sizeof(r.gpioId));
     }
 
@@ -334,6 +342,8 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
     if (rule[Keys::kEnabled].is<bool>()) {
         bool enabled = rule[Keys::kEnabled].as<bool>();
         r.enabled = enabled;
+    } else if (!rule[Keys::kEnabled].isNull()) {
+        return false;
     }
 
     if (!rule[Keys::kSource].isNull()) {
@@ -355,9 +365,14 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
     // 3. Numeric values with bounds checking
     if (rule[Keys::kThreshold].is<float>() || rule[Keys::kThreshold].is<int>()) {
         float th = rule[Keys::kThreshold];
-        th = (std::max)(LIMITS::ALARMS::MIN_THRESHOLD, 
-                         (std::min)(th, LIMITS::ALARMS::MAX_THRESHOLD));
+        if (!std::isfinite(th) ||
+            th < LIMITS::ALARMS::MIN_THRESHOLD ||
+            th > LIMITS::ALARMS::MAX_THRESHOLD) {
+            return false;
+        }
         r.threshold = th;
+    } else if (!rule[Keys::kThreshold].isNull()) {
+        return false;
     }
 
     if (!rule[Keys::kSeverity].isNull()) {
@@ -377,11 +392,17 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
         r.notifyChannels = channels;
     }
 
-    if (rule[Keys::kCooldownSeconds].is<int>()) {
-        uint32_t cooldown = rule[Keys::kCooldownSeconds].as<uint32_t>();
-        cooldown = (std::max)(LIMITS::ALARMS::MIN_COOLDOWN_SEC, 
-                           (std::min)(cooldown, LIMITS::ALARMS::MAX_COOLDOWN_SEC));
-        r.cooldownSeconds = cooldown;
+    if (!rule[Keys::kCooldownSeconds].isNull()) {
+        if (!rule[Keys::kCooldownSeconds].is<int64_t>() &&
+            !rule[Keys::kCooldownSeconds].is<uint64_t>()) {
+            return false;
+        }
+        const int64_t cooldown = rule[Keys::kCooldownSeconds].as<int64_t>();
+        if (cooldown < static_cast<int64_t>(LIMITS::ALARMS::MIN_COOLDOWN_SEC) ||
+            cooldown > static_cast<int64_t>(LIMITS::ALARMS::MAX_COOLDOWN_SEC)) {
+            return false;
+        }
+        r.cooldownSeconds = static_cast<uint32_t>(cooldown);
     }
 
     // 4. Timestamps (temp variable for packed safety)
@@ -393,6 +414,8 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
         uint64_t ts = rule[Keys::kCreatedAt].as<uint64_t>();
         if (ts > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) return false;
         r.createdAt = static_cast<uint32_t>(ts);
+    } else if (!rule[Keys::kCreatedAt].isNull()) {
+        return false;
     }
 
     if (rule[Keys::kUpdatedAt].is<uint32_t>()) {
@@ -402,17 +425,43 @@ bool deserializeAlarmRule(JsonObject& rule, ALARMS::AlarmRule& r) {
         uint64_t ts = rule[Keys::kUpdatedAt].as<uint64_t>();
         if (ts > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) return false;
         r.updatedAt = static_cast<uint32_t>(ts);
+    } else if (!rule[Keys::kUpdatedAt].isNull()) {
+        return false;
     }
 
     // 5. Shelly Device IDs
     if (rule[Keys::kShellyDeviceIds].is<JsonArray>()) {
-        r.clearShellyDevices();
-        for (JsonVariant sdev : rule[Keys::kShellyDeviceIds].as<JsonArray>()) {
-            if (const char* sdevStr = sdev | (const char*)nullptr) r.addShellyDevice(sdevStr);
+        JsonArray shellyIds = rule[Keys::kShellyDeviceIds].as<JsonArray>();
+        if (shellyIds.size() > ALARMS::kMaxShellyPerRule) {
+            return false;
         }
+        r.clearShellyDevices();
+        for (JsonVariant sdev : shellyIds) {
+            const char* deviceId = sdev | static_cast<const char*>(nullptr);
+            if (!deviceId || deviceId[0] == '\0' ||
+                strlen(deviceId) >= ALARMS::kShellyIdLen) {
+                return false;
+            }
+            for (uint8_t existingIndex = 0;
+                 existingIndex < r.shellyDeviceCount;
+                 ++existingIndex) {
+                if (strncmp(r.shellyDeviceIds[existingIndex],
+                            deviceId,
+                            ALARMS::kShellyIdLen) == 0) {
+                    return false;
+                }
+            }
+            if (!r.addShellyDevice(deviceId)) {
+                return false;
+            }
+        }
+    } else if (!rule[Keys::kShellyDeviceIds].isNull()) {
+        return false;
     }
 
-    return true;
+    r.normalizeBooleanSemantics();
+
+    return ALARMS::isValidAlarmRuleDefinition(r);
 }
 
 bool deserializeAlarmRules(JsonArray& rules, ALARMS::AlarmRulesSnapshot& parsed, AlarmRulesParseError* error) {
@@ -459,53 +508,41 @@ bool deserializeAlarmRules(JsonArray& rules, ALARMS::AlarmRulesSnapshot& parsed,
     return true;
 }
 
-void loadAlarms(JsonObject& obj) {
+bool loadAlarms(JsonObject& obj) {
     // Parsed rules are regular CPU-owned config data, so a temporary PSRAM
     // buffer is safe and avoids building a ~2 KB object on the current stack.
     // Before: loadAlarms() kept that parsed snapshot as a local stack object.
     auto parsed = SYSTEM::MEMORY::makeUniqueInPsram<ALARMS::AlarmRulesSnapshot>();
     if (!parsed) {
-        return;
+        return false;
     }
 
-    uint8_t enabledCount = 0;
-
-    if (obj[Keys::kRules].is<JsonArray>()) {
-        for (JsonObject ruleObj : obj[Keys::kRules].as<JsonArray>()) {
-            if (parsed->ruleCount >= RTC::kMaxAlarmRules) break;
-
-            ALARMS::AlarmRule rule;
-            if (!deserializeAlarmRule(ruleObj, rule)) {
-                continue;
-            }
-            if (hasDuplicateRuleId(*parsed, rule.id)) {
-                continue;
-            }
-            if (hasDuplicateRuleName(*parsed, rule.name)) {
-                continue;
-            }
-
-            parsed->rules[parsed->ruleCount] = rule;
-            if (rule.enabled) {
-                enabledCount++;
-            }
-            parsed->ruleCount++;
-        }
+    // The caller requires the top-level alarms section and this loader requires
+    // its rules snapshot to be explicit. Treating an incomplete `alarms: {}`
+    // object as an empty set would silently disarm all configured rules after a
+    // truncated or partial write.
+    if (!obj[Keys::kRules].is<JsonArray>()) {
+        return false;
+    }
+    JsonArray rules = obj[Keys::kRules].as<JsonArray>();
+    if (!deserializeAlarmRules(rules, *parsed)) {
+        // Never partially load a corrupt rule set. Keeping the previous
+        // (or cold-boot default) snapshot is safer than silently dropping
+        // one alarm and presenting the remaining subset as authoritative.
+        return false;
     }
 
     if (!ALARMS::RULES_CONFIG::update([&](ALARMS::AlarmRulesSnapshot& alarms) {
             alarms = *parsed;
         })) {
-        return;
+        return false;
     }
 
-    RTC::updateConfigSection(&RTC::ConfigStore::alarms, [&](ALARMS::AlarmRuntimeSummary& alarms) {
-        alarms.ruleCount = parsed->ruleCount;
-        alarms.enabledCount = enabledCount;
-        for (uint8_t i = parsed->ruleCount; i < RTC::kMaxAlarmRules; i++) {
-            alarms.runtimeStates[i].reset();
-        }
-    });
+    // Do not touch the RTC runtime summary here. On a warm boot it may still
+    // represent the previous LittleFS commit order; AlarmRuleManager maps the
+    // full retained set by runtime identity and then writes a compact summary.
+    // Cold boots already start with an empty summary via RTC::initDefaults().
+    return true;
 }
 
 void saveAlarms(JsonObject& obj) {

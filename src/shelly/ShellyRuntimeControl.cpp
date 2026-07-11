@@ -2,6 +2,8 @@
 
 #include "ShellyService.h"
 
+#include <utility>
+
 namespace SHELLY {
 
 // Keep these wrappers behaviorally minimal. They exist so orchestration code
@@ -31,7 +33,20 @@ size_t deviceCount(const ShellyService* service) {
 
 void beginService(ShellyService* service) {
     if (service) {
-        service->begin();
+        (void)service->begin();
+    }
+}
+
+void reconcileRuntimeIfDue(ShellyService* service, uint32_t nowMs) {
+    if (service) {
+        service->reconcileRuntimeIfDue(nowMs);
+    }
+}
+
+void setConfigChangeCallback(ShellyService* service,
+                             std::function<void()> callback) {
+    if (service) {
+        service->setOnConfigChangeCallback(std::move(callback));
     }
 }
 

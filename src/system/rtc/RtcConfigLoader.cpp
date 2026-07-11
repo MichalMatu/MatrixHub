@@ -69,18 +69,30 @@ bool initConfig(FS& fs) {
 bool reloadAllFromFS(FS& fs) {
     s_warmBootPathUsed = false;
 
-    // Start from compile-time factory defaults so a missing/corrupt config file
-    // still leaves RTC in a complete, self-consistent state.
+    // Start from compile-time defaults so a genuinely missing config file has
+    // an intentional factory path. A present malformed/critical document is
+    // rejected below instead of booting with those empty alarm defaults.
     initDefaults();
     
     LOGI("Forcing full config reload from FS...");
     uint32_t totalStart = millis();
     
     uint32_t start = millis();
-    const bool loadedFromFs = CONFIG::load(fs);
+    CONFIG::LoadFailure loadFailure = CONFIG::LoadFailure::None;
+    const bool loadedFromFs = CONFIG::load(fs, &loadFailure);
     LOGI("  Settings JSON load: %s (%lu ms)", loadedFromFs ? "OK" : "FAILED", millis() - start);
+    if (loadFailure == CONFIG::LoadFailure::CriticalSection ||
+        loadFailure == CONFIG::LoadFailure::InvalidDocument) {
+        // Only a genuinely absent file means an intentional factory-default
+        // boot. A present but malformed document (or a missing/invalid alarm
+        // section inside it) must not silently become an empty alarm store.
+        // Durable backup recovery is a later hardening layer; until then the
+        // safe behavior is to refuse boot and preserve the damaged evidence.
+        LOGE("  Existing configuration rejected; refusing to complete boot config");
+        return false;
+    }
     if (!loadedFromFs) {
-        LOGW("  Using factory defaults in RTC (config file missing/corrupt)");
+        LOGW("  Using factory defaults in RTC (config file missing)");
     }
     
     // Mark the freshly built working copy as valid for later warm-boot use.

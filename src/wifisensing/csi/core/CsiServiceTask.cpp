@@ -94,6 +94,10 @@ bool CsiService::startProcessingTask() {
         (void)xSemaphoreTake(_cleanupSem, 0);
     }
 
+    // Publish the run state before the scheduler can start the task. The worker
+    // must never clear this flag itself: a delayed first run could otherwise
+    // overwrite a stop requested immediately after task creation.
+    _shouldExit.store(false, std::memory_order_release);
     _processingTaskHandle = xTaskCreateStaticPinnedToCore(
         processingTask,
         "CsiProcess",
@@ -190,7 +194,6 @@ void CsiService::processingTask(void* param) {
     }
 
     size_t batchCount = 0;
-    self->_shouldExit.store(false, std::memory_order_release);
     LOG_STACK_BUDGET(CONFIG::TASKS::STACK_BUDGET_WIFI_SENSING_CSI);
 
     // Adaptive ping state
@@ -198,21 +201,19 @@ void CsiService::processingTask(void* param) {
 
     while (!self->_shouldExit.load(std::memory_order_acquire)) {
         uint32_t now = millis();
-        self->applyPendingMotionCommandsNonBlocking();
         self->applyPendingVisualizationCommandsNonBlocking();
 
         // Wait briefly for the first packet so the idle path is cheap.
         if (self->_queue && self->_queue->pop(packet, pdMS_TO_TICKS(10))) {
             self->_dequeuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
             self->_lastPacketMs.store(now, std::memory_order_relaxed);
-            self->applyPendingMotionCommandsNonBlocking();
             self->applyPendingVisualizationCommandsNonBlocking();
+            const uint32_t motionControlEpoch =
+                self->_motionControlFence.requestedEpoch();
             packet.processTimestampMs = now;
             packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
             self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
-            const auto motion = self->processMotionPacket(packet, now);
-            self->publishMotionSnapshot(motion);
-            self->maybePublishMotion(motion, now);
+            self->processMotionPacket(packet, now, motionControlEpoch);
             self->_batchBuffer[batchCount++] = packet;
 
             // Once awake, drain the rest of the burst without blocking so multiple
@@ -220,19 +221,24 @@ void CsiService::processingTask(void* param) {
             while (batchCount < BATCH_CAPACITY && self->_queue->pop(packet, 0)) {
                 self->_dequeuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
                 self->_lastPacketMs.store(now, std::memory_order_relaxed);
-                self->applyPendingMotionCommandsNonBlocking();
                 self->applyPendingVisualizationCommandsNonBlocking();
+                const uint32_t motionControlEpoch =
+                    self->_motionControlFence.requestedEpoch();
                 packet.processTimestampMs = now;
                 packet.compensate_gain = self->_gainCtrl.update(&(packet.rx_ctrl));
                 self->publishVisualizationSnapshot(self->processVisualizationPacket(packet, now));
-                const auto motion = self->processMotionPacket(packet, now);
-                self->publishMotionSnapshot(motion);
-                self->maybePublishMotion(motion, now);
+                self->processMotionPacket(packet, now, motionControlEpoch);
                 self->_batchBuffer[batchCount++] = packet;
             }
         }
 
         now = millis();
+
+        // Freshness is a clock property, not an RX event. Surface an explicit
+        // unknown state even when no next packet ever arrives. The last binary
+        // decision remains retained until fresh evidence can clear it.
+        self->markMotionDataUnavailableIfStale(
+            now, self->_motionControlFence.requestedEpoch());
 
         // Statistics are surfaced for debugging queue pressure. The current code
         // resets counters here but does not auto-tune ping cadence from them yet.
@@ -271,6 +277,7 @@ void CsiService::processingTask(void* param) {
             CsiCallback callback = self->getCsiCallbackSnapshot();
             if (callback) {
                 callback(self->_batchBuffer, batchCount);
+                self->releaseCsiCallbackSnapshot();
             } else {
                 self->recordBatchDelivery(batchCount, false);
             }

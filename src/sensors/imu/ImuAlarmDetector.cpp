@@ -19,6 +19,16 @@ bool shockActive(const ImuAlarmConfig& config, const ImuMetrics& metrics) {
            metrics.accelDeltaG >= config.accelDeltaThresholdG;
 }
 
+bool shockDecisionAvailable(const ImuMetrics& metrics) {
+    return std::isfinite(metrics.accelDeltaG);
+}
+
+bool tiltDecisionAvailable(const ImuAlarmConfig& config,
+                           const ImuMetrics& metrics) {
+    return config.baselineValid && metrics.baselineValid &&
+           std::isfinite(metrics.tiltDeg);
+}
+
 bool tiltTriggerActive(const ImuAlarmConfig& config, const ImuMetrics& metrics) {
     return config.baselineValid &&
            std::isfinite(metrics.tiltDeg) &&
@@ -42,6 +52,22 @@ void ImuAlarmDetector::reset() {
     _activeReason = ImuAlarmReason::None;
 }
 
+void ImuAlarmDetector::restoreRetainedTrigger(bool triggered) {
+    if (!triggered) {
+        return;
+    }
+
+    _triggered = true;
+    _triggerHoldActive = false;
+    _clearHoldActive = false;
+    _triggerHoldStartMs = 0;
+    _clearHoldStartMs = 0;
+    // The retained alarm summary does not persist whether tilt or shock caused
+    // the trigger. Treat it as tilt so clearing requires the more conservative
+    // baseline-backed proof instead of one low acceleration sample.
+    _activeReason = ImuAlarmReason::Tilt;
+}
+
 ImuAlarmStatus ImuAlarmDetector::update(const ImuAlarmConfig& config,
                                         const ImuMetrics& metrics,
                                         uint32_t nowMs) {
@@ -54,14 +80,25 @@ ImuAlarmStatus ImuAlarmDetector::update(const ImuAlarmConfig& config,
 
     if (!config.enabled) {
         reset();
+        status.decisionValid = true;
         return status;
     }
 
     if (!metrics.sampleFresh) {
-        reset();
+        // Missing data is unknown, not evidence that a confirmed tamper ended.
+        // Preserve the last stable binary decision and break both temporal
+        // proofs so time spent without fresh samples cannot satisfy a hold.
+        _triggerHoldActive = false;
+        _clearHoldActive = false;
+        _triggerHoldStartMs = 0;
+        _clearHoldStartMs = 0;
+        status.triggered = _triggered;
+        status.triggerValue = _triggered ? 1.0f : 0.0f;
         status.reason = metrics.sampleTimestampKnown ? ImuAlarmReason::Stale : ImuAlarmReason::Unavailable;
         return status;
     }
+
+    status.decisionValid = true;
 
     const bool shock = shockActive(config, metrics);
     const bool tiltTrigger = tiltTriggerActive(config, metrics);
@@ -72,6 +109,27 @@ ImuAlarmStatus ImuAlarmDetector::update(const ImuAlarmConfig& config,
             _clearHoldActive = false;
             _clearHoldStartMs = 0;
         } else {
+            const bool clearEvidenceAvailable =
+                _activeReason == ImuAlarmReason::Shock
+                    ? shockDecisionAvailable(metrics)
+                    : tiltDecisionAvailable(config, metrics);
+            if (!clearEvidenceAvailable) {
+                // Fresh transport alone is insufficient. A tilt alarm cannot be
+                // cleared without a valid baseline/finite tilt, while a shock
+                // alarm requires a finite acceleration decision. Break the
+                // previous clear proof and publish no binary edge.
+                _clearHoldActive = false;
+                _clearHoldStartMs = 0;
+                status.decisionValid = false;
+                status.triggered = true;
+                status.triggerValue = 1.0f;
+                status.reason =
+                    _activeReason != ImuAlarmReason::Shock &&
+                            (!config.baselineValid || !metrics.baselineValid)
+                        ? ImuAlarmReason::NoBaseline
+                        : ImuAlarmReason::Unavailable;
+                return status;
+            }
             if (!_clearHoldActive) {
                 _clearHoldActive = true;
                 _clearHoldStartMs = nowMs;

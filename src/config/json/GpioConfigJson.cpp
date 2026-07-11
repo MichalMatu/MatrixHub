@@ -135,13 +135,13 @@ bool deserializeGpio(JsonObject& obj, GPIO::GpioData& data) {
     return GPIO::normalizeConfig(data);
 }
 
-void loadGpio(JsonObject& obj) {
+bool loadGpio(JsonObject& obj) {
     GPIO::GpioData next = GPIO::CONFIG_STORE::copy();
     if (!deserializeGpio(obj, next)) {
-        return;
+        return false;
     }
 
-    GPIO::CONFIG_STORE::update([&](GPIO::GpioData& cfg) {
+    return GPIO::CONFIG_STORE::update([&](GPIO::GpioData& cfg) {
         cfg = next;
     });
 }

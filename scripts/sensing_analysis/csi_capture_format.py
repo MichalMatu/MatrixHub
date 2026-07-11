@@ -37,6 +37,7 @@ MAX_FRAME_COUNT = 1_000_000
 MAX_CAPTURE_BYTES = 600 * 1024 * 1024
 MAX_FRAMES_SECTION_BYTES = MAX_CAPTURE_BYTES - MHCF_HEADER_SIZE
 REQUIRED_CAPABILITIES = 0x00FF
+UINT32_HALF_RANGE = 1 << 31
 
 BATCH_HELLO = 1
 BATCH_DATA = 2
@@ -452,6 +453,7 @@ def iter_mhcf_frames(path: Path, *, reject_truncated: bool = True) -> Iterator[C
         _read_exact(handle, MHCF_HEADER_SIZE, "MHCF header")
         consumed = 0
         previous_sequence: int | None = None
+        previous_process_now_ms: int | None = None
         for index in range(header.frame_count):
             raw_header = _read_exact(handle, FRAME_HEADER_SIZE, f"frame {index} header")
             frame, stored_len = decode_frame_header(
@@ -467,7 +469,18 @@ def iter_mhcf_frames(path: Path, *, reject_truncated: bool = True) -> Iterator[C
                         "accepted sequence gap at frame "
                         f"{index}: expected {expected_sequence}, got {frame.accepted_sequence}"
                     )
+            if previous_process_now_ms is not None:
+                process_delta = (
+                    frame.process_now_ms - previous_process_now_ms
+                ) & 0xFFFFFFFF
+                if process_delta >= UINT32_HALF_RANGE:
+                    raise CaptureFormatError(
+                        "non-monotonic modular processNowMs at frame "
+                        f"{index}: previous={previous_process_now_ms}, "
+                        f"current={frame.process_now_ms}"
+                    )
             previous_sequence = frame.accepted_sequence
+            previous_process_now_ms = frame.process_now_ms
             consumed += FRAME_HEADER_SIZE + stored_len
             if consumed > header.frames_section_bytes:
                 raise CaptureFormatError("frame records exceed declared MHCF section size")
@@ -541,6 +554,7 @@ class MhcfWriter:
         self.frames_section_bytes = 0
         self.first_sequence: int | None = None
         self.last_sequence: int | None = None
+        self.last_process_now_ms: int | None = None
         self.initial_replay_origin = False
         self._handle = path.open("w+b")
         os.chmod(path, 0o600)
@@ -565,6 +579,15 @@ class MhcfWriter:
                 raise CaptureFormatError(
                     f"accepted sequence gap: expected {expected}, got {frame.accepted_sequence}"
                 )
+        if self.last_process_now_ms is not None:
+            process_delta = (
+                frame.process_now_ms - self.last_process_now_ms
+            ) & 0xFFFFFFFF
+            if process_delta >= UINT32_HALF_RANGE:
+                raise CaptureFormatError(
+                    "non-monotonic modular processNowMs: "
+                    f"previous={self.last_process_now_ms}, current={frame.process_now_ms}"
+                )
         encoded = encode_frame(frame)
         if self.frames_section_bytes + len(encoded) > MAX_FRAMES_SECTION_BYTES:
             raise CaptureFormatError(f"capture exceeds {MAX_CAPTURE_BYTES} total bytes")
@@ -575,6 +598,7 @@ class MhcfWriter:
             self.first_sequence = frame.accepted_sequence
             self.initial_replay_origin = frame.replay_origin
         self.last_sequence = frame.accepted_sequence
+        self.last_process_now_ms = frame.process_now_ms
 
     def finalize(self) -> MhcfHeader:
         if self._finalized:

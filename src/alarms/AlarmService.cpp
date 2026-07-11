@@ -24,11 +24,17 @@ AlarmService::AlarmService(MATRIX_MANAGER::MatrixManagerService* matrixManager, 
 }
 
 bool AlarmService::begin() {
+    if (!_coordinator.isReady()) {
+        LOGE("Failed to start service: alarm runtime buffers unavailable");
+        return false;
+    }
+
     // Initialize manager from the live PSRAM rule store and the retained RTC
     // runtime summary already restored during boot.
     bool success = _manager.begin();
     
     if (success) {
+        _coordinator.refreshLatchedStateFromRuntime();
         LOGI("Service started. Rules: %u", _manager.getCount());
     } else {
         LOGE("Failed to start service");
@@ -37,52 +43,24 @@ bool AlarmService::begin() {
     return success;
 }
 
-bool AlarmService::reloadRules() {
-    bool result = _manager.reloadRules();
-    
-    if (result) {
-        // Also clear any latched LED since rules changed
-        _coordinator.clearLatchedLed();
-    }
-    
-    return result;
-}
-
 bool AlarmService::updateRules(const AlarmRule* rules, uint8_t count) {
-    AlarmRuleUpdateEffects effects = _manager.updateRules(rules, count);
-    if (!effects.applied) {
+    if (!_coordinator.updateRules(rules, count)) {
         LOGE("Failed to apply updated alarm rules");
         return false;
     }
-
-    if (_shellyActionExecutor) {
-        for (uint8_t i = 0; i < effects.shellyOffCount; i++) {
-            _shellyActionExecutor(effects.shellyOffRules[i], false);
-        }
-    } else if (effects.shellyOffCount > 0) {
-        LOGW("Shelly executor not configured for disabled rule cleanup");
-    }
-    
-    // Clear latched LED state
-    _coordinator.clearLatchedLed();
     return true;
 }
 
 void AlarmService::setShellyActionExecutor(ShellyActionExecutor executor) {
-    _shellyActionExecutor = std::move(executor);
-    _coordinator.setShellyActionExecutor(_shellyActionExecutor);
+    _coordinator.setShellyActionExecutor(std::move(executor));
+    if (_manager.isInitialized()) {
+        _coordinator.reconcileAllShellyDevices();
+    }
 }
 
-void AlarmService::resetRuntimeState() {
-    SYSTEM::ScopeLock lock(_manager.getMutex(), pdMS_TO_TICKS(kAlarmMutexTimeoutMs));
-    if (lock.isLocked()) {
-        if (_manager.resetRuntimeStateLocked()) {
-            LOGI("Runtime state reset");
-        } else {
-            LOGW("Failed to persist runtime state reset");
-        }
-    } else {
-        LOGW("Mutex timeout during reset");
+void AlarmService::reconcileShellyOutputs() {
+    if (_manager.isInitialized()) {
+        _coordinator.reconcileAllShellyDevices();
     }
 }
 
@@ -121,21 +99,40 @@ bool AlarmService::submitInput(const AlarmInputData& inputData) {
     }
     if (!std::isnan(inputData.wifiCsiMotion)) {
         _lastWifiCsiMotion = inputData.wifiCsiMotion;
+        _csiEdgeLatch.submit(inputData.wifiCsiMotion > 0.5f);
         hasUpdates = true;
     }
     if (!std::isnan(inputData.imuTamper)) {
         _lastImuTamper = inputData.imuTamper;
+        _imuEdgeLatch.submit(inputData.imuTamper > 0.5f);
         hasUpdates = true;
     }
 
     if (hasUpdates) {
         _lastSnapshot.timestamp_ms = millis();
         _pendingEvaluation = true;
+        _inputGeneration++;
     }
 
     portEXIT_CRITICAL(&_snapshotLock);
 
     return hasUpdates;
+}
+
+bool AlarmService::submitGpioInput(const char* gpioId, bool logicalValue) {
+    // GpioService calls this from its polling task after debounce. The mailbox
+    // is fixed-size and the critical section performs no allocation, logging,
+    // rule lookup or external I/O.
+    portENTER_CRITICAL(&_snapshotLock);
+    const bool accepted = _gpioEdgeMailbox.submit(gpioId, logicalValue);
+    if (accepted) {
+        _lastSnapshot.timestamp_ms = millis();
+        _pendingEvaluation = true;
+        ++_inputGeneration;
+    }
+    portEXIT_CRITICAL(&_snapshotLock);
+
+    return accepted;
 }
 
 float AlarmService::getLastImuTamperValue() const {
@@ -145,20 +142,67 @@ float AlarmService::getLastImuTamperValue() const {
     return value;
 }
 
-uint8_t AlarmService::processPending() {
-    AggregatedAlarmInput input;
-    bool hasPending = false;
+bool AlarmService::isSourceTriggered(AlarmSource source) {
+    // Boot-time detector restore must not turn a transient manager-lock delay
+    // into an authoritative false that clears retained CSI/IMU state. Callers
+    // use this only during service wiring/tests, so wait for the definitive
+    // snapshot instead of applying the hot-path evaluation timeout.
+    SYSTEM::ScopeLock lock(_manager.getMutex(), portMAX_DELAY);
+    if (!lock.isLocked()) {
+        return false;
+    }
 
-    // Take one coherent snapshot and clear the dirty flag before running the
-    // alarm pipeline. Any new producer update that arrives while processing is
-    // simply marked pending for the next pass instead of blocking the caller.
+    const AlarmRule* rules = _manager.getRules();
+    AlarmRuntimeState* states = _manager.getStates();
+    const uint8_t count = _manager.getCount();
+    for (uint8_t i = 0; i < count; ++i) {
+        if (rules[i].enabled &&
+            rules[i].source == source &&
+            states[i].previouslyTriggered) {
+            return true;
+        }
+    }
+    return false;
+}
+
+uint8_t AlarmService::processPending() {
+    // Shelly admission failures have their own fixed outbox, so they make
+    // progress even when no new sensor/CSI/GPIO sample arrives.
+    _coordinator.retryPendingShellyActions();
+
+    AggregatedAlarmInput input;
+    GpioAlarmEdgeMailbox::PassSnapshot gpioEdges;
+    bool hasPending = false;
+    uint32_t generation = 0;
+    BooleanAlarmEdgeLatch::PendingDecision csiDecision =
+        BooleanAlarmEdgeLatch::PendingDecision::None;
+    BooleanAlarmEdgeLatch::PendingDecision imuDecision =
+        BooleanAlarmEdgeLatch::PendingDecision::None;
+
+    // Peek one coherent snapshot. It is acknowledged only after the coordinator
+    // confirms that evaluation actually ran, so a transient lock timeout cannot
+    // consume the alarm pass.
     portENTER_CRITICAL(&_snapshotLock);
-    if (_pendingEvaluation) {
+    if (_pendingEvaluation || _csiEdgeLatch.hasPending() ||
+        _imuEdgeLatch.hasPending() || _gpioEdgeMailbox.hasPending()) {
         input.sensors = _lastSnapshot;
         input.wifiVariance = _lastWifiVariance;
         input.wifiCsiMotion = _lastWifiCsiMotion;
         input.imuTamper = _lastImuTamper;
-        _pendingEvaluation = false;
+        csiDecision = _csiEdgeLatch.next();
+        if (csiDecision == BooleanAlarmEdgeLatch::PendingDecision::Rising) {
+            input.wifiCsiMotion = 1.0f;
+        } else if (csiDecision == BooleanAlarmEdgeLatch::PendingDecision::Clear) {
+            input.wifiCsiMotion = 0.0f;
+        }
+        imuDecision = _imuEdgeLatch.next();
+        if (imuDecision == BooleanAlarmEdgeLatch::PendingDecision::Rising) {
+            input.imuTamper = 1.0f;
+        } else if (imuDecision == BooleanAlarmEdgeLatch::PendingDecision::Clear) {
+            input.imuTamper = 0.0f;
+        }
+        _gpioEdgeMailbox.peek(gpioEdges);
+        generation = _inputGeneration;
         hasPending = true;
     }
     portEXIT_CRITICAL(&_snapshotLock);
@@ -167,10 +211,32 @@ uint8_t AlarmService::processPending() {
         return 0;
     }
 
-    // All rule evaluation and side effects are centralized here on purpose.
-    // This keeps producers lightweight and makes the execution model easier to
-    // reason about than scattered synchronous alarm runs from multiple tasks.
-    return _coordinator.process(input.sensors, input.wifiVariance, input.wifiCsiMotion, input.imuTamper);
+    bool evaluationCompleted = false;
+    const uint8_t notifications = _coordinator.process(
+        input.sensors,
+        input.wifiVariance,
+        input.wifiCsiMotion,
+        input.imuTamper,
+        &gpioEdges,
+        &evaluationCompleted);
+    if (!evaluationCompleted) {
+        return notifications;
+    }
+
+    portENTER_CRITICAL(&_snapshotLock);
+    _csiEdgeLatch.complete(csiDecision);
+    _imuEdgeLatch.complete(imuDecision);
+    _gpioEdgeMailbox.complete(gpioEdges);
+    if (_inputGeneration == generation) {
+        _pendingEvaluation = false;
+    }
+    if (_csiEdgeLatch.hasPending() || _imuEdgeLatch.hasPending() ||
+        _gpioEdgeMailbox.hasPending()) {
+        _pendingEvaluation = true;
+    }
+    portEXIT_CRITICAL(&_snapshotLock);
+
+    return notifications;
 }
 
 } // namespace ALARMS

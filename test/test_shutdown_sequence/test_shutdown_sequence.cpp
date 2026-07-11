@@ -33,7 +33,12 @@ inline SYSTEM::ShutdownReason recordedReason = SYSTEM::ShutdownReason::UNKNOWN;
 inline int watchdogUnregisterCalls = 0;
 inline int notificationsShutdownCalls = 0;
 inline int notificationWorkerStopCalls = 0;
-inline int wifiSensingStopCalls = 0;
+inline int wifiSensingApiShutdownCalls = 0;
+inline int wifiSensingReconcilerShutdownCalls = 0;
+inline int wifiSensingReconcilerFailuresRemaining = 0;
+inline int wifiSensingShutdownCalls = 0;
+inline int wifiSensingShutdownFailuresRemaining = 0;
+inline int csiShutdownCalls = 0;
 inline int airMouseStopCalls = 0;
 inline int macroStopCalls = 0;
 inline int sensorLoggingStopCalls = 0;
@@ -72,7 +77,12 @@ void reset() {
     watchdogUnregisterCalls = 0;
     notificationsShutdownCalls = 0;
     notificationWorkerStopCalls = 0;
-    wifiSensingStopCalls = 0;
+    wifiSensingApiShutdownCalls = 0;
+    wifiSensingReconcilerShutdownCalls = 0;
+    wifiSensingReconcilerFailuresRemaining = 0;
+    wifiSensingShutdownCalls = 0;
+    wifiSensingShutdownFailuresRemaining = 0;
+    csiShutdownCalls = 0;
     airMouseStopCalls = 0;
     macroStopCalls = 0;
     sensorLoggingStopCalls = 0;
@@ -96,7 +106,9 @@ void reset() {
     clearRawObject<POWER::PowerManager>();
     clearRawObject<API::NotificationsApiService>();
     clearRawObject<NOTIFICATIONS::NotificationWorker>();
+    clearRawObject<WIFISENSING::WifiSensingSettings>();
     clearRawObject<WIFISENSING::WifiSensingService>();
+    clearRawObject<WIFISENSING::CSI::CsiService>();
     clearRawObject<AIRMOUSE::AirMouseService>();
     clearRawObject<MACROS::MacroService>();
     clearRawObject<BLE::BleService>();
@@ -125,6 +137,20 @@ void wireWifiSensing(ServiceRegistry& registry) {
     new (&registry._wifiSensingService)
         std::unique_ptr<WIFISENSING::WifiSensingService>(
             reinterpret_cast<WIFISENSING::WifiSensingService*>(rawStorage<WIFISENSING::WifiSensingService>()));
+}
+
+void wireWifiSensingSettings(ServiceRegistry& registry) {
+    new (&registry._wifiSensingSettings)
+        std::unique_ptr<WIFISENSING::WifiSensingSettings>(
+            reinterpret_cast<WIFISENSING::WifiSensingSettings*>(
+                rawStorage<WIFISENSING::WifiSensingSettings>()));
+}
+
+void wireCsiService(ServiceRegistry& registry) {
+    new (&registry._csiService)
+        std::unique_ptr<WIFISENSING::CSI::CsiService>(
+            reinterpret_cast<WIFISENSING::CSI::CsiService*>(
+                rawStorage<WIFISENSING::CSI::CsiService>()));
 }
 
 void wireAirMouse(ServiceRegistry& registry) {
@@ -247,6 +273,11 @@ API::NotificationsApiService* ServiceRegistry::getNotificationsApiService() cons
     return TEST_SHUTDOWN::notificationsApi;
 }
 
+void ServiceRegistry::shutdownWifiSensingApiLifecycle() {
+    TEST_SHUTDOWN::calls.push("wifiSensingApi.shutdown");
+    TEST_SHUTDOWN::wifiSensingApiShutdownCalls++;
+}
+
 namespace API {
 
 void NotificationsApiService::shutdown() {
@@ -268,11 +299,37 @@ StopStatus NotificationWorker::stop() {
 
 namespace WIFISENSING {
 
-bool WifiSensingService::stop() {
-    TEST_SHUTDOWN::calls.push("wifiSensing.stop");
-    TEST_SHUTDOWN::wifiSensingStopCalls++;
+bool WifiSensingSettings::shutdownRuntimeReconciler(TickType_t waitTicks) {
+    (void)waitTicks;
+    TEST_SHUTDOWN::calls.push("wifiSensingReconciler.shutdown");
+    TEST_SHUTDOWN::wifiSensingReconcilerShutdownCalls++;
+    if (TEST_SHUTDOWN::wifiSensingReconcilerFailuresRemaining > 0) {
+        TEST_SHUTDOWN::wifiSensingReconcilerFailuresRemaining--;
+        vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+        return false;
+    }
     return true;
 }
+
+bool WifiSensingService::shutdown() {
+    TEST_SHUTDOWN::calls.push("wifiSensing.shutdown");
+    TEST_SHUTDOWN::wifiSensingShutdownCalls++;
+    if (TEST_SHUTDOWN::wifiSensingShutdownFailuresRemaining > 0) {
+        TEST_SHUTDOWN::wifiSensingShutdownFailuresRemaining--;
+        return false;
+    }
+    return true;
+}
+
+namespace CSI {
+
+bool CsiService::shutdown() {
+    TEST_SHUTDOWN::calls.push("csi.shutdown");
+    TEST_SHUTDOWN::csiShutdownCalls++;
+    return true;
+}
+
+}  // namespace CSI
 
 }  // namespace WIFISENSING
 
@@ -402,7 +459,9 @@ void test_execute_stops_runtime_services_before_network_and_hardware_shutdown() 
     TEST_SHUTDOWN::wirePowerManager(registry);
     TEST_SHUTDOWN::wireNotificationsApi(registry);
     TEST_SHUTDOWN::wireNotificationWorker(registry);
+    TEST_SHUTDOWN::wireWifiSensingSettings(registry);
     TEST_SHUTDOWN::wireWifiSensing(registry);
+    TEST_SHUTDOWN::wireCsiService(registry);
     TEST_SHUTDOWN::wireAirMouse(registry);
     TEST_SHUTDOWN::wireMacroService(registry);
     TEST_SHUTDOWN::wireShellyService(registry);
@@ -425,7 +484,10 @@ void test_execute_stops_runtime_services_before_network_and_hardware_shutdown() 
 
     TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::notificationsShutdownCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::notificationWorkerStopCalls);
-    TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::wifiSensingStopCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::wifiSensingApiShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::wifiSensingReconcilerShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::wifiSensingShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::csiShutdownCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::airMouseStopCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::macroStopCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SHUTDOWN::sensorLoggingStopCalls);
@@ -450,7 +512,11 @@ void test_execute_stops_runtime_services_before_network_and_hardware_shutdown() 
                              TEST_STUBS::FREERTOS::tickCount);
 
     const size_t notificationsIdx = TEST_SHUTDOWN::indexOf("notificationsApi.shutdown");
-    const size_t wifiIdx = TEST_SHUTDOWN::indexOf("wifiSensing.stop");
+    const size_t wifiApiIdx = TEST_SHUTDOWN::indexOf("wifiSensingApi.shutdown");
+    const size_t wifiReconcilerIdx =
+        TEST_SHUTDOWN::indexOf("wifiSensingReconciler.shutdown");
+    const size_t wifiIdx = TEST_SHUTDOWN::indexOf("wifiSensing.shutdown");
+    const size_t csiIdx = TEST_SHUTDOWN::indexOf("csi.shutdown");
     const size_t bleIdx = TEST_SHUTDOWN::indexOf("ble.prepareForSleep");
     const size_t matrixIdx = TEST_SHUTDOWN::indexOf("matrixTask.stop");
     const size_t thermalIdx = TEST_SHUTDOWN::indexOf("thermal.stop");
@@ -458,17 +524,45 @@ void test_execute_stops_runtime_services_before_network_and_hardware_shutdown() 
     const size_t flushIdx = TEST_SHUTDOWN::indexOf("ringBuffer.end");
 
     TEST_ASSERT_TRUE(notificationsIdx != static_cast<size_t>(-1));
+    TEST_ASSERT_TRUE(wifiApiIdx != static_cast<size_t>(-1));
+    TEST_ASSERT_TRUE(wifiReconcilerIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(wifiIdx != static_cast<size_t>(-1));
+    TEST_ASSERT_TRUE(csiIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(bleIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(matrixIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(thermalIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(bufferIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(flushIdx != static_cast<size_t>(-1));
     TEST_ASSERT_TRUE(wifiIdx < bleIdx);
+    TEST_ASSERT_TRUE(wifiApiIdx < wifiReconcilerIdx);
+    TEST_ASSERT_TRUE(wifiReconcilerIdx < wifiIdx);
+    TEST_ASSERT_TRUE(wifiApiIdx < wifiIdx);
+    TEST_ASSERT_TRUE(csiIdx < bleIdx);
     TEST_ASSERT_TRUE(matrixIdx < bleIdx);
     TEST_ASSERT_TRUE(thermalIdx < bleIdx);
     TEST_ASSERT_TRUE(thermalIdx < bufferIdx);
     TEST_ASSERT_TRUE(bufferIdx < flushIdx);
+}
+
+void test_execute_retries_reconciler_and_rssi_cleanup_before_network_shutdown() {
+    auto& registry = TEST_SHUTDOWN::rawObject<ServiceRegistry>();
+    TEST_SHUTDOWN::wirePowerManager(registry);
+    TEST_SHUTDOWN::wireWifiSensingSettings(registry);
+    TEST_SHUTDOWN::wireWifiSensing(registry);
+    TEST_SHUTDOWN::wifiSensingReconcilerFailuresRemaining = 2;
+    TEST_SHUTDOWN::wifiSensingShutdownFailuresRemaining = 2;
+
+    SYSTEM::ShutdownSequence::execute(registry);
+
+    TEST_ASSERT_EQUAL_INT(3, TEST_SHUTDOWN::wifiSensingReconcilerShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(3, TEST_SHUTDOWN::wifiSensingShutdownCalls);
+    TEST_ASSERT_EQUAL_INT(WIFI_MODE_NULL, TEST_STUBS::WIFI::mode);
+    TEST_ASSERT_EQUAL_UINT32(
+        (4 * TIMEOUT::TASK_SHUTDOWN_POLL_TICKS) +
+            SHUTDOWN::HARDWARE_SETTLE_DELAY_MS +
+            SHUTDOWN::SERIAL_FLUSH_DELAY_MS +
+            SHUTDOWN::SERIAL_END_DELAY_MS,
+        TEST_STUBS::FREERTOS::tickCount);
 }
 
 int main(int argc, char** argv) {
@@ -480,5 +574,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_execute_maps_maintenance_sleep_reason_to_hygiene_sleep);
     RUN_TEST(test_execute_prefers_explicit_reason_over_power_manager_reason);
     RUN_TEST(test_execute_stops_runtime_services_before_network_and_hardware_shutdown);
+    RUN_TEST(test_execute_retries_reconciler_and_rssi_cleanup_before_network_shutdown);
     return UNITY_END();
 }

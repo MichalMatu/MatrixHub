@@ -6,7 +6,7 @@ class SpiRamJsonDocument;
 
 namespace CONFIG::Serialization {
 
-void loadConfigSections(SYSTEM::SpiRamJsonDocument& doc);
-void loadPsramOnlyConfigSections(SYSTEM::SpiRamJsonDocument& doc);
+bool loadConfigSections(SYSTEM::SpiRamJsonDocument& doc);
+bool loadPsramOnlyConfigSections(SYSTEM::SpiRamJsonDocument& doc);
 
 }  // namespace CONFIG::Serialization

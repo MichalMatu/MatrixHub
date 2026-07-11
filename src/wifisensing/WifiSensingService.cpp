@@ -17,6 +17,20 @@
 
 namespace WIFISENSING {
 
+namespace {
+
+uint32_t normalizeSampleIntervalMs(uint32_t sampleIntervalMs) {
+    if (sampleIntervalMs < LIMITS::WIFI_SENSING::MIN_INTERVAL_MS) {
+        return LIMITS::WIFI_SENSING::MIN_INTERVAL_MS;
+    }
+    if (sampleIntervalMs > LIMITS::WIFI_SENSING::MAX_INTERVAL_MS) {
+        return LIMITS::WIFI_SENSING::MAX_INTERVAL_MS;
+    }
+    return sampleIntervalMs;
+}
+
+}  // namespace
+
 WifiSensingService::WifiSensingService(ALARMS::AlarmService* alarmService) 
     : _taskRunner(_sampler, 4.0f) {
     
@@ -25,9 +39,39 @@ WifiSensingService::WifiSensingService(ALARMS::AlarmService* alarmService)
     }
     
     _ssidMutex = xSemaphoreCreateMutex();
+    _lifecycleMutex = xSemaphoreCreateMutex();
+    if (!_lifecycleMutex) {
+        LOGE("Failed to create lifecycle mutex");
+    }
 }
 
 WifiSensingService::~WifiSensingService() {
+    // Keep the class safe under any RAII owner, not only ServiceRegistry. The
+    // worker stores callbacks and an AlarmService pointer, so its task must be
+    // fully reaped before this facade starts deleting lifecycle state or member
+    // destruction reaches WifiSensingTaskRunner/RssiSampler.
+    if (_lifecycleMutex) {
+        bool retryLogged = false;
+        while (!shutdown()) {
+            if (!retryLogged) {
+                LOGW("Waiting for WiFi sensing worker before destruction");
+                retryLogged = true;
+            }
+            vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+        }
+    } else {
+        // Partial construction cannot start through begin(), but keep sampler
+        // ownership conservative in case init() was exercised directly.
+        while (!_taskRunner.stop()) {
+            vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+        }
+        (void)_sampler.deinit(portMAX_DELAY);
+    }
+
+    if (_lifecycleMutex) {
+        vSemaphoreDelete(_lifecycleMutex);
+        _lifecycleMutex = nullptr;
+    }
     if (_ssidMutex) {
         vSemaphoreDelete(_ssidMutex);
         _ssidMutex = nullptr;
@@ -46,10 +90,57 @@ void WifiSensingService::addSensingCallback(SensingCallback cb) {
 }
 
 bool WifiSensingService::begin(uint32_t sampleIntervalMs, float varianceThreshold) {
-    if (_taskRunner.isRunning()) {
-        LOGW("Already running");
-        return true;
+    SYSTEM::ScopeLock lifecycleLock(_lifecycleMutex, portMAX_DELAY);
+    if (!lifecycleLock.isLocked()) {
+        LOGE("Lifecycle mutex unavailable during start");
+        return false;
     }
+
+    return beginLocked(sampleIntervalMs, varianceThreshold);
+}
+
+bool WifiSensingService::beginLocked(uint32_t sampleIntervalMs,
+                                     float varianceThreshold) {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        LOGW("Rejecting start during terminal shutdown");
+        return false;
+    }
+
+    const uint32_t appliedSampleIntervalMs =
+        normalizeSampleIntervalMs(sampleIntervalMs);
+    if (_taskRunner.isRunning()) {
+        if (!_appliedRuntimeConfig.needsReconcile(
+                true,
+                appliedSampleIntervalMs,
+                varianceThreshold,
+                true,
+                _taskRunner.hasTaskResources())) {
+            LOGW("Already running");
+            return true;
+        }
+
+        LOGW("Applied RSSI runtime config drifted; restarting worker");
+        if (!stopLocked()) {
+            return false;
+        }
+    }
+
+    // A previous stop can time out while the task is still unwinding.  Finish
+    // that hand-off before init() resets the sampler; otherwise an
+    // immediate settings rollback can race the old worker and then fail to
+    // restart even though the worker suspends a moment later.
+    if (!_taskRunner.finishPendingStop(TIMEOUT::TASK_SHUTDOWN_TICKS)) {
+        if (!_taskRunner.isRunning()) {
+            _appliedRuntimeConfig.markDisabled();
+        }
+        LOGE("Previous task is still stopping");
+        return false;
+    }
+
+    // At this point no worker is using the previous configuration. Record that
+    // transition before allocating/starting the replacement so an init failure
+    // cannot leave the applied snapshot claiming that a stale worker is live.
+    _appliedRuntimeConfig.markDisabled();
     
     // Initialize dynamic buffer (Lazy Load)
     if (!_sampler.init()) {
@@ -57,42 +148,115 @@ bool WifiSensingService::begin(uint32_t sampleIntervalMs, float varianceThreshol
         return false;
     }
     
-    // Clear sampler buffer
-    _sampler.clear();
-    
     // Update threshold before starting
     _taskRunner.setVarianceThreshold(varianceThreshold);
     
     // Start task (delegates all loop logic to TaskRunner)
     if (!_taskRunner.start(sampleIntervalMs)) {
         LOGE("Failed to start task runner");
-        _sampler.deinit();
+        if (!_sampler.deinit()) {
+            LOGW("Sampler cleanup deferred after task start failure");
+        }
+        _appliedRuntimeConfig.markDisabled();
         return false;
     }
+
+    _appliedRuntimeConfig.markEnabled(
+        appliedSampleIntervalMs, varianceThreshold);
     
     LOGI("Started with %ums interval, buffer=%u samples", 
-         sampleIntervalMs, RSSI_BUFFER_SIZE);
+         appliedSampleIntervalMs, RSSI_BUFFER_SIZE);
     return true;
 }
 
 bool WifiSensingService::stop() {
+    SYSTEM::ScopeLock lifecycleLock(_lifecycleMutex, portMAX_DELAY);
+    if (!lifecycleLock.isLocked()) {
+        LOGE("Lifecycle mutex unavailable during stop");
+        return false;
+    }
+
+    return stopLocked();
+}
+
+bool WifiSensingService::stopLocked() {
     // The task runner can fail to reach its suspended/deletable state within
     // the shutdown budget. In that case keep the sampler allocation alive:
     // freeing it here would race the still-unwinding worker task.
     if (!_taskRunner.stop()) {
+        if (!_taskRunner.isRunning()) {
+            _appliedRuntimeConfig.markDisabled();
+        }
         LOGW("Stop requested but worker still owns sampler resources");
         return false;
     }
 
-    _sampler.clear();
-    _sampler.deinit();
+    _appliedRuntimeConfig.markDisabled();
+
+    if (!_sampler.deinit()) {
+        LOGW("Worker stopped; sampler cleanup will be retried");
+        return false;
+    }
 
     LOGI("Stopped");
     return true;
 }
 
+bool WifiSensingService::shutdown() {
+    _shuttingDown.store(true, std::memory_order_release);
+    return stop();
+}
+
 bool WifiSensingService::isRunning() const {
     return _taskRunner.isRunning();
+}
+
+bool WifiSensingService::needsRuntimeReconcile(
+    bool desiredEnabled,
+    uint32_t desiredSampleIntervalMs,
+    float desiredVarianceThreshold) const {
+    if (_shuttingDown.load(std::memory_order_acquire)) {
+        return false;
+    }
+    SYSTEM::ScopeLock lifecycleLock(_lifecycleMutex, pdMS_TO_TICKS(50));
+    if (!lifecycleLock.isLocked()) {
+        return true;
+    }
+
+    return _appliedRuntimeConfig.needsReconcile(
+        desiredEnabled,
+        normalizeSampleIntervalMs(desiredSampleIntervalMs),
+        desiredVarianceThreshold,
+        _taskRunner.isRunning(),
+        _taskRunner.hasTaskResources() || _sampler.isInitialized());
+}
+
+bool WifiSensingService::reconcileRuntime(
+    bool desiredEnabled,
+    uint32_t desiredSampleIntervalMs,
+    float desiredVarianceThreshold) {
+    SYSTEM::ScopeLock lifecycleLock(_lifecycleMutex, portMAX_DELAY);
+    if (!lifecycleLock.isLocked()) {
+        LOGE("Lifecycle mutex unavailable during runtime reconciliation");
+        return false;
+    }
+
+    if (desiredEnabled) {
+        return beginLocked(desiredSampleIntervalMs, desiredVarianceThreshold);
+    }
+    return stopLocked();
+}
+
+WifiAppliedRuntimeConfigSnapshot
+WifiSensingService::getAppliedRuntimeConfig() const {
+    SYSTEM::ScopeLock lifecycleLock(_lifecycleMutex, pdMS_TO_TICKS(50));
+    if (!lifecycleLock.isLocked()) {
+        WifiAppliedRuntimeConfigSnapshot unavailable{};
+        unavailable.known = false;
+        return unavailable;
+    }
+
+    return _appliedRuntimeConfig.snapshot();
 }
 
 bool WifiSensingService::isActive() const {

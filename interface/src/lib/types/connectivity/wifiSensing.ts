@@ -58,6 +58,11 @@ export interface CsiMotionStatus {
 	state: string;
 	baseline_ready: boolean;
 	detected: boolean;
+	decision_valid: boolean;
+	has_frame: boolean;
+	data_fresh: boolean;
+	last_frame_ms: number;
+	frame_age_ms: number;
 	noisy: boolean;
 	needs_calibration: boolean;
 	score: number;
@@ -72,13 +77,17 @@ export interface CsiMotionStatus {
 
 export interface CsiRuntimeMetrics {
 	enabled: boolean;
+	runtime_fault: boolean;
+	runtime_reconcile_pending: boolean;
 	queue_allocated: boolean;
+	queue_metrics_valid: boolean;
 	active_consumer_mask: number;
 	consumer_count: number;
 	frontend_consumer_active: boolean;
 	alarm_consumer_active: boolean;
 	boot_consumer_active: boolean;
 	matrix_visualization_consumer_active: boolean;
+	diagnostic_capture_consumer_active: boolean;
 	queue_depth: number;
 	queue_capacity: number;
 	queue_drops_total: number;
@@ -95,12 +104,29 @@ export interface CsiRuntimeMetrics {
 	batches_per_sec: number;
 	last_packet_ms: number;
 	last_batch_ms: number;
+	motion_control_epoch: number;
 	calibration_count: number;
 	calibration_target: number;
 	calibration_state: string;
 	motion: CsiMotionStatus;
 	ws_client_count: number;
 	ws_queue_enabled: boolean;
+	capture: CsiCaptureRuntimeMetrics;
+}
+
+export interface CsiCaptureRuntimeMetrics {
+	client_count: number;
+	queue_enabled: boolean;
+	starting: boolean;
+	accepting: boolean;
+	stopping: boolean;
+	session_id: number;
+	start_exclusive_sequence: number;
+	stop_inclusive_sequence: number;
+	records_offered: number;
+	records_enqueued: number;
+	records_dropped: number;
+	truncated_records: number;
 }
 
 export interface WifiSensingStatus extends WifiSensingData {

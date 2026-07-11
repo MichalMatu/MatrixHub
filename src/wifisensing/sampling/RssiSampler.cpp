@@ -6,6 +6,8 @@
 #include "RssiSampler.h"
 #include "../../system/logging/Logging.h"
 #include "../../config/App.h"
+#include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_wifi.h>  // For AP mode station list access
 #include "../../system/utils/ScopeLock.h"
 
@@ -25,39 +27,66 @@ RssiSampler::RssiSampler() {
     }
 }
 
-bool RssiSampler::init() {
-    if (_buffer) return true; // Already init
+bool RssiSampler::init(TickType_t waitTicks) {
+    SYSTEM::ScopeLock lock(_mutex, waitTicks);
+    if (!lock.isLocked()) {
+        LOGW("Sampler init deferred: buffer mutex busy");
+        return false;
+    }
 
-    _buffer = (RssiSample*)heap_caps_malloc(RSSI_BUFFER_SIZE * sizeof(RssiSample), MALLOC_CAP_SPIRAM);
-    if (!_buffer) {
+    if (_buffer) {
+        // A buffer retained after deferred cleanup is safe to reuse once this
+        // lock is owned. Reset its generation atomically with the ownership
+        // hand-off so readers can never observe stale indices over new storage.
+        _head = 0;
+        _count = 0;
+        _initialized.store(true, std::memory_order_release);
+        return true;
+    }
+
+    RssiSample* buffer = (RssiSample*)heap_caps_malloc(
+        RSSI_BUFFER_SIZE * sizeof(RssiSample), MALLOC_CAP_SPIRAM);
+    if (!buffer) {
         LOGE("Failed to allocate RssiSampler buffer in PSRAM!");
         return false;
     }
-    clear();
+
+    _buffer = buffer;
+    _head = 0;
+    _count = 0;
+    _initialized.store(true, std::memory_order_release);
     LOGI("RssiSampler allocated in PSRAM (%u bytes)", RSSI_BUFFER_SIZE * sizeof(RssiSample));
     return true;
 }
 
-void RssiSampler::deinit() {
-    SYSTEM::ScopeLock lock(_mutex, pdMS_TO_TICKS(100));
-    if (lock.isLocked()) {
-        if (_buffer) {
-            heap_caps_free(_buffer);
-            _buffer = nullptr;
-        }
-        LOGI("RssiSampler freed");
-    } else {
-        LOGE("Failed to lock mutex for deinit, forcing free");
-        if (_buffer) {
-            heap_caps_free(_buffer);
-            _buffer = nullptr;
-        }
+bool RssiSampler::deinit(TickType_t waitTicks) {
+    SYSTEM::ScopeLock lock(_mutex, waitTicks);
+    if (!lock.isLocked()) {
+        // A reader still owns the buffer. Never trade a transient cleanup delay
+        // for a use-after-free; the service keeps this resource visible and a
+        // later lifecycle reconciliation retries the reap.
+        LOGW("Sampler cleanup deferred: buffer still in use");
+        return false;
     }
+
+    _head = 0;
+    _count = 0;
+    if (_buffer) {
+        heap_caps_free(_buffer);
+        _buffer = nullptr;
+    }
+    _initialized.store(false, std::memory_order_release);
+    LOGI("RssiSampler freed");
+    return true;
 }
 
 RssiSampler::~RssiSampler() {
     if (_mutex) {
+        // Destruction is the final ownership boundary. Wait for any diagnostic
+        // reader instead of deleting its mutex or storage underneath it.
+        (void)deinit(portMAX_DELAY);
         vSemaphoreDelete(_mutex);
+        _mutex = nullptr;
     }
 }
 
@@ -101,7 +130,7 @@ RssiSample RssiSampler::takeSample() {
     sample._pad[2] = 0; 
     
     SYSTEM::ScopeLock lock(_mutex, pdMS_TO_TICKS(10));
-    if (_buffer && lock.isLocked()) {
+    if (lock.isLocked() && _buffer) {
         _buffer[_head] = sample;
         _head = (_head + 1) % RSSI_BUFFER_SIZE;
         
@@ -122,7 +151,7 @@ uint16_t RssiSampler::getSamples(RssiSample* outBuffer, uint16_t maxCount) const
     
     uint16_t copied = 0;
     SYSTEM::ScopeLock lock(_mutex, pdMS_TO_TICKS(50));
-    if (lock.isLocked()) {
+    if (lock.isLocked() && _buffer) {
         uint16_t currentCount = _count;
         uint16_t currentHead = _head;
         
@@ -157,12 +186,14 @@ uint16_t RssiSampler::getSamples(RssiSample* outBuffer, uint16_t maxCount) const
     return copied;
 }
 
-void RssiSampler::clear() {
-    SYSTEM::ScopeLock lock(_mutex, pdMS_TO_TICKS(50));
+bool RssiSampler::clear(TickType_t waitTicks) {
+    SYSTEM::ScopeLock lock(_mutex, waitTicks);
     if (lock.isLocked()) {
         _head = 0;
         _count = 0;
+        return true;
     }
+    return false;
 }
 
 uint16_t RssiSampler::getCount() const {

@@ -7,11 +7,19 @@
 #include "../../system/rtc/types/RtcAlarmTypes.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <atomic>
 namespace ALARMS {
 
+// PSRAM outbox capacity: one rule update can affect every old and new binding
+// (64), while a concurrent runtime/config reconciliation may additionally need
+// every current binding (32). Coordinator admission prevents a second update
+// commit while any prior entry is still pending.
+constexpr uint8_t kMaxRuleUpdateShellyDevices =
+    kMaxRules * kMaxShellyPerRule * 3;
+
 struct AlarmRuleUpdateEffects {
-    AlarmRule shellyOffRules[kMaxRules];
-    uint8_t shellyOffCount = 0;
+    char shellyDeviceIds[kMaxRuleUpdateShellyDevices][kShellyIdLen]{};
+    uint8_t shellyDeviceCount = 0;
     bool applied = false;
 };
 
@@ -25,7 +33,6 @@ public:
     
     // Lifecycle
     bool begin();
-    bool reloadRules();
     
     // Accessors (Thread-safety handled by caller using getLock/unlock or specialized methods)
     // NOTE: For iteration efficiency, we expose raw arrays but require locking.
@@ -39,7 +46,6 @@ public:
     uint8_t getCount() const { return _state.ruleCount; }
     
     // State management
-    bool resetRuntimeStateLocked();
     bool persistRuntimeState();
     bool persistRuntimeStateLocked();
     
@@ -47,16 +53,18 @@ public:
      * @brief Update rules with new set.
      * Returns side-effect intents for the imperative shell to execute.
      */
-    AlarmRuleUpdateEffects updateRules(const AlarmRule* newRules, uint8_t count);
+    bool updateRules(const AlarmRule* newRules,
+                     uint8_t count,
+                     AlarmRuleUpdateEffects& effects);
 
-    bool isInitialized() const { return _initialized; }
+    bool isInitialized() const { return _initialized.load(std::memory_order_acquire); }
 
 private:
-    void syncFromStoresLocked();
+    bool syncFromStoresLocked();
     bool commitLocked();
 
     AlarmSnapshot _state{};
-    bool _initialized = false;
+    std::atomic<bool> _initialized{false};
     
     // Thread safety
     SemaphoreHandle_t _mutex = nullptr;

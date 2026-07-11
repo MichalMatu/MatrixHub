@@ -94,16 +94,9 @@ void ShellyRelayController::cancelActiveIo() {
     _httpClient->cancelActiveIo();
 }
 
-bool ShellyRelayController::setRelay(const char* id, bool turnOn) {
-    // 1. Get device copy
-    ShellyDevice device;
-    if (!_deviceManager.getDevice(id, device)) {
-        LOGW("setRelay: Device not found: %s", id);
-        return false;
-    }
-
+bool ShellyRelayController::setRelay(const ShellyDevice& device, bool turnOn) {
     if (!device.enabled) {
-        LOGW("setRelay: Device disabled: %s", id);
+        LOGW("setRelay: Device disabled: %s", device.id);
         return false;
     }
 
@@ -125,13 +118,13 @@ bool ShellyRelayController::setRelay(const char* id, bool turnOn) {
 
     auto trySetRelay = [&](uint8_t generation) -> bool {
         if (!buildControlUrlForGeneration(generation, url, sizeof(url), device.ip, device.relayIndex, turnOn)) {
-            LOGE("Failed to build control URL for %s (gen=%u)", id, generation);
+            LOGE("Failed to build control URL for %s (gen=%u)", device.id, generation);
             return false;
         }
 
         SYSTEM::ScopeLock lock(_networkMutex, TIMEOUT::MUTEX_NETWORK_TICKS);
         if (!lock.isLocked()) {
-            LOGW("setRelay: Network mutex timeout for %s", id);
+            LOGW("setRelay: Network mutex timeout for %s", device.id);
             return false;
         }
 
@@ -144,22 +137,17 @@ bool ShellyRelayController::setRelay(const char* id, bool turnOn) {
         if (trySetRelay(fallbackGeneration)) {
             success = true;
             LOGW("Auto-corrected Shelly generation for %s: %u -> %u",
-                 id, device.generation, fallbackGeneration);
+                 device.id, device.generation, fallbackGeneration);
 
-            ShellyDevice corrected = device;
-            corrected.generation = fallbackGeneration;
-            if (!_deviceManager.upsertDevice(corrected)) {
-                LOGE("Failed to persist corrected Shelly generation for %s", id);
+            if (!_deviceManager.updateGenerationIfPeerMatches(
+                    device, fallbackGeneration)) {
+                LOGE("Failed to persist corrected Shelly generation for %s", device.id);
             }
         }
     }
 
-    if (success) {
-        _deviceManager.updateCommandState(id, turnOn, true);
-    }
-
-    if (success) LOGI("Relay %s -> %s", id, turnOn ? "ON" : "OFF");
-    else LOGE("Failed: %s", id);
+    if (success) LOGI("Relay %s -> %s", device.id, turnOn ? "ON" : "OFF");
+    else LOGE("Failed: %s", device.id);
 
     return success;
 }
@@ -185,6 +173,7 @@ bool ShellyRelayController::pollDevice(const ShellyDevice& t) {
     bool online = false;
     ShellyStatus status;
     uint8_t detectedGeneration = t.generation;
+    ShellyDevice commitPeer = t;
     
     LOGV_THROTTLED(TASK_MONITOR::INTERVAL_SHELLY_POLL_MS, "Polling %s (%s)", t.id, t.ip);
 
@@ -221,9 +210,13 @@ bool ShellyRelayController::pollDevice(const ShellyDevice& t) {
             LOGW("Auto-corrected Shelly generation for %s: %u -> %u",
                  t.id, t.generation, fallbackGeneration);
 
-            ShellyDevice corrected = t;
-            corrected.generation = fallbackGeneration;
-            if (!_deviceManager.upsertDevice(corrected)) {
+            if (_deviceManager.updateGenerationIfPeerMatches(
+                    t, fallbackGeneration)) {
+                // The generation update and the final telemetry commit are
+                // independently peer-fenced. Advance the expected snapshot
+                // only after the manager accepted this exact old peer.
+                commitPeer.generation = fallbackGeneration;
+            } else {
                 LOGE("Failed to persist corrected Shelly generation for %s", t.id);
             }
         } else {
@@ -256,42 +249,11 @@ bool ShellyRelayController::pollDevice(const ShellyDevice& t) {
                        detectedGeneration,
                        status.isOn ? "ON" : "OFF");
 
-        // Fix for Shelly intermittent 0.0W bug:
-        // Shelly devices sometimes report apower=0.0 while ON, even with normal voltage.
-        // We debounce: only accept 0W after kZeroPowerThreshold consecutive zero readings.
-        constexpr uint8_t kZeroPowerThreshold = 3;
-
-        if (status.isOn && status.hasPower && status.power == 0.0f) {
-            ShellyDevice oldDevice;
-            if (_deviceManager.getDevice(t.id, oldDevice) && oldDevice.power > 0.0f) {
-                uint8_t count = oldDevice.zeroPowerCount + 1;
-                if (count < kZeroPowerThreshold) {
-                    LOGW("Shelly %s: 0W while ON (%u/%u), keeping %.1fW",
-                         t.id, count, kZeroPowerThreshold, oldDevice.power);
-                    status.power = oldDevice.power;
-                    _deviceManager.withDevice(t.id, [count](ShellyDevice& d) {
-                        d.zeroPowerCount = count;
-                        return true;
-                    });
-                } else {
-                    LOGI("Shelly %s: 0W confirmed after %u readings, accepting", t.id, count);
-                    _deviceManager.withDevice(t.id, [](ShellyDevice& d) {
-                        d.zeroPowerCount = 0;
-                        return true;
-                    });
-                }
-            }
-        } else if (status.hasPower && status.power > 0.0f) {
-            // Normal reading, reset counter
-            _deviceManager.withDevice(t.id, [](ShellyDevice& d) {
-                d.zeroPowerCount = 0;
-                return true;
-            });
-        }
     }
 
-    // 4. State update (has its own fast internal mutex)
-    _deviceManager.updatePollState(t.id, status, online);
+    // Commit health, telemetry and zero-power debounce atomically only if the
+    // device still identifies the peer that produced this HTTP response.
+    _deviceManager.updatePollState(commitPeer, status, online);
     
     return online;
 }

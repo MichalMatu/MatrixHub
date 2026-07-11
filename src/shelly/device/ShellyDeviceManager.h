@@ -13,6 +13,12 @@
 
 namespace SHELLY {
 
+enum class ShellyDeviceLookupResult : uint8_t {
+    Found,
+    NotFound,
+    Busy,
+};
+
 namespace {
     constexpr TickType_t kMutexTimeout = pdMS_TO_TICKS(5000);  // 5s timeout (was portMAX_DELAY)
 }
@@ -33,6 +39,10 @@ public:
     bool loadFromStorage();
 
     // CRUD operations (thread-safe)
+    ShellyDeviceLookupResult lookupDevice(
+        const char* id,
+        ShellyDevice& deviceOut,
+        TickType_t timeout = TIMEOUT::MUTEX_FS_TICKS);
     bool getDevice(const char* id, ShellyDevice& deviceOut);
     bool upsertDevice(const ShellyDevice& device);
     bool removeDevice(const char* id);
@@ -40,8 +50,21 @@ public:
     bool getDeviceByIndex(size_t index, ShellyDevice& deviceOut);
 
     // State updates
-    bool updateCommandState(const char* id, bool isOn, bool isOnline);
-    bool updatePollState(const char* id, const ShellyStatus& status, bool isOnline);
+    bool updateCommandState(const char* id,
+                            bool isOn,
+                            bool isOnline,
+                            const ShellyDevice* expectedPeer = nullptr);
+    bool updatePollState(const ShellyDevice& expectedPeer,
+                         const ShellyStatus& status,
+                         bool isOnline);
+
+    /**
+     * Persist protocol auto-detection only if the command/poll snapshot still
+     * identifies the current peer. Prevents a slow old request from overwriting
+     * a concurrent IP/relay/configuration update.
+     */
+    bool updateGenerationIfPeerMatches(const ShellyDevice& expectedPeer,
+                                       uint8_t generation);
 
     // Callbacks
     using OnStateChangeCallback = std::function<void(const ShellyDevice&)>;
@@ -88,6 +111,7 @@ public:
 private:
     bool saveLockedWithRollback(const RTC::ShellyData& snapshot);
     static void applyPollHealth(ShellyDevice& dev, bool isOnline, bool& changed);
+    static void applyPowerDebounce(ShellyDevice& dev, ShellyStatus& status);
 
     ShellyDeviceStore _store;
     SemaphoreHandle_t _mutex;

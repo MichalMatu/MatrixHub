@@ -28,7 +28,8 @@ bool initConfig(FS& fs);
  * Use after factory reset or config import.
  * 
  * @param fs Filesystem reference (LittleFS)
- * @return true if RTC configuration is ready (defaults are applied even when FS load fails)
+ * @return true if RTC configuration is ready. Missing or globally malformed
+ * files use defaults; a rejected safety-critical section returns false.
  */
 bool reloadAllFromFS(FS& fs);
 

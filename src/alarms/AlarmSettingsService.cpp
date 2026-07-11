@@ -230,19 +230,19 @@ bool AlarmSettingsService::rollbackToState(
     }
 
     _state = state;
-    if (!commitCachedStateLocked()) {
-        return false;
-    }
+    const bool storeRestored = commitCachedStateLocked();
 
     if (!propagate) {
-        return true;
+        return storeRestored;
     }
 
-    if (!persistStateSnapshot(state)) {
-        return false;
-    }
-
-    return applyStateSnapshot(state);
+    // A rollback is best-effort across all three stores. In particular, a
+    // failed LittleFS rollback must not prevent the old runtime snapshot from
+    // being reapplied; otherwise the live alarm engine can remain on the new
+    // rules while the working store has already returned to the old ones.
+    const bool filesystemRestored = persistStateSnapshot(state);
+    const bool runtimeRestored = applyStateSnapshot(state);
+    return storeRestored && filesystemRestored && runtimeRestored;
 }
 
 StateHandlerResult AlarmSettingsService::persistAndApply() {

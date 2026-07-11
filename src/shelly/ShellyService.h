@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <atomic>
+#include <functional>
 #include <FS.h>
 
 #include "ShellyTypes.h"
@@ -9,9 +10,16 @@
 #include "device/ShellyDeviceManager.h"
 #include "control/ShellyRelayController.h"
 #include "worker/ShellyWorker.h"
+#include "worker/ShellyStartRetrySchedule.h"
 #include "validation/IpValidator.h"
 
 namespace SHELLY {
+
+enum class ShellyRelayAdmissionResult : uint8_t {
+    Accepted,
+    Retry,
+    Terminal,
+};
 
 /**
  * Shelly Device Management Service - Main Facade.
@@ -32,7 +40,7 @@ public:
     // Lifecycle
     // ========================================================================
 
-    void begin();
+    bool begin();
     void stop();
     bool isRunning() const { return _running.load() || _worker.isRunning(); }
 
@@ -40,7 +48,10 @@ public:
     void loadConfig();
 
     // Start worker if not already running (lazy start on first device add)
-    void ensureStarted();
+    bool ensureStarted();
+
+    /** Retry a failed worker/task start while retained intent stays pending. */
+    void reconcileRuntimeIfDue(uint32_t nowMs);
 
     // ========================================================================
     // Device Management (delegates to ShellyDeviceManager)
@@ -69,12 +80,21 @@ public:
 
     bool setRelayState(const char* id, bool turnOn);
 
+    /**
+     * Bounded alarm-path admission. Busy locks return Retry so the alarm outbox
+     * can try again without stalling evaluation for the normal API timeout.
+     */
+    ShellyRelayAdmissionResult trySetAlarmRelayState(const char* id,
+                                                     bool turnOn);
+
     // ========================================================================
     // Callbacks
     // ========================================================================
     
     using OnStateChangeCallback = ShellyDeviceManager::OnStateChangeCallback;
     void setOnStateChangeCallback(OnStateChangeCallback cb) { _deviceManager.setOnStateChangeCallback(cb); }
+    using OnConfigChangeCallback = std::function<void()>;
+    void setOnConfigChangeCallback(OnConfigChangeCallback cb);
 
     // ========================================================================
     // Static Utilities
@@ -93,6 +113,13 @@ private:
     ShellyDeviceManager _deviceManager;
     ShellyRelayController _relayController;
     ShellyWorker _worker;
+    ShellyStartRetrySchedule _startRetry;
+    OnConfigChangeCallback _onConfigChange = nullptr;
+
+    ShellyRelayAdmissionResult admitRelayState(const char* id,
+                                               bool turnOn,
+                                               TickType_t mutexTimeout,
+                                               bool parkDisabled);
 };
 
 } // namespace SHELLY

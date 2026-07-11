@@ -7,6 +7,8 @@
 #include <atomic>
 #include "../ShellyTypes.h"
 #include "../ShellyConfig.h"
+#include "ShellyDesiredStateLedger.h"
+#include "ShellyWorkerLifecycleState.h"
 
 namespace SHELLY {
 
@@ -36,22 +38,39 @@ public:
     bool stop();
 
     /**
-     * Queue a relay control command.
-     * @param id Device ID
-     * @param turnOn true = ON, false = OFF
-     * @return true if queued successfully
+     * Store the latest desired relay state and wake the worker if possible.
+     * A saturated wake queue does not discard the stored state.
      */
-    bool queueCommand(const char* id, bool turnOn);
+    bool queueCommand(const char* id,
+                      bool turnOn,
+                      uint64_t peerRevision,
+                      TickType_t mutexTimeout = portMAX_DELAY);
+
+    /** Retain the latest desired state without executing it while disabled. */
+    bool parkCommand(const char* id,
+                     bool turnOn,
+                     uint64_t peerRevision,
+                     TickType_t mutexTimeout = portMAX_DELAY);
+
+    /** Move retained intent to a changed network peer/configuration. */
+    void rebindDevice(const char* id, uint64_t peerRevision);
+
+    /** Keep the last desired value dormant until this device is enabled. */
+    void parkDevice(const char* id, uint64_t peerRevision);
+
+    /** Remove pending state when a configured device is disabled or removed. */
+    void forgetDevice(const char* id);
 
     /**
      * Check if worker is running.
      */
-    bool isRunning() const { return _taskHandle != nullptr; }
+    bool isRunning() const { return _taskLifecycle.isLive(_taskHandle != nullptr); }
+    bool hasTask() const { return _taskHandle != nullptr; }
 
 private:
     static void taskEntry(void* param);
     void taskLoop();
-    void processCommand(const ShellyCommand& cmd);
+    void processDesiredCommands();
     void destroyResources();
     bool reclaimFinishedTaskIfNeeded();
 
@@ -59,13 +78,17 @@ private:
     ShellyRelayController& _relayController;
     std::atomic<bool>& _running;
     
-    QueueHandle_t _commandQueue = nullptr;
-    uint8_t* _queueStorage = nullptr;
-    StaticQueue_t* _queueBuffer = nullptr;
+    ShellyDesiredStateLedger _desiredStates;
+    StaticSemaphore_t _desiredMutexBuffer{};
+    SemaphoreHandle_t _desiredMutex = nullptr;
+
+    QueueHandle_t _wakeQueue = nullptr;
+    uint8_t _wakeQueueStorage[kWorkerWakeQueueSize]{};
+    StaticQueue_t _wakeQueueBuffer{};
     TaskHandle_t _taskHandle;
     StackType_t* _taskStack;
     StaticTask_t* _taskBuffer;
-    std::atomic<bool> _isTaskFinished {false};
+    ShellyWorkerLifecycleState _taskLifecycle;
 };
 
 } // namespace SHELLY

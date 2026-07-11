@@ -4,6 +4,7 @@
 #include "../../alarms/AlarmService.h"
 #include "../../alarms/types/AlarmInputData.h"
 #include "../../ble/settings/BleSettingsService.h"
+#include "../../gpio/GpioService.h"
 #include "../../notifications/runtime/NotificationRuntimeReconciler.h"
 #include "../../notifications/runtime/NotificationWorker.h"
 #include "../../notifications/settings/NotificationSettingsService.h"
@@ -45,21 +46,17 @@ void ServiceRegistry::detachRuntimeCallbacks() {
     }
 
     if (_shellyService) {
+        _shellyService->setOnConfigChangeCallback(nullptr);
         _shellyService->setOnStateChangeCallback(nullptr);
+    }
+
+    if (_gpioService) {
+        _gpioService->setInputChangeCallback(nullptr);
     }
 
     if (_csiService) {
         _csiService->setCsiCallback(nullptr);
         _csiService->setMotionCallback(nullptr);
-    }
-}
-
-void ServiceRegistry::stopBackgroundWorkers() {
-    if (_notifications.runtimeWorker) {
-        _notifications.runtimeWorker->stop();
-    }
-    if (_imuManager) {
-        _imuManager->clearConsumers();
     }
 }
 
@@ -70,6 +67,46 @@ void ServiceRegistry::destroyStaticServices() {
     _api->destroyAll();
     _matrixSettings.destroy();
     _usbTerminalService.destroy();
+}
+
+bool ServiceRegistry::wireCsiAlarmCallback() {
+    if (!_csiService || !_alarmService) {
+        return false;
+    }
+
+    // This bridge is installed before persisted CSI settings can activate the
+    // producer. Otherwise a complete motion pulse during the rest of boot would
+    // collapse to the latest level and never reach AlarmService's edge latch.
+    const bool retainedMotion =
+        _alarmService->isSourceTriggered(ALARMS::AlarmSource::WifiCsiMotion);
+    if (!_csiService->prepareMotionCallbackBootstrap(retainedMotion)) {
+        return false;
+    }
+    _csiService->setMotionCallback([this](bool motion) {
+        if (_isDying.load(std::memory_order_acquire) || !_alarmService) {
+            return;
+        }
+        ALARMS::AlarmInputData input;
+        input.wifiCsiMotion = motion ? 1.0f : 0.0f;
+        (void)_alarmService->submitInput(input);
+    });
+    return true;
+}
+
+bool ServiceRegistry::wireGpioAlarmCallback() {
+    if (!_gpioService || !_alarmService) {
+        return false;
+    }
+
+    // Install the bridge before GpioService::begin() publishes its initial
+    // levels and starts the sampler, so no boot-time edge can be lost.
+    return _gpioService->setInputChangeCallback(
+        [this](const char* gpioId, bool logicalValue) {
+            if (_isDying.load(std::memory_order_acquire) || !_alarmService) {
+                return;
+            }
+            (void)_alarmService->submitGpioInput(gpioId, logicalValue);
+        });
 }
 
 void ServiceRegistry::wireRuntimeCallbacks() {
@@ -127,17 +164,6 @@ void ServiceRegistry::wireRuntimeCallbacks() {
                 return;
             }
             _api->systemApi->sendShellyEvent(&dev);
-        });
-    }
-
-    if (_csiService && _alarmService) {
-        _csiService->setMotionCallback([this](bool motion) {
-            if (_isDying.load(std::memory_order_acquire) || !_alarmService) {
-                return;
-            }
-            ALARMS::AlarmInputData input;
-            input.wifiCsiMotion = motion ? 1.0f : 0.0f;
-            _alarmService->submitInput(input);
         });
     }
 

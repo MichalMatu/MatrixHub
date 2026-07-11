@@ -15,6 +15,12 @@ namespace CONFIG {
 
 namespace {
 
+void setLoadFailure(LoadFailure* failure, LoadFailure value) {
+    if (failure) {
+        *failure = value;
+    }
+}
+
 bool saveInternal(FS& fs, const ALARMS::AlarmRulesSnapshot* alarmRulesOverride) {
     SYSTEM::SpiRamJsonDocument doc(kConfigDocSize);
     Serialization::buildConfigDocument(doc, alarmRulesOverride);
@@ -23,34 +29,48 @@ bool saveInternal(FS& fs, const ALARMS::AlarmRulesSnapshot* alarmRulesOverride) 
 
 }  // namespace
 
-bool load(FS& fs) {
+bool load(FS& fs, LoadFailure* failure) {
+    setLoadFailure(failure, LoadFailure::None);
     if (!fs.exists(kConfigFile)) {
         LOGI("Config file not found, using factory defaults");
+        setLoadFailure(failure, LoadFailure::NotFound);
         return false;
     }
 
     SYSTEM::SpiRamJsonDocument doc(kConfigDocSize);
     if (!Persistence::readConfigDocument(fs, doc, "Load")) {
+        setLoadFailure(failure, LoadFailure::InvalidDocument);
         return false;
     }
 
-    Serialization::loadConfigSections(doc);
+    if (!Serialization::loadConfigSections(doc)) {
+        LOGE("Configuration contains an invalid critical section");
+        setLoadFailure(failure, LoadFailure::CriticalSection);
+        return false;
+    }
     LOGI("Configuration loaded from %s", kConfigFile);
     return true;
 }
 
-bool loadPsramOnly(FS& fs) {
+bool loadPsramOnly(FS& fs, LoadFailure* failure) {
+    setLoadFailure(failure, LoadFailure::None);
     if (!fs.exists(kConfigFile)) {
         LOGI("PSRAM-only config hydration skipped: %s not found", kConfigFile);
+        setLoadFailure(failure, LoadFailure::NotFound);
         return false;
     }
 
     SYSTEM::SpiRamJsonDocument doc(kConfigDocSize);
     if (!Persistence::readConfigDocument(fs, doc, "PSRAM-only load")) {
+        setLoadFailure(failure, LoadFailure::InvalidDocument);
         return false;
     }
 
-    Serialization::loadPsramOnlyConfigSections(doc);
+    if (!Serialization::loadPsramOnlyConfigSections(doc)) {
+        LOGE("PSRAM-only configuration contains an invalid critical section");
+        setLoadFailure(failure, LoadFailure::CriticalSection);
+        return false;
+    }
     LOGI("PSRAM-only config hydrated from %s", kConfigFile);
     return true;
 }

@@ -5,6 +5,7 @@
 #include "../../alarms/AlarmService.h"
 #include "../../alarms/AlarmSettingsService.h"
 #include "../../gpio/GpioService.h"
+#include "../logging/Logging.h"
 #include "../../shelly/ShellyRuntimeControl.h"
 #include "../../udp/UdpPusher.h"
 #include "../health/heap/HeapMonitor.h"
@@ -30,6 +31,8 @@
 #include "../../udp/UdpSettingsService.h"
 #include "../../usb_terminal/UsbTerminalSettingsService.h"
 #include "../../wifisensing/WifiSensingSettings.h"
+
+#include <cstdlib>
 
 void ServiceRegistry::initializeCoreServices() {
     CoreServicesInitializer::initialize(
@@ -85,6 +88,13 @@ void ServiceRegistry::initializeBusinessServices(SemaphoreHandle_t networkMutex)
         _wifiSensingSettings = SERVICE_REGISTRY_INIT_RUNTIME::createWifiSensingSettings(
             _framework->getFS(), _wifiSensingService.get(), _csiService.get());
     }
+    // Install the alarm consumer before persisted settings can activate CSI.
+    // This preserves a complete true->false motion pulse during the remainder
+    // of boot instead of synchronizing only its final level later.
+    if (_csiService && _alarmService && !wireCsiAlarmCallback()) {
+        LOGE("CSI alarm callback bootstrap failed; refusing to boot with an unfenced input path");
+        std::abort();
+    }
     SERVICE_REGISTRY_INIT_RUNTIME::beginWifiSensingSettings(_wifiSensingSettings.get());
 
     // Step 4B of lifecycle cleanup: notification settings are also owned here
@@ -101,6 +111,13 @@ void ServiceRegistry::initializeBusinessServices(SemaphoreHandle_t networkMutex)
     if (_alarmService) {
         _alarmService->setShellyActionExecutor(
             ALARMS::AlarmShellyBridge::build(_shellyService.get()));
+        SHELLY::setConfigChangeCallback(
+            _shellyService.get(),
+            [this]() {
+                if (!_isDying.load(std::memory_order_acquire) && _alarmService) {
+                    _alarmService->reconcileShellyOutputs();
+                }
+            });
     }
 
     // Continue the registry-ownership cleanup for lightweight RTC-backed
@@ -134,13 +151,26 @@ void ServiceRegistry::initializeBusinessServices(SemaphoreHandle_t networkMutex)
             });
     }
 
-    if (!_gpioService) {
+    const bool gpioNeedsStart = !_gpioService;
+    if (gpioNeedsStart) {
         _gpioService = std::make_unique<GPIO::GpioService>(_framework->getFS());
-        _gpioService->begin();
     }
 
     if (_alarmService) {
         _alarmService->setGpioService(_gpioService.get());
+        if (!wireGpioAlarmCallback()) {
+            LOGE("GPIO alarm callback init failed; refusing to boot with an unfenced input path");
+            std::abort();
+        }
+    }
+
+    // The callback above must be live before begin() publishes initial levels
+    // and creates the sampler task.
+    if (gpioNeedsStart) {
+        if (!_gpioService->begin()) {
+            LOGE("GpioService init failed; refusing to boot with unavailable alarm inputs");
+            std::abort();
+        }
     }
 }
 

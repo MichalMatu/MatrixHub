@@ -16,7 +16,6 @@ constexpr float kGainMin = 0.25f;
 constexpr float kGainMax = 4.0f;
 constexpr float kGlobalHighRatioThreshold = 0.60f;
 constexpr uint32_t kGlobalHighHoldMs = 500;
-constexpr float kBaselineEwmaAlpha = 0.005f;
 
 bool g_forceStorageAllocationFailure = false;
 
@@ -82,6 +81,8 @@ const char* toString(CsiMotionState state) {
             return "noisy_environment";
         case CsiMotionState::Unavailable:
             return "unavailable";
+        case CsiMotionState::NeedsCalibration:
+            return "needs_calibration";
         default:
             return "unknown";
     }
@@ -103,6 +104,12 @@ const char* toString(CsiMotionResetReason reason) {
             return "unavailable_storage";
         case CsiMotionResetReason::InvalidFrame:
             return "invalid_frame";
+        case CsiMotionResetReason::FrameGap:
+            return "frame_gap";
+        case CsiMotionResetReason::SourceChange:
+            return "source_change";
+        case CsiMotionResetReason::GainStabilized:
+            return "gain_stabilized";
         default:
             return "unknown";
     }
@@ -142,6 +149,11 @@ void CsiBandMotionDetector::end() {
 void CsiBandMotionDetector::configure(const CsiMotionConfig& config) {
     _config = config;
     normalizeConfig(_config);
+    // A configuration transition starts a new timing epoch. Otherwise the
+    // first frame after an idle control-plane update could satisfy hold/clear
+    // timers using time accumulated under the previous configuration.
+    _hasLastFrame = false;
+    _lastFrameMs = 0;
 
     if (!_storage) {
         _lastResetReason = CsiMotionResetReason::UnavailableStorage;
@@ -159,20 +171,68 @@ void CsiBandMotionDetector::configure(const CsiMotionConfig& config) {
 }
 
 void CsiBandMotionDetector::resetBaseline(CsiMotionResetReason reason) {
+    const bool preserveActiveDecision =
+        _motion &&
+        _config.enabled &&
+        reason != CsiMotionResetReason::Startup &&
+        reason != CsiMotionResetReason::ManualCalibration;
     _lastResetReason = reason;
     _baselineReady = false;
-    _motion = false;
+    _motion = preserveActiveDecision;
+    _requiresManualCalibration = preserveActiveDecision;
     _baselineFramesSeen = 0;
     _candidateSinceMs = 0;
     _clearSinceMs = 0;
     _noisyClearSinceMs = 0;
     _globalHighSinceMs = 0;
+    _quietSinceMs = 0;
+    _lastBaselineUpdateMs = 0;
+    _quietTracking = false;
+    _baselineUpdateStarted = false;
     clearBaselineArrays();
-    _snapshot.baselineReady = false;
-    _snapshot.motion = false;
-    _snapshot.noisy = false;
-    _snapshot.needsCalibration = _config.enabled && _config.bandCount > 0;
-    _snapshot.lastResetReason = _lastResetReason;
+
+    CsiMotionState resetState = CsiMotionState::Calibrating;
+    if (!_config.enabled) {
+        resetState = CsiMotionState::Disabled;
+    } else if (_config.bandCount == 0) {
+        resetState = CsiMotionState::NeedsConfiguration;
+    } else if (_requiresManualCalibration) {
+        resetState = CsiMotionState::NeedsCalibration;
+    }
+    // Rebuild the whole snapshot. Keeping state/decisionValid from the previous
+    // epoch could expose a definitive false before the new baseline is ready.
+    _snapshot = makeSnapshot(resetState);
+}
+
+CsiMotionSnapshot CsiBandMotionDetector::markDataUnavailable(CsiMotionResetReason reason) {
+    if (!_config.enabled) {
+        _motion = false;
+        _snapshot = makeSnapshot(CsiMotionState::Disabled);
+        return _snapshot;
+    }
+
+    _lastResetReason = reason;
+    _candidateSinceMs = 0;
+    _clearSinceMs = 0;
+    _noisyClearSinceMs = 0;
+    _globalHighSinceMs = 0;
+    _quietSinceMs = 0;
+    _lastBaselineUpdateMs = 0;
+    _quietTracking = false;
+    _baselineUpdateStarted = false;
+    // Missing data is unknown. Preserve the last stable binary decision so a
+    // transport outage can never masquerade as evidence that motion cleared.
+    _snapshot = makeSnapshot(CsiMotionState::Unavailable);
+    return _snapshot;
+}
+
+void CsiBandMotionDetector::restoreRetainedMotion(bool motion) {
+    if (!motion || !_config.enabled) {
+        return;
+    }
+    _motion = true;
+    _requiresManualCalibration = true;
+    _snapshot = makeSnapshot(CsiMotionState::NeedsCalibration);
 }
 
 CsiMotionSnapshot CsiBandMotionDetector::process(const CsiPacket& packet, uint32_t nowMs) {
@@ -190,20 +250,47 @@ CsiMotionSnapshot CsiBandMotionDetector::process(const CsiPacket& packet, uint32
 
     const uint16_t width = static_cast<uint16_t>(packet.len / 2);
     if (width < 8 || width > MAX_CSI_SUBCARRIERS) {
-        _motion = false;
-        _lastResetReason = CsiMotionResetReason::InvalidFrame;
-        _snapshot = makeSnapshot(CsiMotionState::Unavailable);
+        // An invalid frame is an unknown evidence gap.  It must break every
+        // temporal proof: otherwise time spent without usable CSI could count
+        // toward either motion hold or quiet clear-hold and manufacture a
+        // transition on the first valid frame that follows.
+        return markDataUnavailable(CsiMotionResetReason::InvalidFrame);
+    }
+
+    const SourceIdentityResult sourceIdentity = updateSourceIdentity(packet);
+    if (sourceIdentity == SourceIdentityResult::Ignore) {
+        // CSI can contain unrelated ambient senders. Keep the established
+        // source pinned instead of letting A/B interleaving reset calibration
+        // forever. A new source is accepted only after a short consecutive run.
         return _snapshot;
     }
 
     _framesSeen++;
 
-    if (width != _width) {
+    if (sourceIdentity == SourceIdentityResult::Changed) {
+        _width = width;
+        resetBaseline(CsiMotionResetReason::SourceChange);
+        _snapshot.width = width;
+    } else if (width != _width) {
         resetBaselineForWidth(width);
+    } else {
+        const bool frameGap = _hasLastFrame && elapsedMs(nowMs, _lastFrameMs) > kFrameGapResetMs;
+        if (frameGap) {
+            if (_baselineReady) {
+                resetTemporalStateAfterGap();
+            } else {
+                resetBaseline(CsiMotionResetReason::FrameGap);
+            }
+        }
     }
 
+    _lastFrameMs = nowMs;
+    _hasLastFrame = true;
+
     if (_config.bandCount == 0) {
-        _motion = false;
+        if (!_requiresManualCalibration) {
+            _motion = false;
+        }
         _snapshot = makeSnapshot(CsiMotionState::NeedsConfiguration);
         return _snapshot;
     }
@@ -214,10 +301,21 @@ CsiMotionSnapshot CsiBandMotionDetector::process(const CsiPacket& packet, uint32
         accumulateBaseline(width);
         if (_baselineFramesSeen >= _config.baselineFrames) {
             finalizeBaseline(width);
-            _snapshot = makeSnapshot(CsiMotionState::Monitoring);
+            _snapshot = makeSnapshot(
+                _requiresManualCalibration
+                    ? CsiMotionState::NeedsCalibration
+                    : CsiMotionState::Monitoring);
         } else {
-            _snapshot = makeSnapshot(CsiMotionState::Calibrating);
+            _snapshot = makeSnapshot(
+                _requiresManualCalibration
+                    ? CsiMotionState::NeedsCalibration
+                    : CsiMotionState::Calibrating);
         }
+        return _snapshot;
+    }
+
+    if (_requiresManualCalibration) {
+        _snapshot = makeSnapshot(CsiMotionState::NeedsCalibration);
         return _snapshot;
     }
 
@@ -228,34 +326,42 @@ CsiMotionSnapshot CsiBandMotionDetector::process(const CsiPacket& packet, uint32
     const bool broadDisturbance = score.globalHighRatio >= kGlobalHighRatioThreshold;
 
     if (noisy) {
-        _motion = false;
         _noisyClearSinceMs = 0;
         state = CsiMotionState::NoisyEnvironment;
     } else if (_snapshot.state == CsiMotionState::NoisyEnvironment) {
-        _motion = false;
         if (score.score < _config.clearThreshold) {
             if (_noisyClearSinceMs == 0) {
                 _noisyClearSinceMs = nowMs;
             }
-            state = (elapsedMs(nowMs, _noisyClearSinceMs) >= _config.clearHoldMs)
-                        ? CsiMotionState::Monitoring
-                        : CsiMotionState::NoisyEnvironment;
+            if (elapsedMs(nowMs, _noisyClearSinceMs) >= _config.clearHoldMs) {
+                _motion = false;
+                _candidateSinceMs = 0;
+                _clearSinceMs = 0;
+                state = CsiMotionState::Monitoring;
+            } else {
+                state = CsiMotionState::NoisyEnvironment;
+            }
         } else {
             _noisyClearSinceMs = 0;
             state = CsiMotionState::NoisyEnvironment;
         }
     } else if (broadDisturbance) {
-        _motion = false;
         _candidateSinceMs = 0;
         _clearSinceMs = 0;
-        state = CsiMotionState::Monitoring;
+        // A global gain jump must not create motion from a clear state, but it
+        // is also not evidence that already-confirmed motion stopped. Preserve
+        // the last stable decision until quiet evidence satisfies clearHoldMs.
+        state = _motion ? CsiMotionState::MotionConfirmed : CsiMotionState::Monitoring;
     } else {
-        switch (_snapshot.state) {
+        const CsiMotionState decisionState =
+            _motion ? CsiMotionState::MotionConfirmed : _snapshot.state;
+        switch (decisionState) {
             case CsiMotionState::Monitoring:
             case CsiMotionState::Calibrating:
             case CsiMotionState::NeedsConfiguration:
             case CsiMotionState::Disabled:
             case CsiMotionState::Unavailable:
+            case CsiMotionState::NeedsCalibration:
                 if (score.score >= _config.enterThreshold) {
                     _candidateSinceMs = nowMs;
                     _clearSinceMs = 0;
@@ -309,11 +415,25 @@ CsiMotionSnapshot CsiBandMotionDetector::process(const CsiPacket& packet, uint32
         }
     }
 
-    if (_config.autoRecalibration &&
+    const bool stableQuiet =
         !_motion &&
-        state != CsiMotionState::NoisyEnvironment &&
-        score.score < _config.clearThreshold) {
-        updateBaselineEwma(width);
+        state == CsiMotionState::Monitoring &&
+        !broadDisturbance &&
+        score.score < _config.clearThreshold;
+    if (_config.autoRecalibration && stableQuiet) {
+        if (!_quietTracking) {
+            _quietTracking = true;
+            _quietSinceMs = nowMs;
+            _lastBaselineUpdateMs = 0;
+            _baselineUpdateStarted = false;
+        } else if (elapsedMs(nowMs, _quietSinceMs) >= kBaselineAdaptDelayMs) {
+            updateBaselineEwma(width, nowMs);
+        }
+    } else {
+        _quietTracking = false;
+        _quietSinceMs = 0;
+        _lastBaselineUpdateMs = 0;
+        _baselineUpdateStarted = false;
     }
 
     _snapshot = makeSnapshot(state, &score);
@@ -360,6 +480,70 @@ void CsiBandMotionDetector::resetBaselineForWidth(uint16_t width) {
     _snapshot.width = width;
 }
 
+void CsiBandMotionDetector::resetTemporalStateAfterGap() {
+    _lastResetReason = CsiMotionResetReason::FrameGap;
+    _candidateSinceMs = 0;
+    _clearSinceMs = 0;
+    _noisyClearSinceMs = 0;
+    _globalHighSinceMs = 0;
+    _quietSinceMs = 0;
+    _lastBaselineUpdateMs = 0;
+    _quietTracking = false;
+    _baselineUpdateStarted = false;
+    _snapshot = makeSnapshot(
+        _motion ? CsiMotionState::MotionConfirmed : CsiMotionState::Monitoring);
+}
+
+CsiBandMotionDetector::SourceIdentityResult
+CsiBandMotionDetector::updateSourceIdentity(const CsiPacket& packet) {
+    const uint8_t channel = packet.rx_ctrl.channel;
+    const uint8_t secondaryChannel = packet.rx_ctrl.secondary_channel;
+
+    if (!_sourceIdentityKnown) {
+        std::memcpy(_sourceMac, packet.mac, sizeof(_sourceMac));
+        _sourceChannel = channel;
+        _sourceSecondaryChannel = secondaryChannel;
+        _sourceIdentityKnown = true;
+        _pendingSourceFrames = 0;
+        return SourceIdentityResult::Accepted;
+    }
+
+    const bool currentSource =
+        std::memcmp(_sourceMac, packet.mac, sizeof(_sourceMac)) == 0 &&
+        _sourceChannel == channel &&
+        _sourceSecondaryChannel == secondaryChannel;
+    if (currentSource) {
+        _pendingSourceFrames = 0;
+        return SourceIdentityResult::Accepted;
+    }
+
+    const bool samePendingSource =
+        _pendingSourceFrames > 0 &&
+        std::memcmp(_pendingSourceMac, packet.mac, sizeof(_pendingSourceMac)) == 0 &&
+        _pendingSourceChannel == channel &&
+        _pendingSourceSecondaryChannel == secondaryChannel;
+    if (!samePendingSource) {
+        std::memcpy(_pendingSourceMac, packet.mac, sizeof(_pendingSourceMac));
+        _pendingSourceChannel = channel;
+        _pendingSourceSecondaryChannel = secondaryChannel;
+        _pendingSourceFrames = 1;
+        return SourceIdentityResult::Ignore;
+    }
+
+    if (_pendingSourceFrames < kSourceSwitchConfirmFrames) {
+        _pendingSourceFrames++;
+    }
+    if (_pendingSourceFrames < kSourceSwitchConfirmFrames) {
+        return SourceIdentityResult::Ignore;
+    }
+
+    std::memcpy(_sourceMac, _pendingSourceMac, sizeof(_sourceMac));
+    _sourceChannel = _pendingSourceChannel;
+    _sourceSecondaryChannel = _pendingSourceSecondaryChannel;
+    _pendingSourceFrames = 0;
+    return SourceIdentityResult::Changed;
+}
+
 void CsiBandMotionDetector::clearBaselineArrays() {
     if (!_storage) {
         return;
@@ -368,6 +552,7 @@ void CsiBandMotionDetector::clearBaselineArrays() {
     std::memset(_storage->mean, 0, sizeof(_storage->mean));
     std::memset(_storage->m2, 0, sizeof(_storage->m2));
     std::memset(_storage->noise, 0, sizeof(_storage->noise));
+    std::memset(_storage->baselineCount, 0, sizeof(_storage->baselineCount));
     std::memset(_storage->valid, 0, sizeof(_storage->valid));
     std::memset(_storage->topScores, 0, sizeof(_storage->topScores));
 }
@@ -381,6 +566,10 @@ void CsiBandMotionDetector::computeEnergy(const CsiPacket& packet, uint16_t widt
     const float gainSquared = gain * gain;
 
     for (uint16_t i = 0; i < width; ++i) {
+        if (packet.firstWordInvalid && i < 2) {
+            _storage->energy[i] = NAN;
+            continue;
+        }
         const float re = static_cast<float>(packet.buf[2 * i]);
         const float im = static_cast<float>(packet.buf[(2 * i) + 1]);
         _storage->energy[i] = (re * re + im * im) * gainSquared;
@@ -389,9 +578,13 @@ void CsiBandMotionDetector::computeEnergy(const CsiPacket& packet, uint16_t widt
 
 void CsiBandMotionDetector::accumulateBaseline(uint16_t width) {
     _baselineFramesSeen++;
-    const float n = static_cast<float>(_baselineFramesSeen);
     for (uint16_t i = 0; i < width; ++i) {
         const float value = _storage->energy[i];
+        if (!std::isfinite(value)) {
+            continue;
+        }
+        const uint16_t count = ++_storage->baselineCount[i];
+        const float n = static_cast<float>(count);
         const float delta = value - _storage->mean[i];
         _storage->mean[i] += delta / n;
         const float delta2 = value - _storage->mean[i];
@@ -401,15 +594,20 @@ void CsiBandMotionDetector::accumulateBaseline(uint16_t width) {
 
 void CsiBandMotionDetector::finalizeBaseline(uint16_t width) {
     _baselineReady = true;
+    const uint16_t minSamples =
+        _baselineFramesSeen > 2 ? static_cast<uint16_t>(_baselineFramesSeen / 2) : 1;
     for (uint16_t i = 0; i < width; ++i) {
-        const float variance = (_baselineFramesSeen > 1)
-                                   ? (_storage->m2[i] / static_cast<float>(_baselineFramesSeen - 1))
+        const uint16_t count = _storage->baselineCount[i];
+        const float variance = (count > 1)
+                                   ? (_storage->m2[i] / static_cast<float>(count - 1))
                                    : 0.0f;
         const float noise = std::sqrt(variance);
         _storage->noise[i] = std::isfinite(noise) ? clampValue(noise, _config.minNoise, 1000000.0f)
                                                   : _config.minNoise;
         _storage->valid[i] =
-            (std::isfinite(_storage->mean[i]) && _storage->mean[i] >= _config.minEnergy) ? 1u : 0u;
+            (count >= minSamples &&
+             std::isfinite(_storage->mean[i]) &&
+             _storage->mean[i] >= _config.minEnergy) ? 1u : 0u;
     }
 }
 
@@ -493,7 +691,8 @@ bool CsiBandMotionDetector::updateNoisyGate(const ScoreResult& score, uint32_t n
         return true;
     }
 
-    if (score.score >= _config.noisyScoreThreshold) {
+    if (score.score >= _config.noisyScoreThreshold &&
+        score.globalHighRatio >= kGlobalHighRatioThreshold) {
         _globalHighSinceMs = 0;
         return true;
     }
@@ -512,7 +711,25 @@ bool CsiBandMotionDetector::updateNoisyGate(const ScoreResult& score, uint32_t n
     return false;
 }
 
-void CsiBandMotionDetector::updateBaselineEwma(uint16_t width) {
+void CsiBandMotionDetector::updateBaselineEwma(uint16_t width, uint32_t nowMs) {
+    if (!_baselineUpdateStarted) {
+        _baselineUpdateStarted = true;
+        _lastBaselineUpdateMs = nowMs;
+        return;
+    }
+
+    uint32_t deltaMs = elapsedMs(nowMs, _lastBaselineUpdateMs);
+    _lastBaselineUpdateMs = nowMs;
+    if (deltaMs == 0) {
+        return;
+    }
+    if (deltaMs > kBaselineAdaptMaxStepMs) {
+        deltaMs = kBaselineAdaptMaxStepMs;
+    }
+    const float alpha = 1.0f - std::exp(
+        -static_cast<float>(deltaMs) /
+        static_cast<float>(kBaselineAdaptTimeConstantMs));
+
     for (uint16_t i = 0; i < width; ++i) {
         if (_storage->valid[i] == 0) {
             continue;
@@ -522,10 +739,10 @@ void CsiBandMotionDetector::updateBaselineEwma(uint16_t width) {
             continue;
         }
         const float delta = energy - _storage->mean[i];
-        _storage->mean[i] += kBaselineEwmaAlpha * delta;
+        _storage->mean[i] += alpha * delta;
         const float absDelta = std::fabs(delta);
         _storage->noise[i] =
-            clampValue(((1.0f - kBaselineEwmaAlpha) * _storage->noise[i]) + (kBaselineEwmaAlpha * absDelta),
+            clampValue(((1.0f - alpha) * _storage->noise[i]) + (alpha * absDelta),
                        _config.minNoise,
                        1000000.0f);
     }
@@ -534,20 +751,22 @@ void CsiBandMotionDetector::updateBaselineEwma(uint16_t width) {
 CsiMotionSnapshot CsiBandMotionDetector::makeSnapshot(CsiMotionState state, const ScoreResult* score) {
     CsiMotionSnapshot snapshot;
     snapshot.state = state;
-    snapshot.motion = _motion && state == CsiMotionState::MotionConfirmed;
+    snapshot.motion = _motion;
+    snapshot.decisionValid = isCsiMotionDecisionValid(state);
+    snapshot.hasFrame = _hasLastFrame;
     snapshot.baselineReady = _baselineReady;
     snapshot.noisy = state == CsiMotionState::NoisyEnvironment;
-    snapshot.needsCalibration =
-        _config.enabled &&
-        _config.bandCount > 0 &&
-        !_baselineReady &&
-        state != CsiMotionState::Unavailable;
+    // Automatic startup/config calibration is normal progress. This flag is
+    // reserved for the fail-safe state that requires an operator-triggered
+    // quiet-room calibration before a retained active decision may clear.
+    snapshot.needsCalibration = state == CsiMotionState::NeedsCalibration;
     snapshot.score = score ? score->score : 0.0f;
     snapshot.confidence =
         (_config.enterThreshold > 0.0f)
             ? clampValue(snapshot.score / _config.enterThreshold, 0.0f, 1.0f)
             : 0.0f;
     snapshot.framesSeen = _framesSeen;
+    snapshot.lastFrameMs = _lastFrameMs;
     snapshot.width = _width;
     snapshot.bandCount = _config.bandCount;
     snapshot.lastResetReason = _lastResetReason;

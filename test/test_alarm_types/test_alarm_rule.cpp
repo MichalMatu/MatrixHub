@@ -265,6 +265,15 @@ void test_addShellyDevice_empty_fails() {
     TEST_ASSERT_EQUAL(0, rule.shellyDeviceCount);
 }
 
+void test_addShellyDevice_rejects_duplicate_and_overlong_id() {
+    AlarmRule rule;
+    TEST_ASSERT_TRUE(rule.addShellyDevice("shelly-001"));
+    TEST_ASSERT_FALSE(rule.addShellyDevice("shelly-001"));
+    TEST_ASSERT_FALSE(
+        rule.addShellyDevice("12345678901234567890123456789012"));
+    TEST_ASSERT_EQUAL(1, rule.shellyDeviceCount);
+}
+
 void test_clearShellyDevices() {
     AlarmRule rule;
     rule.addShellyDevice("shelly-001");
@@ -355,6 +364,7 @@ void run_all_tests() {
     RUN_TEST(test_addShellyDevice_max_limit);
     RUN_TEST(test_addShellyDevice_null_fails);
     RUN_TEST(test_addShellyDevice_empty_fails);
+    RUN_TEST(test_addShellyDevice_rejects_duplicate_and_overlong_id);
     RUN_TEST(test_clearShellyDevices);
     
     // Structure size tests

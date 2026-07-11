@@ -5,10 +5,12 @@ import type { WifiSensingApiService } from '$lib/services/api/connectivity/WifiS
 import type {
 	CsiAlarmBand,
 	CsiAlarmSettings,
-	CsiMotionStatus
+	CsiMotionStatus,
+	CsiRuntimeMetrics
 } from '$lib/types/connectivity/wifiSensing';
 import { toUserRequestErrorMessage } from '$lib/utils';
 import * as m from '$lib/paraglide/messages.js';
+import { canCalibrateCsiMotion } from './csiMotionPresentation';
 
 const DEFAULT_CSI_ALARM_SETTINGS: CsiAlarmSettings = {
 	enabled: false,
@@ -95,6 +97,7 @@ export function useCsiAlarmConfig(getApi: () => WifiSensingApiService) {
 	let settings = $state<CsiAlarmSettings>(cloneSettings(DEFAULT_CSI_ALARM_SETTINGS));
 	let savedSettings = $state<CsiAlarmSettings | null>(null);
 	let motionStatus = $state<CsiMotionStatus | null>(null);
+	let csiRuntime = $state<CsiRuntimeMetrics | null>(null);
 	let loading = $state(false);
 	let saving = $state(false);
 	let calibrating = $state(false);
@@ -105,6 +108,7 @@ export function useCsiAlarmConfig(getApi: () => WifiSensingApiService) {
 		JSON.stringify(normalizeCsiAlarmSettings(settings)) !==
 			JSON.stringify(savedSettings ? normalizeCsiAlarmSettings(savedSettings) : null)
 	);
+	const calibrationAvailable = $derived(canCalibrateCsiMotion(csiRuntime, hasChanges, saving));
 
 	function setSettings(next: CsiAlarmSettings) {
 		settings = cloneSettings(normalizeCsiAlarmSettings(next));
@@ -131,8 +135,10 @@ export function useCsiAlarmConfig(getApi: () => WifiSensingApiService) {
 	async function refreshStatus() {
 		try {
 			const status = await getApi().getStatus();
-			motionStatus = status.csi?.motion ?? null;
+			csiRuntime = status.csi ?? null;
+			motionStatus = csiRuntime?.motion ?? null;
 		} catch {
+			csiRuntime = null;
 			motionStatus = null;
 		}
 	}
@@ -234,6 +240,9 @@ export function useCsiAlarmConfig(getApi: () => WifiSensingApiService) {
 		},
 		get motionStatus() {
 			return motionStatus;
+		},
+		get calibrationAvailable() {
+			return calibrationAvailable;
 		},
 		get loading() {
 			return loading;

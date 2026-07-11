@@ -17,7 +17,10 @@ void ImuServicesInitializer::initialize(State state) {
         state.imuService.get(),
         state.imuManager.get(),
         state.alarmService);
-    state.imuRuntimeService->begin();
+    const bool retainedAlarmTriggered =
+        state.alarmService &&
+        state.alarmService->isSourceTriggered(ALARMS::AlarmSource::ImuTamper);
+    state.imuRuntimeService->begin(retainedAlarmTriggered);
 
     LOGI("IMU services initialized (idle runtime)");
 }

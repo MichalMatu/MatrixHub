@@ -144,6 +144,23 @@ void test_wifi_csi_motion_does_not_trigger_when_clear() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, res.currentValue);
 }
 
+void test_wifi_csi_motion_cannot_be_inverted_by_stale_rule_operator() {
+    AlarmRule rule = createRule(AlarmSource::WifiCsiMotion, AlarmOperator::Below, 0.5f);
+    AlarmRuntimeState state;
+    memset(&state, 0, sizeof(state));
+
+    AlarmInputData detected;
+    detected.wifiCsiMotion = 1.0f;
+    EvaluationResult result = AlarmEvaluator::evaluate(rule, detected, state, 1000);
+    TEST_ASSERT_TRUE(result.triggered);
+
+    AlarmInputData clear;
+    clear.wifiCsiMotion = 0.0f;
+    result = AlarmEvaluator::evaluate(rule, clear, state, 2000);
+    TEST_ASSERT_FALSE(result.triggered);
+    TEST_ASSERT_TRUE(result.stateChanged);
+}
+
 void test_imu_tamper_triggers_above_half_when_detected() {
     AlarmRule rule = createRule(AlarmSource::ImuTamper, AlarmOperator::Above, 0.5f);
     AlarmInputData data;
@@ -220,6 +237,54 @@ void test_cooldown_logic() {
     TEST_ASSERT_EQUAL_UINT32(161000, state.lastTriggeredMs); // Updated
 }
 
+void test_retained_active_alarm_anchors_new_boot_epoch_without_reminder() {
+    AlarmRule rule = createRule(AlarmSource::Temperature, AlarmOperator::Above, 30.0f, 60);
+    AlarmRuntimeState state;
+    memset(&state, 0, sizeof(state));
+
+    // AlarmRuleManager preserves the stable active state across deep sleep,
+    // but clears the old boot's millis()-based timestamp.
+    state.previouslyTriggered = true;
+    state.initialized = true;
+    state.lastTriggeredMs = 0;
+
+    EvaluationResult first = AlarmEvaluator::evaluate(rule, createData(31.0f), state, 250);
+    TEST_ASSERT_TRUE(first.triggered);
+    TEST_ASSERT_FALSE(first.stateChanged);
+    TEST_ASSERT_FALSE(first.shouldNotify);
+    TEST_ASSERT_EQUAL_UINT32(250, state.lastTriggeredMs);
+
+    EvaluationResult beforeBoundary =
+        AlarmEvaluator::evaluate(rule, createData(31.0f), state, 60249);
+    TEST_ASSERT_FALSE(beforeBoundary.shouldNotify);
+    TEST_ASSERT_EQUAL_UINT32(250, state.lastTriggeredMs);
+
+    EvaluationResult atBoundary =
+        AlarmEvaluator::evaluate(rule, createData(31.0f), state, 60250);
+    TEST_ASSERT_TRUE(atBoundary.shouldNotify);
+    TEST_ASSERT_EQUAL_UINT32(60250, state.lastTriggeredMs);
+}
+
+void test_rising_edge_at_millis_zero_still_notifies_once() {
+    AlarmRule rule = createRule(AlarmSource::Temperature, AlarmOperator::Above, 30.0f, 60);
+    AlarmRuntimeState state;
+    memset(&state, 0, sizeof(state));
+
+    EvaluationResult rising = AlarmEvaluator::evaluate(rule, createData(31.0f), state, 0);
+    TEST_ASSERT_TRUE(rising.stateChanged);
+    TEST_ASSERT_TRUE(rising.shouldNotify);
+    TEST_ASSERT_EQUAL_UINT32(0, state.lastTriggeredMs);
+
+    // The coordinator marks the runtime state initialized after the pass. The
+    // zero timestamp must not turn the next steady-state sample into a second
+    // notification.
+    state.initialized = true;
+    EvaluationResult steady = AlarmEvaluator::evaluate(rule, createData(31.0f), state, 10);
+    TEST_ASSERT_FALSE(steady.stateChanged);
+    TEST_ASSERT_FALSE(steady.shouldNotify);
+    TEST_ASSERT_EQUAL_UINT32(10, state.lastTriggeredMs);
+}
+
 void test_cooldown_reset_on_clear() {
     AlarmRule rule = createRule(AlarmSource::Temperature, AlarmOperator::Above, 30.0f, 60);
     AlarmRuntimeState state;
@@ -268,6 +333,26 @@ void test_millis_overflow_cooldown() {
     TEST_ASSERT_TRUE(res3.shouldNotify);
 }
 
+void test_cooldown_exact_boundary_after_millis_wrap() {
+    AlarmRule rule = createRule(AlarmSource::Temperature, AlarmOperator::Above, 30.0f, 1);
+    AlarmRuntimeState state;
+    memset(&state, 0, sizeof(state));
+
+    constexpr uint32_t beforeWrap = 0xFFFFFF00;
+    EvaluationResult first = AlarmEvaluator::evaluate(rule, createData(31.0f), state, beforeWrap);
+    TEST_ASSERT_TRUE(first.shouldNotify);
+
+    // 256 ms elapse before millis() reaches zero. Values 743 and 744 are
+    // therefore exactly 999 ms and 1000 ms after the first notification.
+    EvaluationResult beforeBoundary =
+        AlarmEvaluator::evaluate(rule, createData(31.0f), state, 743);
+    TEST_ASSERT_FALSE(beforeBoundary.shouldNotify);
+
+    EvaluationResult atBoundary =
+        AlarmEvaluator::evaluate(rule, createData(31.0f), state, 744);
+    TEST_ASSERT_TRUE(atBoundary.shouldNotify);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -279,11 +364,15 @@ int main(int argc, char **argv) {
     RUN_TEST(test_ble_rssi_source_value);
     RUN_TEST(test_wifi_csi_motion_triggers_above_half_when_detected);
     RUN_TEST(test_wifi_csi_motion_does_not_trigger_when_clear);
+    RUN_TEST(test_wifi_csi_motion_cannot_be_inverted_by_stale_rule_operator);
     RUN_TEST(test_imu_tamper_triggers_above_half_when_detected);
     RUN_TEST(test_gpio_digital_triggers_above_half_when_true);
     RUN_TEST(test_state_change_detection);
     RUN_TEST(test_cooldown_logic);
+    RUN_TEST(test_retained_active_alarm_anchors_new_boot_epoch_without_reminder);
+    RUN_TEST(test_rising_edge_at_millis_zero_still_notifies_once);
     RUN_TEST(test_cooldown_reset_on_clear);
     RUN_TEST(test_millis_overflow_cooldown);
+    RUN_TEST(test_cooldown_exact_boundary_after_millis_wrap);
     return UNITY_END();
 }

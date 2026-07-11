@@ -11,6 +11,7 @@ public:
     ImuAlarmStatus update(const ImuAlarmConfig& config,
                           const ImuMetrics& metrics,
                           uint32_t nowMs);
+    void restoreRetainedTrigger(bool triggered);
     void reset();
 
 private:

@@ -92,18 +92,37 @@ void hydratePsramOnlyConfigIfNeeded() {
     }
 
     const uint32_t loadStartMs = millis();
-    const bool hydrated = CONFIG::loadPsramOnly(LittleFS);
+    constexpr uint8_t kHydrationAttempts = 3;
+    bool hydrated = false;
+    CONFIG::LoadFailure loadFailure = CONFIG::LoadFailure::None;
+    for (uint8_t attempt = 0; attempt < kHydrationAttempts; ++attempt) {
+        loadFailure = CONFIG::LoadFailure::None;
+        hydrated = CONFIG::loadPsramOnly(LittleFS, &loadFailure);
+        if (hydrated) {
+            break;
+        }
+
+        // Only transient allocation/lock-style failures are worth another
+        // immediate attempt. Missing, malformed, or safety-critical content is
+        // deterministic and must remain available for diagnosis/recovery.
+        if (loadFailure == CONFIG::LoadFailure::NotFound ||
+            loadFailure == CONFIG::LoadFailure::InvalidDocument ||
+            loadFailure == CONFIG::LoadFailure::CriticalSection) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
     LOGI("[Phase1] Warm boot PSRAM-only hydration: %s (%lu ms)",
-         hydrated ? "OK" : "SKIPPED",
+         hydrated ? "OK" : "FAILED",
          millis() - loadStartMs);
     if (!hydrated) {
-        // PSRAM-only hydration is just the fast path. Fall back to a full FS reload
-        // instead of continuing with a partially restored warm-boot configuration.
-        LOGW("[Phase1] Warm boot hydration incomplete - falling back to full FS reload");
-        if (!RTC::reloadAllFromFS(LittleFS)) {
-            LOGE("[Phase1] Warm boot full FS reload fallback failed");
-            std::abort();
-        }
+        // Never call reloadAllFromFS() here: it starts with initDefaults() and
+        // would erase the valid RTC-retained alarm summary before a retry could
+        // map it by semantic identity. Preserve the retained evidence and stop
+        // boot instead of manufacturing a clear edge from defaults.
+        LOGE("[Phase1] Warm boot PSRAM hydration failed (reason=%u); retained alarm state preserved",
+             static_cast<unsigned>(loadFailure));
+        std::abort();
     }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <FS.h>
 #include <Arduino.h>
 
@@ -17,6 +18,9 @@ void ensureOwnedService(std::unique_ptr<ShellyService>& slot,
 void loadConfig(ShellyService* service);
 size_t deviceCount(const ShellyService* service);
 void beginService(ShellyService* service);
+void reconcileRuntimeIfDue(ShellyService* service, uint32_t nowMs);
+void setConfigChangeCallback(ShellyService* service,
+                             std::function<void()> callback);
 bool runtimeIsRunning(const ShellyService* service);
 void runtimeStop(ShellyService* service);
 

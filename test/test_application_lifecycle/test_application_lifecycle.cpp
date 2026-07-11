@@ -54,6 +54,11 @@ inline int powerLoopTickCalls = 0;
 inline int bleLoopCalls = 0;
 inline int systemHealthUpdateCalls = 0;
 inline int alarmProcessPendingCalls = 0;
+inline int shellyRuntimeReconcileCalls = 0;
+inline uint32_t lastShellyRuntimeReconcileMs = 0;
+inline int wifiSensingReconcileCalls = 0;
+inline uint32_t lastWifiSensingReconcileMs = 0;
+inline int deferredApiReconcileCalls = 0;
 inline int imuRuntimeTickCalls = 0;
 inline int udpUpdateCalls = 0;
 inline int usbTerminalLoopCalls = 0;
@@ -104,6 +109,11 @@ void reset() {
     bleLoopCalls = 0;
     systemHealthUpdateCalls = 0;
     alarmProcessPendingCalls = 0;
+    shellyRuntimeReconcileCalls = 0;
+    lastShellyRuntimeReconcileMs = 0;
+    wifiSensingReconcileCalls = 0;
+    lastWifiSensingReconcileMs = 0;
+    deferredApiReconcileCalls = 0;
     imuRuntimeTickCalls = 0;
     udpUpdateCalls = 0;
     usbTerminalLoopCalls = 0;
@@ -113,6 +123,7 @@ void reset() {
     clearRawObject<POWER::PowerManager>();
     clearRawObject<BLE::BleService>();
     clearRawObject<ALARMS::AlarmService>();
+    clearRawObject<WIFISENSING::WifiSensingSettings>();
     clearRawObject<IMU::ImuRuntimeService>();
     clearRawObject<UDPPUSH::UdpPusher>();
     clearRawObject<USB_TERMINAL::UsbTerminalService>();
@@ -125,6 +136,12 @@ void wireLoopServices(ServiceRegistry& services) {
         std::unique_ptr<BLE::BleService>(reinterpret_cast<BLE::BleService*>(rawStorage<BLE::BleService>()));
     new (&services._alarmService)
         std::unique_ptr<ALARMS::AlarmService>(reinterpret_cast<ALARMS::AlarmService*>(rawStorage<ALARMS::AlarmService>()));
+    new (&services._shellyService)
+        std::unique_ptr<SHELLY::ShellyService>(
+            reinterpret_cast<SHELLY::ShellyService*>(0x2020));
+    new (&services._wifiSensingSettings)
+        std::unique_ptr<WIFISENSING::WifiSensingSettings>(
+            reinterpret_cast<WIFISENSING::WifiSensingSettings*>(rawStorage<WIFISENSING::WifiSensingSettings>()));
     new (&services._imuRuntimeService)
         std::unique_ptr<IMU::ImuRuntimeService>(
             reinterpret_cast<IMU::ImuRuntimeService*>(rawStorage<IMU::ImuRuntimeService>()));
@@ -268,6 +285,21 @@ uint8_t ALARMS::AlarmService::processPending() {
     return 0;
 }
 
+void SHELLY::reconcileRuntimeIfDue(ShellyService* service, uint32_t nowMs) {
+    TEST_ASSERT_NOT_NULL(service);
+    TEST_APPLICATION::shellyRuntimeReconcileCalls++;
+    TEST_APPLICATION::lastShellyRuntimeReconcileMs = nowMs;
+}
+
+void WIFISENSING::WifiSensingSettings::reconcileRuntimeIfDue(uint32_t nowMs) {
+    TEST_APPLICATION::wifiSensingReconcileCalls++;
+    TEST_APPLICATION::lastWifiSensingReconcileMs = nowMs;
+}
+
+void ServiceRegistry::reconcileDeferredApiLifecycle() {
+    TEST_APPLICATION::deferredApiReconcileCalls++;
+}
+
 void IMU::ImuRuntimeService::tick() {
     TEST_APPLICATION::imuRuntimeTickCalls++;
 }
@@ -340,6 +372,7 @@ void test_runLoopCore_drives_registry_owned_runtime_services() {
     PsychicHttpsServer server;
     ESP32SvelteKit framework(&server);
     TEST_APPLICATION::wireLoopServices(services);
+    TEST_STUBS::ARDUINO::millisValue = 1234;
 
     APP_INTERNAL::runLoopCore(services, buttonHandler, framework);
 
@@ -350,6 +383,11 @@ void test_runLoopCore_drives_registry_owned_runtime_services() {
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::systemHealthUpdateCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::imuRuntimeTickCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::alarmProcessPendingCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::shellyRuntimeReconcileCalls);
+    TEST_ASSERT_EQUAL_UINT32(1234, TEST_APPLICATION::lastShellyRuntimeReconcileMs);
+    TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::wifiSensingReconcileCalls);
+    TEST_ASSERT_EQUAL_UINT32(1234, TEST_APPLICATION::lastWifiSensingReconcileMs);
+    TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::deferredApiReconcileCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::udpUpdateCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::usbTerminalLoopCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_APPLICATION::maintenanceUpdateCalls);

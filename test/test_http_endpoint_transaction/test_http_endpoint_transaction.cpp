@@ -95,6 +95,7 @@ void MatrixMenuService::invalidateCache() {}
 namespace CONFIG {
 bool shouldSaveSucceed = true;
 bool shouldSaveAlarmRulesSucceed = true;
+int failSaveAlarmRulesOnCall = -1;
 RTC::AlarmRulesData lastSavedAlarmRules{};
 int saveAlarmRulesCallCount = 0;
 
@@ -107,6 +108,9 @@ bool saveWithAlarmRules(FS& fs, const RTC::AlarmRulesData& alarmRules) {
     (void)fs;
     lastSavedAlarmRules = alarmRules;
     ++saveAlarmRulesCallCount;
+    if (saveAlarmRulesCallCount == failSaveAlarmRulesOnCall) {
+        return false;
+    }
     return shouldSaveAlarmRulesSucceed;
 }
 }  // namespace CONFIG
@@ -561,6 +565,7 @@ void resetRtcStore() {
     RTC::lockCallCount = 0;
     CONFIG::shouldSaveSucceed = true;
     CONFIG::shouldSaveAlarmRulesSucceed = true;
+    CONFIG::failSaveAlarmRulesOnCall = -1;
     CONFIG::lastSavedAlarmRules = RTC::AlarmRulesData{};
     CONFIG::saveAlarmRulesCallCount = 0;
     SYSTEM::HEARTBEAT_CONFIG::heartbeatState = RTC::HeartbeatData{};
@@ -1428,6 +1433,52 @@ void test_alarm_settings_service_rolls_back_store_and_fs_on_apply_failure() {
     TEST_ASSERT_TRUE(snapshot.rules[0].enabled);
 }
 
+void test_alarm_settings_rollback_reapplies_runtime_when_fs_restore_fails() {
+    RTC::AlarmRulesData initialState{};
+    initialState.ruleCount = 1;
+    strncpy(initialState.rules[0].id,
+            "alarm-old",
+            sizeof(initialState.rules[0].id));
+    strncpy(initialState.rules[0].name,
+            "Old rule",
+            sizeof(initialState.rules[0].name));
+    initialState.rules[0].enabled = true;
+    ALARMS::RULES_CONFIG::alarmRulesState = initialState;
+
+    int applyCalls = 0;
+    RTC::AlarmRulesData lastApplied{};
+    FS fs;
+    ALARMS::AlarmSettingsService service(
+        &fs,
+        [&](const RTC::AlarmRulesData& state) {
+            ++applyCalls;
+            lastApplied = state;
+            return applyCalls != 1;
+        });
+    CONFIG::failSaveAlarmRulesOnCall = 2;
+
+    const StateTransactionResult result = service.updateAndPropagate(
+        [&](RTC::AlarmRulesData& state) {
+            state = RTC::AlarmRulesData{};
+            state.ruleCount = 1;
+            strncpy(state.rules[0].id,
+                    "alarm-new",
+                    sizeof(state.rules[0].id));
+            strncpy(state.rules[0].name,
+                    "New rule",
+                    sizeof(state.rules[0].name));
+            return StateUpdateResult::CHANGED;
+        },
+        "test");
+
+    TEST_ASSERT_EQUAL(StateUpdateResult::ERROR, result.outcome);
+    TEST_ASSERT_EQUAL(2, CONFIG::saveAlarmRulesCallCount);
+    TEST_ASSERT_EQUAL(2, applyCalls);
+    TEST_ASSERT_EQUAL_STRING("alarm-old", lastApplied.rules[0].id);
+    TEST_ASSERT_EQUAL_STRING(
+        "alarm-old", ALARMS::RULES_CONFIG::alarmRulesState.rules[0].id);
+}
+
 void test_alarm_settings_validation_reports_duplicate_rule_ids() {
     JsonDocument doc;
     JsonObject root = doc.to<JsonObject>();
@@ -1557,6 +1608,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_settings_service_rejects_sleep_without_wake_source);
     RUN_TEST(test_power_settings_validation_reports_missing_wake_source);
     RUN_TEST(test_alarm_settings_service_rolls_back_store_and_fs_on_apply_failure);
+    RUN_TEST(test_alarm_settings_rollback_reapplies_runtime_when_fs_restore_fails);
     RUN_TEST(test_alarm_settings_validation_reports_duplicate_rule_ids);
     RUN_TEST(test_alarm_settings_update_state_returns_unchanged_for_identical_payload);
     RUN_TEST(test_matrix_settings_service_rolls_back_rtc_and_icons_on_save_failure);

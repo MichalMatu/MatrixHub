@@ -312,6 +312,11 @@ public:
 
   API::NotificationsApiService* getNotificationsApiService() const;
 
+  // Retries durable API lifecycle requests after transient task allocation or
+  // lock contention without exposing the private ApiServices container.
+  void reconcileDeferredApiLifecycle();
+  void shutdownWifiSensingApiLifecycle();
+
   SYSTEM::HeartbeatSettingsService* getHeartbeatSettingsService() const {
       return _heartbeatSettings.get();
   }
@@ -358,6 +363,8 @@ private:
   void initializeInteractionServices();
   void initializeNotificationServices(SemaphoreHandle_t notifMutex);
   void initializeApiServices();
+  bool wireCsiAlarmCallback();
+  bool wireGpioAlarmCallback();
   void wireRuntimeCallbacks();
 
   SemaphoreHandle_t _fsMutex = nullptr;

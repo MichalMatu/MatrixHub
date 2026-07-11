@@ -9,6 +9,7 @@ namespace CSI {
 
 constexpr uint8_t MAX_CSI_ALARM_BANDS = 4;
 constexpr uint16_t MAX_CSI_SUBCARRIERS = MAX_CSI_DATA_LEN / 2;
+constexpr uint32_t CSI_MOTION_STALE_AFTER_MS = 5000;
 
 static_assert(MAX_CSI_ALARM_BANDS == 4, "CSI alarm UI/config assumes max 4 bands");
 static_assert(MAX_CSI_SUBCARRIERS <= 256, "Review CSI motion storage before increasing CSI width");
@@ -27,6 +28,7 @@ enum class CsiMotionState : uint8_t {
     MotionConfirmed = 5,
     NoisyEnvironment = 6,
     Unavailable = 7,
+    NeedsCalibration = 8,
 };
 
 enum class CsiMotionResetReason : uint8_t {
@@ -37,6 +39,9 @@ enum class CsiMotionResetReason : uint8_t {
     WidthChange = 4,
     UnavailableStorage = 5,
     InvalidFrame = 6,
+    FrameGap = 7,
+    SourceChange = 8,
+    GainStabilized = 9,
 };
 
 struct CsiMotionSensitivityPreset {
@@ -79,13 +84,19 @@ struct CsiMotionConfig {
 
 struct CsiMotionSnapshot {
     CsiMotionState state = CsiMotionState::Disabled;
+    // Last stable binary decision. During noisy/unavailable states this value
+    // is retained, but decisionValid is false so consumers do not mistake an
+    // unknown signal for a definitive clear edge.
     bool motion = false;
+    bool decisionValid = false;
+    bool hasFrame = false;
     bool baselineReady = false;
     bool noisy = false;
     bool needsCalibration = false;
     float score = 0.0f;
     float confidence = 0.0f;
     uint32_t framesSeen = 0;
+    uint32_t lastFrameMs = 0;
     uint16_t width = 0;
     uint16_t selectedCarrierCount = 0;
     uint16_t validCarrierCount = 0;
@@ -94,6 +105,11 @@ struct CsiMotionSnapshot {
     uint8_t visualizationBinCount = 0;
     CsiMotionResetReason lastResetReason = CsiMotionResetReason::None;
 };
+
+inline bool isCsiMotionDecisionValid(CsiMotionState state) {
+    return state == CsiMotionState::Monitoring ||
+           state == CsiMotionState::MotionConfirmed;
+}
 
 const char* toString(CsiMotionState state);
 const char* toString(CsiMotionResetReason reason);

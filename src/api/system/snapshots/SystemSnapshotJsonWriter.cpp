@@ -79,6 +79,8 @@ void SystemSnapshotJsonWriter::writeSystemInfo(
     writer.key(CONFIG::Keys::kFirmwareVersion); writer.string(snapshot.firmwareVersion); writer.raw(",");
     writer.key(CONFIG::Keys::kFirmwareName); writer.string(snapshot.firmwareName); writer.raw(",");
     writer.key(CONFIG::Keys::kFirmwareBuiltTarget); writer.string(snapshot.buildTarget); writer.raw(",");
+    writer.key(CONFIG::Keys::kFirmwareCommit); writer.string(snapshot.firmwareCommit); writer.raw(",");
+    writer.key(CONFIG::Keys::kFirmwareDirty); writer.value(snapshot.firmwareDirty); writer.raw(",");
     writer.key(CONFIG::Keys::kCpuFreqMhz); writer.value(snapshot.cpuFreqMhz); writer.raw(",");
     writer.key(CONFIG::Keys::kCpuType); writer.string(snapshot.chipModel); writer.raw(",");
     writer.key(CONFIG::Keys::kCpuRev); writer.value(snapshot.cpuRevision); writer.raw(",");

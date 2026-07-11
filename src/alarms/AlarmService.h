@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include "core/AlarmRuleManager.h"
 #include "core/AlarmCoordinator.h"
+#include "core/CsiAlarmEdgeLatch.h"
+#include "core/GpioAlarmEdgeMailbox.h"
 #include "types/AlarmInputData.h"
 #include <utility>
 #include <freertos/FreeRTOS.h>
@@ -30,17 +32,6 @@ public:
     bool begin();
     
     /**
-     * @brief Reload rules from storage.
-     * Use this after modifying rules via API.
-     */
-    bool reloadRules();
-    
-    /**
-     * @brief Reset runtime state (cooldowns, triggers).
-     */
-    void resetRuntimeState();
-
-    /**
      * @brief Re-apply current latched LED/Matrix state.
      * Useful when display settings (mode, brightness) change.
      */
@@ -65,7 +56,9 @@ public:
      * central caller decide when the alarm pipeline should actually run.
      */
     bool submitInput(const AlarmInputData& input);
+    bool submitGpioInput(const char* gpioId, bool logicalValue);
     float getLastImuTamperValue() const;
+    bool isSourceTriggered(AlarmSource source);
 
     /**
      * @brief Execute one pending alarm evaluation pass, if new input arrived.
@@ -80,11 +73,21 @@ public:
      */
     void setStateChangeCallback(AlarmStateCallback cb) { _coordinator.setStateChangeCallback(cb); }
     void setShellyActionExecutor(ShellyActionExecutor executor);
+    void reconcileShellyOutputs();
     void setNotificationBackend(AlarmNotificationBackend backend) { _coordinator.setNotificationBackend(std::move(backend)); }
     void setGpioService(GPIO::GpioService* service) { _coordinator.setGpioService(service); }
     
     // Direct access to manager if needed (e.g. for locking)
     AlarmRuleManager& getManager() { return _manager; }
+
+#ifdef UNIT_TEST
+    bool enqueueShellyReconcileForTest(const char* deviceId) {
+        return _coordinator.enqueueShellyReconcileForTest(deviceId);
+    }
+    uint8_t pendingShellyReconcileCountForTest() {
+        return _coordinator.pendingShellyReconcileCountForTest();
+    }
+#endif
 
     // Inject Dependencies
     AlarmService(MATRIX_MANAGER::MatrixManagerService* matrixManager, BLE::BleService* ble);
@@ -99,8 +102,6 @@ private:
 
     AlarmRuleManager _manager;
     AlarmCoordinator _coordinator;
-    ShellyActionExecutor _shellyActionExecutor = nullptr;
-
     // Cache the last merged view from all producers. SensorTaskLoop and
     // WifiSensingTaskRunner update different fields, so we keep one combined
     // snapshot and evaluate alarms against that coherent state later.
@@ -110,6 +111,10 @@ private:
     float _lastImuTamper = NAN;
     // Dirty flag for the coalesced "latest state available" mailbox model.
     bool _pendingEvaluation = false;
+    uint32_t _inputGeneration = 0;
+    BooleanAlarmEdgeLatch _csiEdgeLatch;
+    BooleanAlarmEdgeLatch _imuEdgeLatch;
+    GpioAlarmEdgeMailbox _gpioEdgeMailbox;
 
     // Cross-task producers only touch this small in-memory snapshot. The
     // expensive alarm pipeline runs outside the lock in processPending().

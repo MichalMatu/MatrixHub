@@ -6,6 +6,7 @@
 #include "ShellyDeviceStore.h"
 #include "../../system/logging/Logging.h"
 #include "core/config/ConfigManager.h"
+#include "../ShellyPeerRevision.h"
 
 #undef LOG_TAG
 #define LOG_TAG "ShellyStore"
@@ -124,22 +125,40 @@ bool ShellyDeviceStore::updateDevice(const char* id, const ShellyDevice& device)
 
   // Preserve runtime state while replacing config fields.
   ShellyDevice runtime = *existing;
+  const bool samePeer = shellyPeerMatches(*existing, device);
 
   *existing = device;
 
-  existing->isOn = runtime.isOn;
-  existing->isOnline = runtime.isOnline;
-  existing->failedPolls = runtime.failedPolls;
-  existing->zeroPowerCount = runtime.zeroPowerCount;
-  existing->lastUpdate = runtime.lastUpdate;
-  existing->power = runtime.power;
-  existing->energy = runtime.energy;
-  existing->voltage = runtime.voltage;
-  existing->current = runtime.current;
-  existing->temperature = runtime.temperature;
-  existing->interval = runtime.interval;
-  existing->pollBackoff = runtime.pollBackoff;
-  existing->rssi = runtime.rssi;
+  if (samePeer) {
+    existing->isOn = runtime.isOn;
+    existing->isOnline = runtime.isOnline;
+    existing->failedPolls = runtime.failedPolls;
+    existing->zeroPowerCount = runtime.zeroPowerCount;
+    existing->lastUpdate = runtime.lastUpdate;
+    existing->power = runtime.power;
+    existing->energy = runtime.energy;
+    existing->voltage = runtime.voltage;
+    existing->current = runtime.current;
+    existing->temperature = runtime.temperature;
+    existing->interval = runtime.interval;
+    existing->pollBackoff = runtime.pollBackoff;
+    existing->rssi = runtime.rssi;
+  } else {
+    // Runtime observations belong to the previous IP/relay/protocol target.
+    // Never carry an old command ACK or poll state onto the new peer.
+    existing->isOn = false;
+    existing->isOnline = false;
+    existing->failedPolls = 0;
+    existing->zeroPowerCount = 0;
+    existing->lastUpdate = 0;
+    existing->power = 0.0f;
+    existing->energy = 0.0f;
+    existing->voltage = 0.0f;
+    existing->current = 0.0f;
+    existing->temperature = 0.0f;
+    existing->pollBackoff = 1;
+    existing->rssi = 0;
+  }
   if (!commit()) {
     _data = before;
     return false;

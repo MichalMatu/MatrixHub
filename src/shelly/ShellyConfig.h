@@ -23,8 +23,9 @@ constexpr size_t kMaxDevices = 4;  // Maximum number of Shelly devices
 // ============================================================================
 // HTTP Configuration
 // ============================================================================
-constexpr uint8_t kHttpMaxRetries = 3;
+constexpr uint8_t kHttpMaxRetries = 3;  // Fast retries before recovery cadence
 constexpr uint16_t kHttpRetryDelayMs = 200;
+constexpr uint32_t kHttpRecoveryRetryDelayMs = 30000;
 constexpr uint16_t kHttpTimeoutMs = 1500;
 constexpr uint16_t kHttpPollTimeoutMs = 2000;
 
@@ -33,7 +34,7 @@ constexpr uint16_t kHttpPollTimeoutMs = 2000;
 // ============================================================================
 constexpr unsigned long kPollIntervalMs = 10000;      // Poll every 10s
 constexpr unsigned long kShutdownTimeoutMs = 12000;    // Max wait for graceful shutdown (12s to cover network timeouts)
-constexpr uint16_t kCommandQueueSize = 10;            // Max queued commands
+constexpr uint8_t kWorkerWakeQueueSize = 1;           // Hint only; desired state lives in the ledger
 constexpr uint16_t kWorkerStackSize = CONFIG::TASKS::STACK_SHELLY;
 constexpr uint8_t kWorkerPriority = CONFIG::TASKS::PRIO_SHELLY;                // FreeRTOS task priority
 

@@ -41,13 +41,17 @@ describe('WifiSensingApiService', () => {
 			},
 			csi: {
 				enabled: true,
+				runtime_fault: false,
+				runtime_reconcile_pending: false,
 				queue_allocated: true,
+				queue_metrics_valid: true,
 				active_consumer_mask: 1,
 				consumer_count: 1,
 				frontend_consumer_active: true,
 				alarm_consumer_active: false,
 				boot_consumer_active: false,
 				matrix_visualization_consumer_active: false,
+				diagnostic_capture_consumer_active: false,
 				queue_depth: 0,
 				queue_capacity: 16,
 				queue_drops_total: 0,
@@ -64,6 +68,7 @@ describe('WifiSensingApiService', () => {
 				batches_per_sec: 3,
 				last_packet_ms: 123,
 				last_batch_ms: 124,
+				motion_control_epoch: 2,
 				calibration_count: 9,
 				calibration_target: 100,
 				calibration_state: 'collecting',
@@ -72,6 +77,11 @@ describe('WifiSensingApiService', () => {
 					state: 'monitoring',
 					baseline_ready: true,
 					detected: false,
+					decision_valid: true,
+					has_frame: true,
+					data_fresh: true,
+					last_frame_ms: 123,
+					frame_age_ms: 0,
 					noisy: false,
 					needs_calibration: false,
 					score: 0,
@@ -84,7 +94,21 @@ describe('WifiSensingApiService', () => {
 					last_reset_reason: 'width_change'
 				},
 				ws_client_count: 1,
-				ws_queue_enabled: true
+				ws_queue_enabled: true,
+				capture: {
+					client_count: 0,
+					queue_enabled: true,
+					starting: false,
+					accepting: false,
+					stopping: false,
+					session_id: 0,
+					start_exclusive_sequence: 0,
+					stop_inclusive_sequence: 0,
+					records_offered: 0,
+					records_enqueued: 0,
+					records_dropped: 0,
+					truncated_records: 0
+				}
 			}
 		};
 		mockClient.get.mockResolvedValue(status);
@@ -102,7 +126,22 @@ describe('WifiSensingApiService', () => {
 		const settings = {
 			enabled: true,
 			sample_interval_ms: 1000,
-			variance_threshold: 4
+			variance_threshold: 4,
+			csi_alarm: {
+				enabled: true,
+				bands: [{ start: 10, end: 17 }],
+				baseline_frames: 150,
+				top_k: 8,
+				enter_threshold: 6,
+				clear_threshold: 3,
+				hold_ms: 1200,
+				clear_hold_ms: 2500,
+				min_noise: 4,
+				min_energy: 4,
+				noisy_threshold: 80,
+				auto_recalibration: true,
+				sensitivity: 1 as const
+			}
 		};
 		mockClient.get.mockResolvedValue(settings);
 		mockClient.post.mockResolvedValue(settings);
@@ -117,6 +156,20 @@ describe('WifiSensingApiService', () => {
 		expect(mockClient.post).toHaveBeenCalledWith(
 			'/api/wifisensing/config',
 			{ enabled: false },
+			expect.objectContaining({ signal: expect.any(AbortSignal) })
+		);
+	});
+
+	it('requests CSI alarm calibration through the guarded endpoint', async () => {
+		mockClient.post.mockResolvedValue({ ok: true, state: 'calibrating' });
+
+		await expect(service.calibrateCsiAlarm()).resolves.toEqual({
+			ok: true,
+			state: 'calibrating'
+		});
+		expect(mockClient.post).toHaveBeenCalledWith(
+			'/api/wifisensing/csi/calibrate',
+			{},
 			expect.objectContaining({ signal: expect.any(AbortSignal) })
 		);
 	});

@@ -1,12 +1,17 @@
 #include <unity.h>
 
 #include <cstdarg>
+#include <csignal>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <new>
 #include <string>
 #include <vector>
+
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "../../src/system/power/PowerManager.h"
 #include "../../src/wifisensing/csi/core/CsiService.h"
@@ -61,14 +66,21 @@ inline SemaphoreHandle_t lastShellyMutex = nullptr;
 inline int shellyLoadConfigCalls = 0;
 inline int shellyBeginCalls = 0;
 inline size_t shellyDeviceCountValue = 0;
+inline int shellySetConfigCallbackCalls = 0;
+inline std::function<void()> shellyConfigCallback;
 alignas(SHELLY::ShellyService) inline unsigned char shellyStorage[sizeof(SHELLY::ShellyService)];
 
 inline int createGpioServiceCalls = 0;
 inline int beginGpioServiceCalls = 0;
+inline bool beginGpioServiceResult = true;
+inline int wireGpioAlarmCallbackCalls = 0;
+inline bool wireGpioAlarmCallbackResult = true;
 inline FS* lastGpioFs = nullptr;
 
 inline int createWifiSensingSettingsCalls = 0;
 inline int beginWifiSensingSettingsCalls = 0;
+inline int wireCsiAlarmCallbackCalls = 0;
+inline bool wireCsiAlarmCallbackResult = true;
 inline FS* lastWifiSensingFs = nullptr;
 inline WIFISENSING::WifiSensingService* lastWifiSensingService = nullptr;
 inline WIFISENSING::CSI::CsiService* lastWifiSensingCsiService = nullptr;
@@ -83,6 +95,7 @@ inline int alarmShellyBridgeBuildCalls = 0;
 inline SHELLY::ShellyService* lastAlarmShellyService = nullptr;
 inline int setShellyExecutorCalls = 0;
 inline ALARMS::ShellyActionExecutor storedShellyExecutor;
+inline int alarmShellyReconcileCalls = 0;
 
 inline int createCompensationSettingsCalls = 0;
 inline FS* lastCompensationFs = nullptr;
@@ -220,14 +233,21 @@ void reset() {
     shellyLoadConfigCalls = 0;
     shellyBeginCalls = 0;
     shellyDeviceCountValue = 0;
+    shellySetConfigCallbackCalls = 0;
+    shellyConfigCallback = {};
     std::memset(shellyStorage, 0, sizeof(shellyStorage));
 
     createGpioServiceCalls = 0;
     beginGpioServiceCalls = 0;
+    beginGpioServiceResult = true;
+    wireGpioAlarmCallbackCalls = 0;
+    wireGpioAlarmCallbackResult = true;
     lastGpioFs = nullptr;
 
     createWifiSensingSettingsCalls = 0;
     beginWifiSensingSettingsCalls = 0;
+    wireCsiAlarmCallbackCalls = 0;
+    wireCsiAlarmCallbackResult = true;
     lastWifiSensingFs = nullptr;
     lastWifiSensingService = nullptr;
     lastWifiSensingCsiService = nullptr;
@@ -242,6 +262,7 @@ void reset() {
     lastAlarmShellyService = nullptr;
     setShellyExecutorCalls = 0;
     storedShellyExecutor = {};
+    alarmShellyReconcileCalls = 0;
 
     createCompensationSettingsCalls = 0;
     lastCompensationFs = nullptr;
@@ -429,6 +450,7 @@ std::unique_ptr<WIFISENSING::WifiSensingSettings> createWifiSensingSettings(
 
 void beginWifiSensingSettings(WIFISENSING::WifiSensingSettings* settings) {
     TEST_SERVICE_REGISTRY_INIT::beginWifiSensingSettingsCalls++;
+    TEST_SERVICE_REGISTRY_INIT::calls.push("beginWifiSensingSettings");
     TEST_ASSERT_EQUAL_PTR(TEST_SERVICE_REGISTRY_INIT::fakeObjectPtr<WIFISENSING::WifiSensingSettings>(),
                           settings);
 }
@@ -634,6 +656,13 @@ void beginService(ShellyService* service) {
     TEST_SERVICE_REGISTRY_INIT::shellyBeginCalls++;
 }
 
+void setConfigChangeCallback(ShellyService* service,
+                             std::function<void()> callback) {
+    TEST_ASSERT_NOT_NULL(service);
+    TEST_SERVICE_REGISTRY_INIT::shellySetConfigCallbackCalls++;
+    TEST_SERVICE_REGISTRY_INIT::shellyConfigCallback = std::move(callback);
+}
+
 }  // namespace SHELLY
 
 namespace GPIO {
@@ -660,27 +689,50 @@ GpioService::~GpioService() = default;
 
 bool GpioService::begin() {
     TEST_SERVICE_REGISTRY_INIT::beginGpioServiceCalls++;
-    _running = true;
-    return true;
+    TEST_SERVICE_REGISTRY_INIT::calls.push("beginGpioService");
+    _running = TEST_SERVICE_REGISTRY_INIT::beginGpioServiceResult;
+    return TEST_SERVICE_REGISTRY_INIT::beginGpioServiceResult;
 }
 
 }  // namespace GPIO
+
+bool ServiceRegistry::wireCsiAlarmCallback() {
+    if (!_csiService || !_alarmService) {
+        return false;
+    }
+    TEST_SERVICE_REGISTRY_INIT::wireCsiAlarmCallbackCalls++;
+    TEST_SERVICE_REGISTRY_INIT::calls.push("wireCsiAlarmCallback");
+    return TEST_SERVICE_REGISTRY_INIT::wireCsiAlarmCallbackResult;
+}
+
+bool ServiceRegistry::wireGpioAlarmCallback() {
+    if (!_gpioService || !_alarmService) {
+        return false;
+    }
+    TEST_SERVICE_REGISTRY_INIT::wireGpioAlarmCallbackCalls++;
+    TEST_SERVICE_REGISTRY_INIT::calls.push("wireGpioAlarmCallback");
+    return TEST_SERVICE_REGISTRY_INIT::wireGpioAlarmCallbackResult;
+}
 
 namespace ALARMS {
 
 ShellyActionExecutor AlarmShellyBridge::build(SHELLY::ShellyService* shellyService) {
     TEST_SERVICE_REGISTRY_INIT::alarmShellyBridgeBuildCalls++;
     TEST_SERVICE_REGISTRY_INIT::lastAlarmShellyService = shellyService;
-    return [](const AlarmRule& rule, bool state) -> uint8_t {
+    return [](const AlarmRule& rule, bool state) -> ShellyActionResult {
         (void)rule;
         (void)state;
-        return 77;
+        return ShellyActionResult::Accepted;
     };
 }
 
 void AlarmService::setShellyActionExecutor(ShellyActionExecutor executor) {
     TEST_SERVICE_REGISTRY_INIT::setShellyExecutorCalls++;
     TEST_SERVICE_REGISTRY_INIT::storedShellyExecutor = std::move(executor);
+}
+
+void AlarmService::reconcileShellyOutputs() {
+    TEST_SERVICE_REGISTRY_INIT::alarmShellyReconcileCalls++;
 }
 
 bool AlarmService::updateRules(const AlarmRule* rules, uint8_t count) {
@@ -845,6 +897,21 @@ void test_initializeBusinessServices_creates_owned_services_and_starts_shelly_wh
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::createAlarmSettingsCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::createGpioServiceCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::beginGpioServiceCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::wireCsiAlarmCallbackCalls);
+    TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::wireGpioAlarmCallbackCalls);
+
+    const std::vector<std::string> expectedAlarmInputOrder{
+        "wireCsiAlarmCallback",
+        "beginWifiSensingSettings",
+        "wireGpioAlarmCallback",
+        "beginGpioService",
+    };
+    TEST_ASSERT_EQUAL(expectedAlarmInputOrder.size(),
+                      TEST_SERVICE_REGISTRY_INIT::calls.entries.size());
+    for (size_t i = 0; i < expectedAlarmInputOrder.size(); ++i) {
+        TEST_ASSERT_EQUAL_STRING(expectedAlarmInputOrder[i].c_str(),
+                                 TEST_SERVICE_REGISTRY_INIT::calls.entries[i].c_str());
+    }
 
     TEST_ASSERT_EQUAL_PTR(framework.getFS(), TEST_SERVICE_REGISTRY_INIT::lastShellyFs);
     TEST_ASSERT_EQUAL_PTR(networkMutex, TEST_SERVICE_REGISTRY_INIT::lastShellyMutex);
@@ -873,6 +940,12 @@ void test_initializeBusinessServices_creates_owned_services_and_starts_shelly_wh
                           TEST_SERVICE_REGISTRY_INIT::lastAlarmShellyService);
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::setShellyExecutorCalls);
     TEST_ASSERT_TRUE(static_cast<bool>(TEST_SERVICE_REGISTRY_INIT::storedShellyExecutor));
+    TEST_ASSERT_EQUAL_INT(
+        1, TEST_SERVICE_REGISTRY_INIT::shellySetConfigCallbackCalls);
+    TEST_ASSERT_TRUE(
+        static_cast<bool>(TEST_SERVICE_REGISTRY_INIT::shellyConfigCallback));
+    TEST_SERVICE_REGISTRY_INIT::shellyConfigCallback();
+    TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::alarmShellyReconcileCalls);
 
     RTC::AlarmRulesData rules{};
     rules.ruleCount = 3;
@@ -914,6 +987,53 @@ void test_initializeBusinessServices_is_idempotent_for_creation_and_only_rebegin
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::beginGpioServiceCalls);
     TEST_ASSERT_EQUAL_INT(1, TEST_SERVICE_REGISTRY_INIT::shellyLoadConfigCalls);
     TEST_ASSERT_EQUAL_INT(0, TEST_SERVICE_REGISTRY_INIT::shellyBeginCalls);
+}
+
+void test_initializeBusinessServices_aborts_when_gpio_service_cannot_start() {
+    PsychicHttpServer server;
+    ESP32SvelteKit framework(&server);
+    auto& registry = TEST_SERVICE_REGISTRY_INIT::rawObject<ServiceRegistry>();
+    TEST_SERVICE_REGISTRY_INIT::bindFramework(registry, server, framework);
+    TEST_SERVICE_REGISTRY_INIT::beginGpioServiceResult = false;
+
+    const pid_t child = fork();
+    if (child == 0) {
+        const rlimit noCore{0, 0};
+        (void)setrlimit(RLIMIT_CORE, &noCore);
+        registry.initializeBusinessServices(reinterpret_cast<SemaphoreHandle_t>(0x55));
+        _exit(0);
+    }
+    TEST_ASSERT_GREATER_THAN_INT(0, child);
+
+    int status = 0;
+    TEST_ASSERT_EQUAL_INT(child, waitpid(child, &status, 0));
+    TEST_ASSERT_TRUE(WIFSIGNALED(status));
+    TEST_ASSERT_EQUAL_INT(SIGABRT, WTERMSIG(status));
+}
+
+void test_initializeBusinessServices_aborts_when_gpio_alarm_callback_cannot_be_wired() {
+    PsychicHttpServer server;
+    ESP32SvelteKit framework(&server);
+    auto& registry = TEST_SERVICE_REGISTRY_INIT::rawObject<ServiceRegistry>();
+    TEST_SERVICE_REGISTRY_INIT::bindFramework(registry, server, framework);
+    TEST_SERVICE_REGISTRY_INIT::setUniquePtr(
+        registry._alarmService,
+        TEST_SERVICE_REGISTRY_INIT::fakeObjectPtr<ALARMS::AlarmService>());
+    TEST_SERVICE_REGISTRY_INIT::wireGpioAlarmCallbackResult = false;
+
+    const pid_t child = fork();
+    if (child == 0) {
+        const rlimit noCore{0, 0};
+        (void)setrlimit(RLIMIT_CORE, &noCore);
+        registry.initializeBusinessServices(reinterpret_cast<SemaphoreHandle_t>(0x56));
+        _exit(0);
+    }
+    TEST_ASSERT_GREATER_THAN_INT(0, child);
+
+    int status = 0;
+    TEST_ASSERT_EQUAL_INT(child, waitpid(child, &status, 0));
+    TEST_ASSERT_TRUE(WIFSIGNALED(status));
+    TEST_ASSERT_EQUAL_INT(SIGABRT, WTERMSIG(status));
 }
 
 void test_initializeBusinessServices_callbacks_delegate_to_power_manager_and_guard_heartbeat() {
@@ -1224,6 +1344,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_initializeCoreServices_delegates_to_core_initializer_with_registry_refs);
     RUN_TEST(test_initializeBusinessServices_creates_owned_services_and_starts_shelly_when_configured);
     RUN_TEST(test_initializeBusinessServices_is_idempotent_for_creation_and_only_rebegins_settings);
+    RUN_TEST(test_initializeBusinessServices_aborts_when_gpio_service_cannot_start);
+    RUN_TEST(test_initializeBusinessServices_aborts_when_gpio_alarm_callback_cannot_be_wired);
     RUN_TEST(test_initializeBusinessServices_callbacks_delegate_to_power_manager_and_guard_heartbeat);
     RUN_TEST(test_initializeBleServices_creates_settings_begins_and_forwards_registry_state);
     RUN_TEST(test_initializeBleServices_reuses_existing_settings_and_rebegins_them);

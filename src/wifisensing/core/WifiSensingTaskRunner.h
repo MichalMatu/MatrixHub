@@ -49,9 +49,21 @@ class WifiSensingTaskRunner {
   bool stop();
 
   /**
+   * @brief Finish reaping a worker that already received a stop request.
+   *
+   * A timed-out stop leaves the task handle and sampler ownership intact until
+   * the worker reaches its suspend point.  Call this before touching sampler
+   * storage during an immediate rollback/restart.
+   */
+  bool finishPendingStop(TickType_t waitTicks);
+
+  /**
    * @brief Check if task is running.
    */
   bool isRunning() const { return _running.load(std::memory_order_acquire); }
+  bool hasTaskResources() const {
+    return _taskHandle != nullptr || _running.load(std::memory_order_acquire);
+  }
 
   /**
    * @brief Get current motion detection state (from MotionDetector with hysteresis).

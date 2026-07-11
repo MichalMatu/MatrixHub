@@ -2,6 +2,7 @@
 #include "../../system/health/network/HttpServerHealthTracker.h"
 #include "../../system/logging/Logging.h"
 #include <cstring>
+#include <utility>
 #include <esp_heap_caps.h>
 #include <freertos/task.h>
 
@@ -66,10 +67,14 @@ void WebSocketBroadcaster::broadcast(uint8_t* data, size_t len, httpd_ws_type_t 
         return;
     }
 
-    if (_taskQueue.isEnabled()) {
+    auto producerLease = _taskQueue.acquireProducerLease();
+    if (producerLease && !_poolReady.load(std::memory_order_acquire)) {
+        producerLease = {};
+    }
+    if (producerLease) {
         WEBSOCKET::WsMessage msg;
         if (prepareInlineMessage(msg, data, len, type)) {
-            (void)_taskQueue.enqueue(msg);
+            (void)producerLease.enqueue(msg);
             return;
         }
 
@@ -97,7 +102,7 @@ void WebSocketBroadcaster::broadcast(uint8_t* data, size_t len, httpd_ws_type_t 
         memcpy(payload, data, len);
 
         msg = { payload, len, type, isAllocated, payloadSlot, {0}, 0 };
-        if (!_taskQueue.enqueue(msg)) {
+        if (!producerLease.enqueue(msg)) {
             // Pool release is handled inside WsTaskQueue::enqueue on failure
         }
     } else {
@@ -108,13 +113,17 @@ void WebSocketBroadcaster::broadcast(uint8_t* data, size_t len, httpd_ws_type_t 
 void WebSocketBroadcaster::broadcast(int* fds, size_t count, uint8_t* data, size_t len, httpd_ws_type_t type) {
     if (!_clientMgr.hasClients() || !data || len == 0 || count == 0) return;
 
-    if (_taskQueue.isEnabled()) {
+    auto producerLease = _taskQueue.acquireProducerLease();
+    if (producerLease && !_poolReady.load(std::memory_order_acquire)) {
+        producerLease = {};
+    }
+    if (producerLease) {
         WEBSOCKET::WsMessage msg;
         if (prepareInlineMessage(msg, data, len, type)) {
             msg.targetCount = snapshotTargetSessions(
                 fds, count, msg.targets, msg.targetGenerations);
             if (msg.targetCount == 0) return;
-            (void)_taskQueue.enqueue(msg);
+            (void)producerLease.enqueue(msg);
             return;
         }
 
@@ -153,7 +162,7 @@ void WebSocketBroadcaster::broadcast(int* fds, size_t count, uint8_t* data, size
                targetCount * sizeof(WEBSOCKET::WsClientGeneration));
         msg.targetCount = targetCount;
 
-        if (!_taskQueue.enqueue(msg)) {
+        if (!producerLease.enqueue(msg)) {
             // Pool release is handled inside WsTaskQueue::enqueue on failure
         }
     } else {
@@ -164,26 +173,8 @@ void WebSocketBroadcaster::broadcast(int* fds, size_t count, uint8_t* data, size
 bool WebSocketBroadcaster::broadcastSerialized(size_t reserveLen,
                                                PayloadWriter writer,
                                                httpd_ws_type_t type) {
-    if (!hasClients() || reserveLen == 0 || !writer) {
-        return false;
-    }
-
-    uint8_t* payload = nullptr;
-    int16_t payloadSlot = -1;
-    bool isAllocated = false;
-    if (!acquirePayload(reserveLen, &payload, &payloadSlot, &isAllocated)) {
-        return false;
-    }
-
-    const size_t written = writer(payload, reserveLen);
-    if (written == 0 || written > reserveLen) {
-        WEBSOCKET::WsMessage msg = { payload, reserveLen, type, isAllocated, payloadSlot, {0}, 0 };
-        _pool.releaseMessageResources(msg);
-        return false;
-    }
-
-    return broadcastPrepared(
-        nullptr, nullptr, 0, payload, written, payloadSlot, isAllocated, type);
+    return broadcastSerializedInternal(
+        nullptr, 0, false, reserveLen, std::move(writer), type, false);
 }
 
 bool WebSocketBroadcaster::broadcastSerialized(int* fds,
@@ -191,41 +182,26 @@ bool WebSocketBroadcaster::broadcastSerialized(int* fds,
                                                size_t reserveLen,
                                                PayloadWriter writer,
                                                httpd_ws_type_t type) {
-    if (!fds || count == 0 || reserveLen == 0 || !writer || !hasClients()) {
-        return false;
-    }
+    return broadcastSerializedInternal(
+        fds, count, true, reserveLen, std::move(writer), type, false);
+}
 
-    int targetSnapshots[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
-    WEBSOCKET::WsClientGeneration targetGenerations[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
-    const size_t targetCount = snapshotTargetSessions(
-        fds, count, targetSnapshots, targetGenerations);
-    if (targetCount == 0) {
-        return false;
-    }
+bool WebSocketBroadcaster::broadcastSerializedQueued(
+    size_t reserveLen,
+    PayloadWriter writer,
+    httpd_ws_type_t type) {
+    return broadcastSerializedInternal(
+        nullptr, 0, false, reserveLen, std::move(writer), type, true);
+}
 
-    uint8_t* payload = nullptr;
-    int16_t payloadSlot = -1;
-    bool isAllocated = false;
-    if (!acquirePayload(reserveLen, &payload, &payloadSlot, &isAllocated)) {
-        return false;
-    }
-
-    const size_t written = writer(payload, reserveLen);
-    if (written == 0 || written > reserveLen) {
-        WEBSOCKET::WsMessage msg = { payload, reserveLen, type, isAllocated, payloadSlot, {0}, 0 };
-        _pool.releaseMessageResources(msg);
-        return false;
-    }
-
-    return broadcastPrepared(
-        targetSnapshots,
-        targetGenerations,
-        targetCount,
-        payload,
-        written,
-        payloadSlot,
-        isAllocated,
-        type);
+bool WebSocketBroadcaster::broadcastSerializedQueued(
+    int* fds,
+    size_t count,
+    size_t reserveLen,
+    PayloadWriter writer,
+    httpd_ws_type_t type) {
+    return broadcastSerializedInternal(
+        fds, count, true, reserveLen, std::move(writer), type, true);
 }
 
 void WebSocketBroadcaster::processBroadcast(WEBSOCKET::WsMessage& msg) {
@@ -248,6 +224,10 @@ void WebSocketBroadcaster::enableQueue(size_t queueSize, uint32_t stackSize, siz
         return;
     }
 
+    // A stopped-but-not-yet-reaped queue may still own pool slots, so lifecycle
+    // cleanup must run before init() can replace pool storage. _poolReady keeps
+    // producers out of the short queue-created/pool-initializing window.
+    _poolReady.store(false, std::memory_order_release);
     _taskQueue.enable(queueSize, stackSize);
     if (!_taskQueue.isEnabled()) {
         return;
@@ -256,13 +236,23 @@ void WebSocketBroadcaster::enableQueue(size_t queueSize, uint32_t stackSize, siz
     if (!_pool.init(queueSize, payloadSlotSize)) {
         LOGE("[%s] Failed to initialize WebSocket payload pool", _logTag);
         (void)_taskQueue.disable();
+        return;
     }
+    _poolReady.store(true, std::memory_order_release);
+}
+
+void WebSocketBroadcaster::requestQueueStop() {
+    _taskQueue.requestStop();
+    _poolReady.store(false, std::memory_order_release);
 }
 
 bool WebSocketBroadcaster::disableQueue() {
     if (!_taskQueue.disable()) {
         return false;
     }
+    // acquireProducerLease() can no longer succeed after disable() returns, so
+    // no producer can observe ready=true and then enter pool storage here.
+    _poolReady.store(false, std::memory_order_release);
     _pool.deinit();
     return true;
 }
@@ -305,6 +295,7 @@ size_t WebSocketBroadcaster::snapshotTargetSessions(
 }
 
 bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
+                                          bool queued,
                                           uint8_t** payload,
                                           int16_t* payloadSlot,
                                           bool* isAllocated) {
@@ -316,7 +307,7 @@ bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
     *payloadSlot = -1;
     *isAllocated = false;
 
-    if (_taskQueue.isEnabled()) {
+    if (queued) {
         const size_t slotSize = _pool.getSlotSize();
         if (slotSize > 0 && reserveLen <= slotSize) {
             if (_pool.acquireSlot(reserveLen, payload, payloadSlot)) {
@@ -330,7 +321,7 @@ bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
 
     *payload = static_cast<uint8_t*>(heap_caps_malloc(reserveLen, MALLOC_CAP_SPIRAM));
     if (!*payload) {
-        if (_taskQueue.isEnabled()) {
+        if (queued) {
             SYSTEM::HEALTH::HttpServerHealthTracker::recordWsQueueDrop(reserveLen);
             LOGW("[%s] Queue Drop: OOM", _logTag);
         }
@@ -341,6 +332,70 @@ bool WebSocketBroadcaster::acquirePayload(size_t reserveLen,
     return true;
 }
 
+bool WebSocketBroadcaster::broadcastSerializedInternal(
+    int* fds,
+    size_t count,
+    bool targeted,
+    size_t reserveLen,
+    PayloadWriter writer,
+    httpd_ws_type_t type,
+    bool queuedOnly) {
+    if (reserveLen == 0 || !writer || !hasClients() ||
+        (targeted && (!fds || count == 0))) {
+        return false;
+    }
+
+    int targetSnapshots[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+    WEBSOCKET::WsClientGeneration targetGenerations[WEBSOCKET::MAX_BROADCAST_TARGETS]{};
+    size_t targetCount = 0;
+    if (targeted) {
+        targetCount = snapshotTargetSessions(
+            fds, count, targetSnapshots, targetGenerations);
+        if (targetCount == 0) {
+            return false;
+        }
+    }
+
+    auto producerLease = _taskQueue.acquireProducerLease();
+    if (producerLease && !_poolReady.load(std::memory_order_acquire)) {
+        producerLease = {};
+    }
+    if (queuedOnly && !producerLease) {
+        return false;
+    }
+
+    uint8_t* payload = nullptr;
+    int16_t payloadSlot = -1;
+    bool isAllocated = false;
+    if (!acquirePayload(
+            reserveLen,
+            static_cast<bool>(producerLease),
+            &payload,
+            &payloadSlot,
+            &isAllocated)) {
+        return false;
+    }
+
+    const size_t written = writer(payload, reserveLen);
+    if (written == 0 || written > reserveLen) {
+        WEBSOCKET::WsMessage msg = {
+            payload, reserveLen, type, isAllocated, payloadSlot, {0}, 0};
+        _pool.releaseMessageResources(msg);
+        return false;
+    }
+
+    return broadcastPrepared(
+        targeted ? targetSnapshots : nullptr,
+        targeted ? targetGenerations : nullptr,
+        targeted ? targetCount : 0,
+        payload,
+        written,
+        payloadSlot,
+        isAllocated,
+        type,
+        producerLease ? &producerLease : nullptr);
+}
+
 bool WebSocketBroadcaster::broadcastPrepared(
     int* fds,
     const WEBSOCKET::WsClientGeneration* targetGenerations,
@@ -349,14 +404,15 @@ bool WebSocketBroadcaster::broadcastPrepared(
     size_t len,
     int16_t payloadSlot,
     bool isAllocated,
-    httpd_ws_type_t type) {
+    httpd_ws_type_t type,
+    WEBSOCKET::WsTaskQueue::ProducerLease* producerLease) {
     if (!payload || len == 0) {
         WEBSOCKET::WsMessage msg = { payload, len, type, isAllocated, payloadSlot, {0}, 0 };
         _pool.releaseMessageResources(msg);
         return false;
     }
 
-    if (_taskQueue.isEnabled()) {
+    if (producerLease && *producerLease) {
         WEBSOCKET::WsMessage msg = { payload, len, type, isAllocated, payloadSlot, {0}, 0 };
         if (fds && count > 0) {
             const size_t actualCount =
@@ -367,7 +423,7 @@ bool WebSocketBroadcaster::broadcastPrepared(
                    actualCount * sizeof(WEBSOCKET::WsClientGeneration));
             msg.targetCount = actualCount;
         }
-        return _taskQueue.enqueue(msg);
+        return producerLease->enqueue(msg);
     }
 
     if (fds && count > 0) {

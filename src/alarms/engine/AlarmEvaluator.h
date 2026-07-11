@@ -73,11 +73,17 @@ public:
         }
         
         // Check if condition is met
-        bool conditionMet = checkCondition(value, rule.threshold, rule.op);
+        const bool conditionMet = rule.isBooleanLikeSource()
+                                      ? value > 0.5f
+                                      : checkCondition(value, rule.threshold, rule.op);
         result.triggered = conditionMet;
         
+        // Keep the pre-evaluation state so a genuine rising edge can be
+        // distinguished from an alarm retained as active across deep sleep.
+        const bool wasTriggered = state.previouslyTriggered;
+
         // Detect state change
-        result.stateChanged = (conditionMet != state.previouslyTriggered);
+        result.stateChanged = (conditionMet != wasTriggered);
         
         // Update previous state
         state.previouslyTriggered = conditionMet;
@@ -85,10 +91,20 @@ public:
         
         // Determine if we should notify
         if (conditionMet) {
-            // Notify on first trigger, and then periodically while still triggered
-            // once the cooldown elapses (reminder behavior).
-            if (state.lastTriggeredMs == 0 ||
-                isCooldownElapsed(state.lastTriggeredMs, rule.cooldownSeconds, currentTimeMs)) {
+            // A real false->true edge always notifies immediately. A retained
+            // active state with lastTriggeredMs == 0 is different: begin()
+            // cleared a millis()-based timestamp because it belonged to the
+            // previous boot clock domain. Anchor its cooldown in this boot
+            // without emitting a reminder solely because the clock restarted.
+            if (!wasTriggered) {
+                result.shouldNotify = true;
+                state.lastTriggeredMs = currentTimeMs;
+            } else if (state.lastTriggeredMs == 0) {
+                state.lastTriggeredMs = currentTimeMs;
+            } else if (isCooldownElapsed(
+                           state.lastTriggeredMs,
+                           rule.cooldownSeconds,
+                           currentTimeMs)) {
                 result.shouldNotify = true;
                 state.lastTriggeredMs = currentTimeMs;
             }
@@ -167,7 +183,7 @@ public:
      * @param currentTimeMs Current time
      * @return true if cooldown has passed
      */
-    static inline bool isCooldownElapsed(uint32_t lastTriggeredMs, uint16_t cooldownSeconds, uint32_t currentTimeMs) {
+    static inline bool isCooldownElapsed(uint32_t lastTriggeredMs, uint32_t cooldownSeconds, uint32_t currentTimeMs) {
         // Handle millis() overflow
         uint32_t elapsed;
         if (currentTimeMs >= lastTriggeredMs) {

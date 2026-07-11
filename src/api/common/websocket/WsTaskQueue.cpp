@@ -54,6 +54,40 @@ WsTaskQueue::WsTaskQueue(const char* logTag, ProcessCallback processCb, WsPayloa
     _lifecycleLock = xSemaphoreCreateMutex();
 }
 
+WsTaskQueue::ProducerLease::~ProducerLease() {
+    release();
+}
+
+WsTaskQueue::ProducerLease::ProducerLease(ProducerLease&& other) noexcept
+    : _owner(other._owner), _queue(other._queue) {
+    other._owner = nullptr;
+    other._queue = nullptr;
+}
+
+WsTaskQueue::ProducerLease& WsTaskQueue::ProducerLease::operator=(
+    ProducerLease&& other) noexcept {
+    if (this != &other) {
+        release();
+        _owner = other._owner;
+        _queue = other._queue;
+        other._owner = nullptr;
+        other._queue = nullptr;
+    }
+    return *this;
+}
+
+bool WsTaskQueue::ProducerLease::enqueue(const WsMessage& msg) {
+    return _owner && _queue && _owner->enqueueWithLease(_queue, msg);
+}
+
+void WsTaskQueue::ProducerLease::release() {
+    if (_owner) {
+        _owner->releaseProducerLease();
+        _owner = nullptr;
+        _queue = nullptr;
+    }
+}
+
 WsTaskQueue::~WsTaskQueue() {
     if (!isBroadcastTaskContext()) {
         while (!disable()) {
@@ -76,49 +110,60 @@ bool WsTaskQueue::isBroadcastTaskContext() const {
 
 bool WsTaskQueue::isEnabled() const {
     return _queueAccepting.load(std::memory_order_acquire) &&
+           !_shutdownRequested.load(std::memory_order_acquire) &&
            _msgQueue.load(std::memory_order_acquire) != nullptr;
 }
 
-bool WsTaskQueue::enqueue(const WsMessage& msg) {
-    QueueHandle_t queue = nullptr;
-    {
-        SYSTEM::ScopeLock queueLock(_lifecycleLock, kEnqueueLockTimeout);
-        if (!queueLock.isLocked()) {
-            if (_pool) {
-                _pool->releaseMessageResources(msg);
-                _pool->logDrop("queue lifecycle lock busy", msg.len);
-            }
-            return false;
-        }
-
-        queue = _msgQueue.load(std::memory_order_acquire);
-        if (!_queueAccepting.load(std::memory_order_acquire) ||
-            _shutdownRequested.load(std::memory_order_acquire) ||
-            !queue) {
-            if (_pool) {
-                _pool->releaseMessageResources(msg);
-                _pool->logDrop("queue disabled", msg.len);
-            }
-            return false;
-        }
-
-        _enqueueInFlight.fetch_add(1, std::memory_order_acq_rel);
+WsTaskQueue::ProducerLease WsTaskQueue::acquireProducerLease() {
+    SYSTEM::ScopeLock queueLock(_lifecycleLock, kEnqueueLockTimeout);
+    if (!queueLock.isLocked()) {
+        return {};
     }
 
-    const bool sent = (xQueueSend(queue, &msg, kQueueSendTimeout) == pdTRUE);
-    _enqueueInFlight.fetch_sub(1, std::memory_order_acq_rel);
+    QueueHandle_t queue = _msgQueue.load(std::memory_order_acquire);
+    if (!_queueAccepting.load(std::memory_order_acquire) ||
+        _shutdownRequested.load(std::memory_order_acquire) ||
+        !queue) {
+        return {};
+    }
 
-    if (!sent) {
+    _enqueueInFlight.fetch_add(1, std::memory_order_acq_rel);
+    return ProducerLease(this, queue);
+}
+
+bool WsTaskQueue::enqueue(const WsMessage& msg) {
+    ProducerLease lease = acquireProducerLease();
+    if (!lease) {
         if (_pool) {
             _pool->releaseMessageResources(msg);
-            // Log queue full drop
-            size_t queued = uxQueueMessagesWaiting(queue);
-            size_t length = uxQueueSpacesAvailable(queue) + queued;
+            _pool->logDrop("queue disabled or lifecycle lock busy", msg.len);
+        }
+        return false;
+    }
+
+    return lease.enqueue(msg);
+}
+
+bool WsTaskQueue::enqueueWithLease(QueueHandle_t queue, const WsMessage& msg) {
+    const bool sent = (xQueueSend(queue, &msg, kQueueSendTimeout) == pdTRUE);
+
+    if (!sent) {
+        const size_t queued = uxQueueMessagesWaiting(queue);
+        const size_t length = uxQueueSpacesAvailable(queue) + queued;
+        if (_pool) {
+            _pool->releaseMessageResources(msg);
             _pool->logDrop("queue full", msg.len, queued, length);
         }
         return false;
     }
     return true;
+}
+
+void WsTaskQueue::releaseProducerLease() {
+    // This is deliberately the producer's final queue-lifecycle operation. A
+    // disable() waiter may destroy both queue and payload pool as soon as the
+    // count reaches zero.
+    _enqueueInFlight.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void WsTaskQueue::enable(size_t queueSize, uint32_t stackSize) {
@@ -141,7 +186,6 @@ void WsTaskQueue::enable(size_t queueSize, uint32_t stackSize) {
     }
 
     _queueAccepting.store(false, std::memory_order_release);
-    _shutdownRequested.store(false, std::memory_order_release);
 
     if (!_cleanupSem) {
         _cleanupSem = xSemaphoreCreateBinary();
@@ -235,6 +279,15 @@ void WsTaskQueue::enable(size_t queueSize, uint32_t stackSize) {
     LOGI("[%s] Queued mode enabled statically", _logTag);
 }
 
+void WsTaskQueue::requestStop() {
+    // This is intentionally lock-free and non-blocking. An enqueue that
+    // already crossed the lifecycle fence owns a valid queue reference and may
+    // still publish one final message; the worker will drain it before
+    // suspending. Queue resources stay owned until disable() reaps the worker.
+    _shutdownRequested.store(true, std::memory_order_release);
+    _queueAccepting.store(false, std::memory_order_release);
+}
+
 bool WsTaskQueue::disable() {
     SYSTEM::ScopeLock queueLock(_lifecycleLock, kLifecycleLockTimeout);
     if (!queueLock.isLocked()) {
@@ -251,6 +304,12 @@ bool WsTaskQueue::disable() {
 
     if (!waitForEnqueueIdle(kEnqueueDrainTimeout)) {
         LOGW("[%s] Timed out waiting for in-flight enqueues", _logTag);
+        // Teardown has not crossed the terminal shutdown fence yet. Restore a
+        // fully usable queue instead of leaving the owner in a half-disabled
+        // state that a reconnect could mistake for an uninitialized queue.
+        if (!_shutdownRequested.load(std::memory_order_acquire)) {
+            _queueAccepting.store(true, std::memory_order_release);
+        }
         return false;
     }
 
@@ -258,6 +317,9 @@ bool WsTaskQueue::disable() {
 
     if (isBroadcastTaskContext()) {
         LOGW("[%s] disable called from broadcast task; deferring cleanup", _logTag);
+        if (!_shutdownRequested.load(std::memory_order_acquire)) {
+            _queueAccepting.store(true, std::memory_order_release);
+        }
         return false;
     }
 
@@ -390,6 +452,7 @@ void WsTaskQueue::broadcastTask(void* pvParameters) {
             }
 
             if (self->_shutdownRequested.load(std::memory_order_acquire) &&
+                self->_enqueueInFlight.load(std::memory_order_acquire) == 0 &&
                 uxQueueMessagesWaiting(msgQueue) == 0) {
                 break;
             }
@@ -397,6 +460,7 @@ void WsTaskQueue::broadcastTask(void* pvParameters) {
         }
 
         if (self->_shutdownRequested.load(std::memory_order_acquire) &&
+            self->_enqueueInFlight.load(std::memory_order_acquire) == 0 &&
             uxQueueMessagesWaiting(msgQueue) == 0) {
             break;
         }

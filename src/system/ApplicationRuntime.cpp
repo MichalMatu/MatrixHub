@@ -14,8 +14,10 @@
 #include "../alarms/AlarmService.h"
 #include "../ble/BleService.h"
 #include "../sensors/imu/ImuRuntimeService.h"
+#include "../shelly/ShellyRuntimeControl.h"
 #include "../udp/UdpPusher.h"
 #include "../usb_terminal/UsbTerminalService.h"
+#include "../wifisensing/WifiSensingSettings.h"
 
 #include <cstdlib>
 
@@ -116,6 +118,24 @@ void runLoopCore(ServiceRegistry& services,
     // on alarm-side work and multiple fast updates naturally coalesce.
     alarmService->processPending();
   }
+
+  if (auto* shelly = services.getShellyService()) {
+    // A desired relay state lives independently of the worker task. If task
+    // stack/control-block allocation failed, recreate the runtime from the
+    // retained in-memory ledger without waiting for another alarm edge.
+    SHELLY::reconcileRuntimeIfDue(shelly, millis());
+  }
+
+  if (auto* wifiSensingSettings = services.getWifiSensingSettings()) {
+    // Repair desired/runtime drift after transient CSI/RSSI lifecycle failures.
+    // The settings service owns a bounded exponential backoff.
+    wifiSensingSettings->reconcileRuntimeIfDue(millis());
+  }
+
+  // Deferred CSI frontend/capture lifecycle requests are generation-backed.
+  // This poll only does work when task creation previously failed, closing the
+  // recovery path without blocking the CSI processing callback.
+  services.reconcileDeferredApiLifecycle();
 
   if (auto* udpPusher = services.getUdpPusher()) {
     // UdpPusher is no longer a hidden singleton. The main loop updates the

@@ -42,6 +42,14 @@ Important ownership rules:
   control block stay in internal RAM; the transient WebSocket batch buffer is
   allocated in PSRAM.
 - CSI is enabled only while at least one consumer is active.
+- Consumer bits represent desired ownership. They are committed before bounded
+  lifecycle locking so a start/stop timeout cannot erase the request. A
+  low-frequency reconciler retries desired/runtime drift with 5–60 second
+  backoff and reaps deferred task/queue cleanup.
+- The Wi-Fi driver receives a process-lifetime callback fence rather than a
+  `CsiService*`. Detach clears the owner before unregister/drain, so even a
+  driver-dispatched callback that enters late cannot dereference a destroyed
+  service or queue.
 
 Current CSI consumers are defined by `WIFISENSING::CSI::CsiConsumer`:
 
@@ -199,8 +207,20 @@ python scripts/sensing_analysis/csi_capture.py collect \
 
 `--firmware-commit` is mandatory and must be the full 40-hex commit actually
 flashed. A local transport smoke test may use `<sha>-dirty`, but promotion
-rejects dirty or unknown provenance and also requires the remaining firmware
-identity fields reported by the device.
+rejects dirty or unknown provenance. ESP32 builds embed their Git SHA and dirty
+bit in `/api/system/info`; before creating any artifact, the collector compares
+that device-reported identity with the CLI expectation. The scenario records
+only the verified device value, so an accidentally mislabeled or different
+flash fails closed. Promotion and native replay additionally require
+`firmware_dirty=false`, the collector verification marker, and the remaining
+firmware identity fields reported by the device.
+
+Before creating an artifact, the collector verifies that the CSI alarm is
+enabled with at least one valid configured band, CSI is running with an
+allocated queue, no runtime fault or reconciliation is pending, gain calibration
+has reached `forced`, and the active detector has received a fresh valid frame.
+A failed preflight leaves no `.partial` directory; correct the device
+configuration and retry.
 
 The collector writes:
 
@@ -232,6 +252,17 @@ python scripts/sensing_analysis/csi_capture.py annotate ARTIFACT_DIR \
   --note "Continuous walking across the room"
 
 python scripts/sensing_analysis/csi_capture.py annotate ARTIFACT_DIR --review
+
+python scripts/sensing_analysis/csi_capture.py acceptance ARTIFACT_DIR \
+  --max-false-positive-ms 2s \
+  --max-false-negative-ms 4s \
+  --max-invalid-decision-ms 4s \
+  --max-detection-latency-ms 2s \
+  --max-clear-latency-ms 4s \
+  --max-motion-dropout-ms 500ms \
+  --max-missed-motion-intervals 0 \
+  --max-uncleared-transitions 0
+
 python scripts/sensing_analysis/csi_capture.py verify ARTIFACT_DIR
 python scripts/sensing_analysis/csi_capture.py report ARTIFACT_DIR
 ```
@@ -247,6 +278,21 @@ The v1 vocabulary is:
 
 Unknown transition intervals are valid, but a reviewed scenario must contain at
 least one interval with known motion and complete context/evidence fields.
+Choose and persist scenario-specific acceptance limits before using a candidate
+detector replay to judge the capture. The values above illustrate the command,
+not universal product limits. `max_false_positive_ms` and
+`max_false_negative_ms` limit total misclassified known time, while
+`max_invalid_decision_ms` limits known time for which the production detector
+does not expose a valid alarm decision.
+`max_detection_latency_ms`, `max_clear_latency_ms`, and
+`max_motion_dropout_ms` limit the worst event/run. The remaining limits count
+completely missed motion windows and motion-to-quiet transitions that never
+clear. Time labeled `unknown` is reported separately and is excluded from the
+confusion metrics. Label detector warm-up/calibration as `unknown`; otherwise
+its invalid decision time is intentionally charged against the reviewed limit.
+The same `acceptance` command upgrades a reviewed G0 raw/promoted scenario that
+predates the acceptance block; release verification still rejects it until all
+limits have been explicitly supplied.
 
 Promote only a lossless capture whose ground truth was already persisted as
 reviewed with `annotate --review`; `--reviewed` is an additional explicit
@@ -267,6 +313,27 @@ capture directly into `test/fixtures/`. Free-text descriptions and annotation
 notes are also scanned fail-closed for SSID/BSSID labels, hostnames, IP/MAC
 addresses, email addresses, tokens, and secrets; keep identifying room/network
 details out of those fields.
+
+Run every promoted, reviewed real-device scenario through the exact production
+`CsiBandMotionDetector` with:
+
+```bash
+python scripts/tests/run_csi_fixture_replay.py
+```
+
+The wrapper first validates MHCF structure, modular `processNowMs` ordering,
+hashes, provenance, human ground truth, and reviewed acceptance limits. It then
+passes the corpus to the native PlatformIO runner through
+`MATRIXHUB_CSI_FIXTURE_ROOT`. The wrapper fails if the corpus is absent or empty,
+if a fixture contains anything other than `frames.mhcf` and `scenario.json`, or
+if any acceptance limit is exceeded. The ordinary `pio test -e native` run keeps
+the same test visible as `SKIPPED` when no real corpus was explicitly enabled;
+synthetic frames exercise only codec, parser, and metric unit behavior and are
+never accepted as release evidence. Across the enabled corpus, the native gate
+also requires at least one reviewed motion-present window and one transition
+from motion to known quiet, so a quiet-only fixture cannot falsely exercise the
+detection, dropout, and clear gates. This minimum does not replace the complete
+G1 scenario list below.
 
 Start the real-data corpus with separate captures for quiet calibration,
 enter/walk/exit, occupied-but-stationary, repeated motion/quiet cycles over at
@@ -297,11 +364,18 @@ POST /api/wifisensing/csi/calibrate
 - RSSI sensing state and statistics
 - CSI consumer state and queue pressure
 - CSI packet, batch, and WebSocket counters
+- explicit `runtime_fault` and `runtime_reconcile_pending` lifecycle state
 - CSI motion detector state, score, confidence, selected carrier count, and
-  reset reason
+  reset reason, plus `decision_valid`, `has_frame`, `data_fresh`, and frame age
 
 The calibration endpoint applies to the alarm detector. Matrix visualization is
 display-only and should not require calibration or alarm baseline readiness.
+`POST /api/wifisensing/csi/calibrate` returns HTTP 503 with
+`csi/calibration_unavailable` unless the alarm is enabled with at least one
+band, runtime and detector storage are healthy, gain is forced, and a fresh
+valid non-`Unavailable` frame exists. This fail-safe is intentional: accepting
+calibration during an outage could forget a retained active alarm and learn an
+occupied room as quiet.
 
 ## Alarm Semantics
 
@@ -323,7 +397,35 @@ The detector implementation is `CsiBandMotionDetector`:
 - selected-band top-K z-score
 - hysteresis and hold/clear-hold windows
 - noisy-environment gating
-- non-blocking calibration request path
+- serialized, fail-closed manual calibration request path
+
+Binary publication is fail-safe:
+
+- only `Monitoring` and `MotionConfirmed` are definitive decisions,
+- `Unavailable`, stale, noisy, invalid-frame, reconnect, baseline collection,
+  and required-calibration states preserve the last stable boolean but do not
+  publish a clear,
+- an active decision retained across RTC boot or detector storage recovery is
+  reapplied before any automatic baseline can run and remains latched until an
+  operator-authorized calibration produces fresh definitive quiet evidence,
+- disabling the alarm is the explicit exception and publishes one durable
+  `false` synchronization value.
+
+The alarm bridge preserves a true edge even if a false sample arrives before
+the main-loop coordinator pass. Failed coordinator lock attempts remain queued,
+and boolean-like rule sources are always evaluated as `Above 0.5`; persisted
+inverse operators cannot turn motion into a clear-trigger rule.
+
+### Lifecycle Residual To Prove On Hardware
+
+The stable callback fence closes the lifetime/UAF window, but the public
+Espressif CSI API does not expose a registration-generation token. A callback
+dispatched under an old registration and delayed until after detach/reattach
+could theoretically enter the new generation as one stale frame. The detector
+hold/gain-reset rules make one frame non-authoritative, but reconnect captures
+and the one-hour soak must still verify that no stale frame crosses the real
+driver boundary. This is a hardware acceptance gate, not a reason to synthesize
+an expected result in Python.
 
 ## Matrix Visualization
 
@@ -375,12 +477,19 @@ Useful targeted checks:
 
 ```bash
 pio test -e native -f test_csi_band_motion_detector
+pio test -e native -f test_csi_motion_calibration_gate
+pio test -e native -f test_csi_motion_control_fence
+pio test -e native -f test_csi_motion_publication_gate
+pio test -e native -f test_csi_rx_callback_fence
+pio test -e native -f test_csi_runtime_cleanup_gate
+pio test -e native -f test_alarm_service_csi_pipeline
 pio test -e native -f test_csi_capture_wire_format
 pio test -e native -f test_csi_capture_sequence_window
 pio test -e native -f test_csi_capture_replay
 pio test -e native -f test_csi_visualization_reducer
 pio test -e native -f test_matrix_task
 python -m unittest test.test_csi_capture_tools
+python scripts/tests/run_csi_fixture_replay.py
 python scripts/analyze_csi.py
 python scripts/csi_monitor.py
 ```

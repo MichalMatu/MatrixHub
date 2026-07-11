@@ -21,6 +21,7 @@ struct __attribute__((packed)) AlarmRulesSnapshot {
  */
 struct __attribute__((packed)) AlarmRuntimeSummary {
     AlarmRuntimeState runtimeStates[kMaxRules];
+    uint64_t ruleRuntimeIdentityHashes[kMaxRules]{};
     uint8_t ruleCount = 0;
     uint8_t enabledCount = 0;
     uint8_t _pad[2] = {0};

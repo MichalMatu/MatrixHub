@@ -1,3 +1,4 @@
+import asyncio
 import json
 import struct
 import tempfile
@@ -5,6 +6,7 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts.sensing_analysis.csi_capture import (
     CAPTURE_FILENAME,
@@ -15,10 +17,15 @@ from scripts.sensing_analysis.csi_capture import (
     annotate_capture,
     atomic_write_json,
     build_parser,
+    collect_capture,
+    firmware_provenance,
     initial_scenario,
     parse_milliseconds,
     promote_capture,
+    require_capture_ready_config,
+    require_capture_ready_status,
     require_safe_raw_root,
+    set_acceptance,
     sha256_file,
     verify_capture,
 )
@@ -50,6 +57,10 @@ from scripts.sensing_analysis.csi_capture_format import (
     iter_mhcf_frames,
     validate_mhcf,
     write_mhcf,
+)
+from scripts.tests.run_csi_fixture_replay import (
+    CorpusError,
+    discover_fixture_directories,
 )
 
 
@@ -116,6 +127,11 @@ class CsiCaptureFormatTest(unittest.TestCase):
         self.assertEqual(parse_milliseconds("0"), 0)
         self.assertEqual(parse_milliseconds("1.5s"), 1500)
 
+    def test_release_corpus_discovery_rejects_an_empty_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaisesRegex(CorpusError, "corpus is empty"):
+                discover_fixture_directories(Path(tmpdir))
+
     def test_mhcf_round_trip_preserves_exact_inputs_and_observed_diagnostics(self):
         source = bytes.fromhex("101122334455")
         destination = bytes.fromhex("aabbccddeeff")
@@ -159,6 +175,45 @@ class CsiCaptureFormatTest(unittest.TestCase):
             path.write_bytes(bytes(data) + b"x")
             with self.assertRaisesRegex(CaptureFormatError, "size mismatch"):
                 validate_mhcf(path)
+
+    def test_mhcf_process_time_is_monotonic_modulo_uint32(self):
+        source = bytes.fromhex("101122334455")
+        destination = bytes.fromhex("aabbccddeeff")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / CAPTURE_FILENAME
+            write_mhcf(
+                path,
+                1,
+                [
+                    make_frame(
+                        10,
+                        0xFFFFFFF0,
+                        source,
+                        destination,
+                        replay_origin=True,
+                    ),
+                    make_frame(11, 0x00000010, source, destination),
+                ],
+            )
+            self.assertEqual(validate_mhcf(path).header.frame_count, 2)
+
+            with self.assertRaisesRegex(
+                CaptureFormatError, "non-monotonic modular processNowMs"
+            ):
+                write_mhcf(
+                    path,
+                    1,
+                    [
+                        make_frame(
+                            20,
+                            1000,
+                            source,
+                            destination,
+                            replay_origin=True,
+                        ),
+                        make_frame(21, 900, source, destination),
+                    ],
+                )
 
     def test_mhcf_requires_exactly_one_initial_replay_origin(self):
         source = bytes.fromhex("101122334455")
@@ -266,6 +321,188 @@ class CsiCaptureFormatTest(unittest.TestCase):
 
 
 class CsiCaptureWorkflowTest(unittest.TestCase):
+    @staticmethod
+    def capture_ready_status() -> dict:
+        return {
+            "csi": {
+                "enabled": True,
+                "runtime_fault": False,
+                "runtime_reconcile_pending": False,
+                "queue_allocated": True,
+                "calibration_state": "forced",
+                "motion": {
+                    "enabled": True,
+                    "state": "calibrating",
+                    "has_frame": True,
+                    "data_fresh": True,
+                },
+            }
+        }
+
+    def test_capture_requires_enabled_alarm_with_at_least_one_valid_band(self):
+        require_capture_ready_config(
+            {
+                "csi_alarm": {
+                    "enabled": True,
+                    "bands": [
+                        {"start": "invalid", "end": 7},
+                        {"start": 8, "end": 15},
+                    ],
+                }
+            }
+        )
+
+        invalid_configs = (
+            {},
+            {"csi_alarm": {"enabled": False, "bands": [{"start": 0, "end": 7}]}},
+            {"csi_alarm": {"enabled": True, "bands": []}},
+            {"csi_alarm": {"enabled": True, "bands": [{"start": 8, "end": 7}]}},
+            {"csi_alarm": {"enabled": True, "bands": [{"start": 0, "end": 256}]}},
+            {"csi_alarm": {"enabled": True, "bands": [{"start": True, "end": 7}]}},
+        )
+        for config in invalid_configs:
+            with self.subTest(config=config), self.assertRaises(CaptureWorkflowError):
+                require_capture_ready_config(config)
+
+    def test_capture_requires_stable_forced_gain(self):
+        require_capture_ready_status(self.capture_ready_status())
+        unstable_gain = self.capture_ready_status()
+        unstable_gain["csi"]["calibration_state"] = "collecting"
+        with self.assertRaises(CaptureWorkflowError):
+            require_capture_ready_status(unstable_gain)
+        disabled = self.capture_ready_status()
+        disabled["csi"]["enabled"] = False
+        with self.assertRaises(CaptureWorkflowError):
+            require_capture_ready_status(disabled)
+
+    def test_capture_rejects_faulted_reconciling_or_stale_alarm_runtime(self):
+        invalid_statuses = []
+        for field, value in (
+            ("runtime_fault", True),
+            ("runtime_reconcile_pending", True),
+            ("queue_allocated", False),
+        ):
+            status = self.capture_ready_status()
+            status["csi"][field] = value
+            invalid_statuses.append(status)
+
+        for motion_update in (
+            {"enabled": False},
+            {"state": "unavailable"},
+            {"has_frame": False},
+            {"data_fresh": False},
+        ):
+            status = self.capture_ready_status()
+            status["csi"]["motion"].update(motion_update)
+            invalid_statuses.append(status)
+
+        for status in invalid_statuses:
+            with self.subTest(status=status), self.assertRaises(CaptureWorkflowError):
+                require_capture_ready_status(status)
+
+    def test_collect_preflight_failure_creates_no_capture_artifact(self):
+        valid_config = {
+            "csi_alarm": {
+                "enabled": True,
+                "bands": [{"start": 0, "end": 7}],
+            }
+        }
+        valid_status = self.capture_ready_status()
+        cases = (
+            (
+                "disabled-alarm",
+                {"csi_alarm": {"enabled": False, "bands": [{"start": 0, "end": 7}]}},
+                valid_status,
+            ),
+            (
+                "missing-band",
+                {"csi_alarm": {"enabled": True, "bands": []}},
+                valid_status,
+            ),
+            (
+                "unstable-gain",
+                valid_config,
+                {
+                    **valid_status,
+                    "csi": {**valid_status["csi"], "calibration_state": "collecting"},
+                },
+            ),
+            (
+                "runtime-fault",
+                valid_config,
+                {**valid_status, "csi": {**valid_status["csi"], "runtime_fault": True}},
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for name, config, status in cases:
+                with self.subTest(name=name):
+                    output_root = Path(tmpdir) / name
+
+                    def response(_client, path):
+                        if path == "/api/wifisensing/config":
+                            return config
+                        if path == "/api/wifisensing/status":
+                            return status
+                        self.fail(f"unexpected preflight request: {path}")
+
+                    args = SimpleNamespace(
+                        scenario_id=name,
+                        output_root=output_root,
+                    )
+                    with patch(
+                        "scripts.sensing_analysis.csi_capture.DeviceClient.from_args",
+                        return_value=object(),
+                    ), patch(
+                        "scripts.sensing_analysis.csi_capture.get_json_object",
+                        side_effect=response,
+                    ):
+                        with self.assertRaises(CaptureWorkflowError):
+                            asyncio.run(collect_capture(args))
+
+                    self.assertFalse(output_root.exists())
+
+    def test_collect_identity_mismatch_creates_no_capture_artifact(self):
+        config = {
+            "csi_alarm": {
+                "enabled": True,
+                "bands": [{"start": 0, "end": 7}],
+            }
+        }
+        status = self.capture_ready_status()
+        system_info = {
+            "firmware_commit": "b" * 40,
+            "firmware_dirty": False,
+        }
+
+        def response(_client, path):
+            if path == "/api/wifisensing/config":
+                return config
+            if path == "/api/wifisensing/status":
+                return status
+            if path == "/api/system/info":
+                return system_info
+            self.fail(f"unexpected preflight request: {path}")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "identity-mismatch"
+            args = SimpleNamespace(
+                scenario_id="identity-mismatch",
+                output_root=output_root,
+                firmware_commit="a" * 40,
+            )
+            with patch(
+                "scripts.sensing_analysis.csi_capture.DeviceClient.from_args",
+                return_value=object(),
+            ), patch(
+                "scripts.sensing_analysis.csi_capture.get_json_object",
+                side_effect=response,
+            ):
+                with self.assertRaisesRegex(CaptureWorkflowError, "does not match expected"):
+                    asyncio.run(collect_capture(args))
+
+            self.assertFalse(output_root.exists())
+
     def create_raw_capture(self, root: Path) -> tuple[Path, bytes, bytes]:
         capture_dir = root / "raw-capture"
         capture_dir.mkdir()
@@ -290,6 +527,8 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
         system_info = {
             "firmware_version": "1.0.0-test",
             "firmware_built_target": "esp32s3",
+            "firmware_commit": "a" * 40,
+            "firmware_dirty": False,
             "esp_platform": "ESP32-S3",
             "sdk_version": "5.5.1",
             "arduino_version": "3.x",
@@ -336,6 +575,32 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
         atomic_write_json(capture_dir / MANIFEST_FILENAME, manifest)
         return capture_dir, source, destination
 
+    def test_firmware_provenance_uses_and_verifies_device_identity(self):
+        system_info = {
+            "firmware_version": "1.0.0-test",
+            "firmware_built_target": "esp32s3",
+            "firmware_commit": "a" * 40,
+            "firmware_dirty": False,
+            "esp_platform": "ESP32-S3",
+            "sdk_version": "5.5.1",
+            "arduino_version": "3.x",
+        }
+        provenance = firmware_provenance(system_info, "a" * 40)
+        self.assertEqual(provenance["firmware_commit"], "a" * 40)
+        self.assertFalse(provenance["firmware_dirty"])
+        self.assertTrue(provenance["firmware_identity_verified"])
+
+        dirty_info = {**system_info, "firmware_dirty": True}
+        dirty = firmware_provenance(dirty_info, f"{'a' * 40}-dirty")
+        self.assertEqual(dirty["firmware_commit"], f"{'a' * 40}-dirty")
+
+        with self.assertRaisesRegex(CaptureWorkflowError, "does not match expected"):
+            firmware_provenance(system_info, "b" * 40)
+        with self.assertRaisesRegex(CaptureWorkflowError, "does not match expected"):
+            firmware_provenance(dirty_info, "a" * 40)
+        with self.assertRaisesRegex(CaptureWorkflowError, "no exact 40-hex"):
+            firmware_provenance({**system_info, "firmware_commit": "unknown"}, "a" * 40)
+
     def mark_scenario_reviewed(self, capture_dir: Path) -> None:
         scenario_path = capture_dir / SCENARIO_FILENAME
         scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
@@ -349,6 +614,17 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                 "confidence": "high",
             }
         )
+        scenario["acceptance"] = {
+            "reviewed": True,
+            "max_false_positive_ms": 100,
+            "max_false_negative_ms": 100,
+            "max_invalid_decision_ms": 100,
+            "max_detection_latency_ms": 100,
+            "max_clear_latency_ms": 100,
+            "max_motion_dropout_ms": 100,
+            "max_missed_motion_intervals": 0,
+            "max_uncleared_transitions": 0,
+        }
         atomic_write_json(scenario_path, scenario)
 
     def test_annotate_review_promote_anonymizes_macs_and_keeps_ground_truth_separate(self):
@@ -371,6 +647,19 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
             annotate_capture(annotation_args)
             review_args = SimpleNamespace(**{**vars(annotation_args), "review": True})
             annotate_capture(review_args)
+            set_acceptance(
+                SimpleNamespace(
+                    target=capture_dir,
+                    max_false_positive_ms=100,
+                    max_false_negative_ms=100,
+                    max_invalid_decision_ms=100,
+                    max_detection_latency_ms=100,
+                    max_clear_latency_ms=100,
+                    max_motion_dropout_ms=100,
+                    max_missed_motion_intervals=0,
+                    max_uncleared_transitions=0,
+                )
+            )
 
             fixture_root = root / "fixtures"
             promoted = promote_capture(
@@ -429,6 +718,75 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                         reviewed=True,
                     )
                 )
+
+    def test_acceptance_requires_reviewed_ground_truth(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            capture_dir, _, _ = self.create_raw_capture(Path(tmpdir))
+            with self.assertRaisesRegex(CaptureWorkflowError, "not been marked reviewed"):
+                set_acceptance(
+                    SimpleNamespace(
+                        target=capture_dir,
+                        max_false_positive_ms=100,
+                        max_false_negative_ms=100,
+                        max_invalid_decision_ms=100,
+                        max_detection_latency_ms=100,
+                        max_clear_latency_ms=100,
+                        max_motion_dropout_ms=100,
+                        max_missed_motion_intervals=0,
+                        max_uncleared_transitions=0,
+                    )
+                )
+
+    def test_acceptance_command_upgrades_a_reviewed_g0_raw_scenario(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            capture_dir, _, _ = self.create_raw_capture(Path(tmpdir))
+            self.mark_scenario_reviewed(capture_dir)
+            scenario_path = capture_dir / SCENARIO_FILENAME
+            scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+            del scenario["acceptance"]
+            atomic_write_json(scenario_path, scenario)
+
+            set_acceptance(
+                SimpleNamespace(
+                    target=capture_dir,
+                    max_false_positive_ms=100,
+                    max_false_negative_ms=100,
+                    max_invalid_decision_ms=100,
+                    max_detection_latency_ms=100,
+                    max_clear_latency_ms=100,
+                    max_motion_dropout_ms=100,
+                    max_missed_motion_intervals=0,
+                    max_uncleared_transitions=0,
+                )
+            )
+            upgraded = json.loads(scenario_path.read_text(encoding="utf-8"))
+            self.assertTrue(upgraded["acceptance"]["reviewed"])
+            self.assertEqual(upgraded["acceptance"]["max_invalid_decision_ms"], 100)
+
+    def test_ground_truth_edit_invalidates_prior_acceptance_review(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            capture_dir, _, _ = self.create_raw_capture(Path(tmpdir))
+            self.mark_scenario_reviewed(capture_dir)
+            annotate_capture(
+                SimpleNamespace(
+                    target=capture_dir,
+                    review=False,
+                    start_ms=20,
+                    end_ms=30,
+                    motion="present",
+                    occupancy="occupied",
+                    environment="stable",
+                    evidence="operator",
+                    confidence="high",
+                    note="Replace reviewed unit interval.",
+                    replace=True,
+                )
+            )
+            scenario = json.loads(
+                (capture_dir / SCENARIO_FILENAME).read_text(encoding="utf-8")
+            )
+            self.assertFalse(scenario["ground_truth"]["reviewed"])
+            self.assertFalse(scenario["acceptance"]["reviewed"])
 
     def test_promotion_rejects_sensitive_free_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -22,6 +22,8 @@ export type SystemInformation = {
   firmware_version: string;
   firmware_name?: string;
   firmware_built_target?: string;
+  firmware_commit: string;
+  firmware_dirty: boolean;
   cpu_freq_mhz: number;
   cpu_type: string;
   cpu_rev: number;
@@ -675,7 +677,12 @@ export interface PowerStatus extends PowerConfig {
   wake_awake_window_ms: number;
   wake_awake_eta_ms: number;
   last_activity_ms: number;
-  thermal_state: "normal" | "soft_throttle" | "hard_throttle" | "critical" | "unknown";
+  thermal_state:
+    | "normal"
+    | "soft_throttle"
+    | "hard_throttle"
+    | "critical"
+    | "unknown";
   thermal_temp_c: number | null;
   thermal_cpu_mhz: number;
   thermal_throttled: boolean;
@@ -718,17 +725,65 @@ export interface WifiSensingSettings {
   enabled: boolean;
   sample_interval_ms: number;
   variance_threshold: number;
+  csi_alarm: CsiAlarmSettings;
+}
+
+export interface CsiAlarmBand {
+  start: number;
+  end: number;
+}
+
+export interface CsiAlarmSettings {
+  enabled: boolean;
+  bands: CsiAlarmBand[];
+  baseline_frames: number;
+  top_k: number;
+  enter_threshold: number;
+  clear_threshold: number;
+  hold_ms: number;
+  clear_hold_ms: number;
+  min_noise: number;
+  min_energy: number;
+  noisy_threshold: number;
+  auto_recalibration: boolean;
+  sensitivity: 0 | 1 | 2;
+}
+
+export interface CsiMotionStatus {
+  enabled: boolean;
+  state: string;
+  baseline_ready: boolean;
+  detected: boolean;
+  decision_valid: boolean;
+  has_frame: boolean;
+  data_fresh: boolean;
+  last_frame_ms: number;
+  frame_age_ms: number;
+  noisy: boolean;
+  needs_calibration: boolean;
+  score: number;
+  confidence: number;
+  frames_seen: number;
+  width: number;
+  band_count: number;
+  selected_carriers: number;
+  valid_carriers: number;
+  last_reset_reason: string;
 }
 
 export interface CsiRuntimeMetrics {
   enabled: boolean;
+  runtime_fault: boolean;
+  runtime_reconcile_pending: boolean;
   queue_allocated: boolean;
+  queue_metrics_valid: boolean;
   active_consumer_mask: number;
   consumer_count: number;
   frontend_consumer_active: boolean;
   alarm_consumer_active: boolean;
   boot_consumer_active: boolean;
   matrix_visualization_consumer_active: boolean;
+  diagnostic_capture_consumer_active: boolean;
   queue_depth: number;
   queue_capacity: number;
   queue_drops_total: number;
@@ -745,11 +800,34 @@ export interface CsiRuntimeMetrics {
   batches_per_sec: number;
   last_packet_ms: number;
   last_batch_ms: number;
+  motion_control_epoch: number;
   calibration_count: number;
   calibration_target: number;
   calibration_state: string;
+  motion: CsiMotionStatus;
   ws_client_count: number;
   ws_queue_enabled: boolean;
+  capture: CsiCaptureRuntimeMetrics;
+}
+
+export interface CsiCaptureRuntimeMetrics {
+  client_count: number;
+  queue_enabled: boolean;
+  starting: boolean;
+  accepting: boolean;
+  stopping: boolean;
+  session_id: number;
+  start_exclusive_sequence: number;
+  stop_inclusive_sequence: number;
+  records_offered: number;
+  records_enqueued: number;
+  records_dropped: number;
+  truncated_records: number;
+}
+
+export interface CsiCalibrationResponse {
+  ok: true;
+  state: "calibrating";
 }
 
 export interface WifiSensingStatus extends WifiSensingData {
@@ -766,7 +844,10 @@ export type AlarmSource =
   | "ble_temperature"
   | "ble_humidity"
   | "ble_battery"
-  | "ble_rssi";
+  | "ble_rssi"
+  | "wifi_csi_motion"
+  | "imu_tamper"
+  | "gpio_digital";
 
 export type AlarmOperator = "above" | "below";
 export type NotifyChannel = "telegram" | "led" | "webhook" | "pushover";

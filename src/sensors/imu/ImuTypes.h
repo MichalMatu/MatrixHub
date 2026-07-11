@@ -57,6 +57,9 @@ struct ImuAlarmConfig {
 struct ImuAlarmStatus {
     bool enabled = false;
     bool sampleFresh = false;
+    // True only when triggerValue is backed by a definitive input decision.
+    // Disabled is an explicit false decision; stale/unavailable data is unknown.
+    bool decisionValid = false;
     bool baselineValid = false;
     bool triggered = false;
     bool pendingTrigger = false;

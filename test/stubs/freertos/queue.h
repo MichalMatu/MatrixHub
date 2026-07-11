@@ -3,6 +3,8 @@
 #include "FreeRTOS.h"
 #include <cstring>
 #include <deque>
+#include <functional>
+#include <mutex>
 #include <vector>
 
 typedef struct { int dummy; } StaticQueue_t;
@@ -12,6 +14,7 @@ namespace TEST_STUBS::FREERTOS {
 struct QueueStub {
     UBaseType_t length = 0;
     size_t itemSize = 0;
+    std::mutex mutex;
     std::deque<std::vector<uint8_t>> items;
 };
 
@@ -21,6 +24,7 @@ inline QueueHandle_t lastCreatedQueue = nullptr;
 inline UBaseType_t lastQueueLength = 0;
 inline size_t lastQueueItemSize = 0;
 inline TickType_t lastQueueSendTimeout = 0;
+inline std::function<void()> beforeQueueSendHook = nullptr;
 
 inline void resetQueueStub() {
     failCreateStaticQueue = false;
@@ -29,6 +33,7 @@ inline void resetQueueStub() {
     lastQueueLength = 0;
     lastQueueItemSize = 0;
     lastQueueSendTimeout = 0;
+    beforeQueueSendHook = nullptr;
 }
 
 } // namespace TEST_STUBS::FREERTOS
@@ -54,10 +59,14 @@ inline QueueHandle_t xQueueCreateStatic(UBaseType_t uxQueueLength,
 
 inline BaseType_t xQueueSend(QueueHandle_t xQueue, const void* pvItemToQueue, TickType_t xTicksToWait) {
     TEST_STUBS::FREERTOS::lastQueueSendTimeout = xTicksToWait;
+    if (TEST_STUBS::FREERTOS::beforeQueueSendHook) {
+        TEST_STUBS::FREERTOS::beforeQueueSendHook();
+    }
     auto* queue = static_cast<TEST_STUBS::FREERTOS::QueueStub*>(xQueue);
     if (!queue || !pvItemToQueue) {
         return pdFALSE;
     }
+    std::lock_guard<std::mutex> lock(queue->mutex);
     if (TEST_STUBS::FREERTOS::failNextQueueSend) {
         TEST_STUBS::FREERTOS::failNextQueueSend = false;
         return pdFALSE;
@@ -83,7 +92,11 @@ inline BaseType_t xQueueSendFromISR(QueueHandle_t xQueue,
 inline BaseType_t xQueueReceive(QueueHandle_t xQueue, void* pvBuffer, TickType_t xTicksToWait) {
     (void)xTicksToWait;
     auto* queue = static_cast<TEST_STUBS::FREERTOS::QueueStub*>(xQueue);
-    if (!queue || !pvBuffer || queue->items.empty()) {
+    if (!queue || !pvBuffer) {
+        return pdFALSE;
+    }
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    if (queue->items.empty()) {
         return pdFALSE;
     }
 
@@ -95,12 +108,20 @@ inline BaseType_t xQueueReceive(QueueHandle_t xQueue, void* pvBuffer, TickType_t
 
 inline UBaseType_t uxQueueMessagesWaiting(QueueHandle_t xQueue) {
     auto* queue = static_cast<TEST_STUBS::FREERTOS::QueueStub*>(xQueue);
-    return queue ? static_cast<UBaseType_t>(queue->items.size()) : 0;
+    if (!queue) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    return static_cast<UBaseType_t>(queue->items.size());
 }
 
 inline UBaseType_t uxQueueSpacesAvailable(QueueHandle_t xQueue) {
     auto* queue = static_cast<TEST_STUBS::FREERTOS::QueueStub*>(xQueue);
-    if (!queue || queue->items.size() >= queue->length) {
+    if (!queue) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    if (queue->items.size() >= queue->length) {
         return 0;
     }
     return static_cast<UBaseType_t>(queue->length - queue->items.size());

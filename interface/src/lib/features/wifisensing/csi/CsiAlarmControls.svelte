@@ -12,6 +12,10 @@
 	import Trash from '~icons/tabler/trash';
 	import * as m from '$lib/paraglide/messages.js';
 	import { FormInput, FormSelect } from '$lib/components/shared/forms';
+	import {
+		resolveCsiMotionBadgeClass,
+		resolveCsiMotionPresentationState
+	} from './csiMotionPresentation';
 
 	interface Props {
 		settings: CsiAlarmSettings;
@@ -20,6 +24,7 @@
 		hasChanges: boolean;
 		saving: boolean;
 		calibrating: boolean;
+		calibrationAvailable: boolean;
 		selectionMode?: boolean;
 		subcarriers: number;
 		onSave: () => void;
@@ -37,6 +42,7 @@
 		hasChanges,
 		saving,
 		calibrating,
+		calibrationAvailable,
 		selectionMode = $bindable(false),
 		subcarriers,
 		onSave,
@@ -47,25 +53,30 @@
 		onSensitivity
 	}: Props = $props();
 
+	const presentationState = $derived(resolveCsiMotionPresentationState(settings.enabled, status));
 	const stateLabel = $derived.by(() => {
-		if (!settings.enabled) return m.csi_alarm_state_disabled();
-		if (!status) return m.csi_alarm_state_unknown();
-		if (status.detected) return m.csi_alarm_state_motion();
-		if (status.noisy) return m.csi_alarm_state_noisy();
-		if (status.state === 'calibrating') return m.csi_alarm_state_calibrating();
-		if (status.state === 'needs_configuration') return m.csi_alarm_state_needs_configuration();
-		if (status.baseline_ready) return m.csi_alarm_state_monitoring();
-		return status.state.replaceAll('_', ' ');
+		switch (presentationState) {
+			case 'disabled':
+				return m.csi_alarm_state_disabled();
+			case 'unknown':
+				return m.csi_alarm_state_unknown();
+			case 'needs_calibration':
+				return m.csi_alarm_state_needs_calibration();
+			case 'stale':
+				return m.csi_alarm_state_stale();
+			case 'motion':
+				return m.csi_alarm_state_motion();
+			case 'noisy':
+				return m.csi_alarm_state_noisy();
+			case 'calibrating':
+				return m.csi_alarm_state_calibrating();
+			case 'needs_configuration':
+				return m.csi_alarm_state_needs_configuration();
+			default:
+				return m.csi_alarm_state_monitoring();
+		}
 	});
-	const stateClass = $derived(
-		status?.detected
-			? 'badge-error'
-			: status?.noisy
-				? 'badge-warning'
-				: settings.enabled
-					? 'badge-success'
-					: 'badge-ghost'
-	);
+	const stateClass = $derived(resolveCsiMotionBadgeClass(presentationState));
 	const carrierCount = $derived(Math.max(subcarriers || status?.width || 256, 1));
 	const selectionLabel = $derived(
 		selectionMode ? m.csi_alarm_selecting() : m.csi_alarm_select_band()
@@ -114,6 +125,12 @@
 		</div>
 	{/snippet}
 
+	{#if presentationState === 'needs_calibration'}
+		<div class="alert alert-warning mb-4 text-sm" role="alert">
+			<span>{m.csi_alarm_calibration_required_help()}</span>
+		</div>
+	{/if}
+
 	<div class="grid gap-4 lg:grid-cols-[1fr_auto]">
 		<div class="grid gap-3 sm:grid-cols-3">
 			<div class="rounded-md border border-base-300/60 bg-base-100/30 px-3 py-2">
@@ -156,8 +173,11 @@
 			<button
 				type="button"
 				class="btn btn-sm btn-outline"
-				disabled={!isAdmin || calibrating || !settings.enabled}
+				disabled={!isAdmin || calibrating || !calibrationAvailable}
 				onclick={onCalibrate}
+				title={calibrationAvailable
+					? m.csi_alarm_calibrate()
+					: m.csi_alarm_calibration_not_ready_help()}
 			>
 				<Refresh class="h-4 w-4" />
 				{calibrating ? m.common_loading() : m.csi_alarm_calibrate()}

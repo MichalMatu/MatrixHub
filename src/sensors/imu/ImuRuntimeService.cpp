@@ -47,7 +47,11 @@ ImuRuntimeService::ImuRuntimeService(FS* fs,
     publishBaselineFromSettings(_state);
 }
 
-void ImuRuntimeService::begin() {
+void ImuRuntimeService::begin(bool retainedAlarmTriggered) {
+    // This runs before ApplicationRuntime can tick the detector. Restoring the
+    // RTC-backed decision first prevents the initial fresh sample from treating
+    // a new detector object's default false as authoritative.
+    _alarmDetector.restoreRetainedTrigger(retainedAlarmTriggered);
     addUpdateHandler(
         [this](std::string_view originId) {
             (void)originId;
@@ -208,7 +212,7 @@ void ImuRuntimeService::updateAlarmDetector(uint32_t nowMs) {
 }
 
 void ImuRuntimeService::publishAlarmValue(const ImuAlarmStatus& status) {
-    if (!_alarmService) {
+    if (!_alarmService || !status.decisionValid) {
         return;
     }
 

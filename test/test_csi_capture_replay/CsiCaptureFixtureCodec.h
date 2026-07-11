@@ -63,6 +63,7 @@ enum class CsiCaptureError : uint8_t {
     InvalidBooleanMetadata,
     NonZeroReserved,
     SequenceGap,
+    NonMonotonicProcessTime,
     FrameSectionMismatch,
     OutputTooSmall,
 };

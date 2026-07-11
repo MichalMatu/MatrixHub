@@ -86,8 +86,9 @@ constexpr uint32_t kMagicValid = 0xC0FFEE42;
  *  45 - Added Matrix native effect engine/provider settings (June 2026)
  *  46 - Added Matrix data visualization background settings (June 2026)
  *  47 - Added configurable deep-sleep wake sources/windows to PowerData (July 2026)
+ *  48 - Added semantic alarm runtime identities to retained state (July 2026)
  */
-constexpr uint32_t kSchemaVersion = 47;
+constexpr uint32_t kSchemaVersion = 48;
 
 // Shelly Constants moved to types/RtcShellyTypes.h
 
@@ -374,6 +375,9 @@ constexpr size_t getTotalRtcUsage() {
  * Slow is guaranteed for persistence).
  */
 constexpr size_t kLpSramTotal = 8192;  // 8KB on S3
+
+static_assert(getTotalRtcUsage() <= kLpSramTotal,
+              "Tracked RTC retained state exceeds ESP32-S3 LP SRAM");
 
 /**
  * Log current RTC usage and config status

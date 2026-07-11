@@ -127,7 +127,7 @@ bool WifiSensingTaskRunner::start(uint32_t sampleIntervalMs) {
       LOGW("Task already running");
       return true;
     }
-    if (!reapStoppedTask(0)) {
+    if (!finishPendingStop(0)) {
       LOGW("Task is still stopping");
       return false;
     }
@@ -221,11 +221,11 @@ bool WifiSensingTaskRunner::stop() {
     (void)xTaskAbortDelay(_taskHandle);
   }
 
-  uint32_t maxWaitMs = _sampleIntervalMs * 5;
-  if (maxWaitMs < 200) {
-    maxWaitMs = 200;
-  }
-  const TickType_t waitTicks = wasRunning ? pdMS_TO_TICKS(maxWaitMs) : 0;
+  // xTaskAbortDelay() above removes the sampling interval from the shutdown
+  // budget. Keep every control-plane stop bounded by the shared task timeout;
+  // a delayed exit remains retryable through finishPendingStop().
+  const TickType_t waitTicks =
+      wasRunning ? TIMEOUT::TASK_SHUTDOWN_TICKS : 0;
   if (!reapStoppedTask(waitTicks)) {
     LOGW("WifiSensing task did not suspend cleanly - keeping resources allocated");
     return false;
@@ -233,6 +233,16 @@ bool WifiSensingTaskRunner::stop() {
 
   LOGI("Task stopped");
   return true;
+}
+
+bool WifiSensingTaskRunner::finishPendingStop(TickType_t waitTicks) {
+  if (_running.load(std::memory_order_acquire)) {
+    return false;
+  }
+  if (_taskHandle != nullptr && xTaskGetCurrentTaskHandle() == _taskHandle) {
+    return false;
+  }
+  return reapStoppedTask(waitTicks);
 }
 
 bool WifiSensingTaskRunner::reapStoppedTask(TickType_t waitTicks) {

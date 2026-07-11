@@ -8,9 +8,8 @@ namespace CONFIG {
 namespace JSON {
 
 bool deserializeGpio(JsonObject& obj, GPIO::GpioData& data);
-void loadGpio(JsonObject& obj);
+bool loadGpio(JsonObject& obj);
 void saveGpio(JsonObject& obj);
 
 }  // namespace JSON
 }  // namespace CONFIG
-

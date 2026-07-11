@@ -20,7 +20,7 @@ public:
                       ImuManager* imuManager,
                       ALARMS::AlarmService* alarmService = nullptr);
 
-    void begin();
+    void begin(bool retainedAlarmTriggered = false);
     void tick();
 
     ImuMetrics getMetrics() const;

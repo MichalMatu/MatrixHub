@@ -1,6 +1,7 @@
 #include "WifiSensingApiService.h"
 #include "CsiCaptureWireFormat.h"
 #include "CsiCaptureSequenceWindow.h"
+#include "CsiCaptureAdmission.h"
 #include "CsiWireFormat.h"
 
 #include <esp_http_server.h>
@@ -37,6 +38,11 @@ constexpr uint32_t kCsiWsQueueStackBytes = 4096;
 constexpr size_t kCsiCaptureWsQueueDepth = 8;
 constexpr uint32_t kCsiCaptureWsQueueStackBytes = 4096;
 constexpr uint32_t kCsiCapturePowerKeepAliveMs = 30000;
+constexpr uint32_t kCsiLifecycleRetryMs = 250;
+
+uint32_t nonZeroDeadline(uint32_t deadlineMs) {
+    return deadlineMs == 0 ? 1 : deadlineMs;
+}
 } // namespace
 
 // Constructor
@@ -62,11 +68,19 @@ WifiSensingApiService::WifiSensingApiService(PsychicHttpServer* server, Security
         LOGE("Failed to create CSI capture session mutex");
     }
     _csiEndpoint.setRequestCallback([this]() {
+        CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+        if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+            return;
+        }
         if (_powerManager) {
             _powerManager->notifyActivity("ws/csi");
         }
     });
     _csiCaptureEndpoint.setRequestCallback([this]() {
+        CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+        if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+            return;
+        }
         if (_powerManager) {
             _powerManager->notifyActivity("ws/csi-capture");
         }
@@ -80,21 +94,7 @@ WifiSensingApiService::WifiSensingApiService(PsychicHttpServer* server, Security
 }
 
 WifiSensingApiService::~WifiSensingApiService() {
-    cancelPendingCsiFrontendStop();
-    cancelPendingCsiCaptureStop();
-    const TickType_t waitStep = pdMS_TO_TICKS(10);
-    TickType_t waited = 0;
-    while ((_csiFrontendStopTaskRunning.load(std::memory_order_acquire) ||
-            _csiCaptureStopTaskRunning.load(std::memory_order_acquire)) &&
-           waited < pdMS_TO_TICKS(1000)) {
-        vTaskDelay(waitStep);
-        waited += waitStep;
-    }
-    if (_csiService) {
-        _csiService->setCsiCallback(nullptr);
-    }
-    teardownCsiTransport();
-    teardownCsiCaptureTransport();
+    shutdown();
     if (_csiFrontendLifecycleMutex) {
         vSemaphoreDelete(_csiFrontendLifecycleMutex);
         _csiFrontendLifecycleMutex = nullptr;
@@ -102,6 +102,77 @@ WifiSensingApiService::~WifiSensingApiService() {
     if (_csiCaptureSessionMutex) {
         vSemaphoreDelete(_csiCaptureSessionMutex);
         _csiCaptureSessionMutex = nullptr;
+    }
+}
+
+void WifiSensingApiService::fenceLifecycleWorkers() {
+    _shuttingDown.store(true, std::memory_order_release);
+    _shutdownGate.close();
+    cancelPendingCsiFrontendStop();
+    cancelPendingCsiCaptureStop();
+
+    // A handler that entered before close() may still be about to schedule a
+    // stop task. Drain those handlers first, then cancel the due times again so
+    // a pre-fence scheduler cannot restore a grace-period deadline.
+    while (_shutdownGate.hasInFlight()) {
+        vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+    }
+    cancelPendingCsiFrontendStop();
+    cancelPendingCsiCaptureStop();
+
+    // A stop worker may already be inside CsiService::setConsumerActive(),
+    // whose shutdown path can wait for up to TASK_SHUTDOWN_MS.  Do not use a
+    // shorter best-effort timeout here: both workers hold `this` as their task
+    // context, so deleting the mutexes (or returning from this destructor)
+    // before they have drained would be a use-after-free.
+    while (_csiFrontendWorkerGate.isWorkerRunning() ||
+           _csiCaptureWorkerGate.isWorkerRunning()) {
+        vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+    }
+    if (_csiService) {
+        _csiService->setCsiCallback(nullptr);
+    }
+}
+
+void WifiSensingApiService::prepareForSystemShutdown() {
+    fenceLifecycleWorkers();
+
+    // Restart and factory-reset hooks execute synchronously on the httpd task.
+    // A queued CSI sender can already be inside httpd_ws_send_data(), which in
+    // turn waits for that same httpd task. Waiting for the WebSocket worker here
+    // would therefore form a cycle. Fence new messages and request both workers
+    // to stop, but retain their queues/pools until the imminent hardware reset.
+    _csiEndpoint.broadcaster().requestQueueStop();
+    _csiCaptureEndpoint.broadcaster().requestQueueStop();
+}
+
+void WifiSensingApiService::shutdown() {
+    fenceLifecycleWorkers();
+
+    // disableQueue() is deliberately retryable while its worker drains. The
+    // endpoint objects and their payload pools must stay alive until both
+    // workers have reached the terminal state; a single best-effort call here
+    // would defer that safety boundary until an unrelated later destructor.
+    const uint32_t teardownStartedMs = millis();
+    bool teardownWaitLogged = false;
+    bool frontendTransportStopped = false;
+    bool captureTransportStopped = false;
+    while (!frontendTransportStopped || !captureTransportStopped) {
+        if (!frontendTransportStopped) {
+            frontendTransportStopped = teardownCsiTransport();
+        }
+        if (!captureTransportStopped) {
+            captureTransportStopped = teardownCsiCaptureTransport();
+        }
+        if (frontendTransportStopped && captureTransportStopped) {
+            break;
+        }
+        if (!teardownWaitLogged &&
+            (millis() - teardownStartedMs) >= TIMEOUT::TASK_SHUTDOWN_MS) {
+            LOGW("Waiting for CSI WebSocket transports to drain");
+            teardownWaitLogged = true;
+        }
+        vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
     }
 }
 
@@ -124,6 +195,10 @@ void WifiSensingApiService::injectComponents(WIFISENSING::WifiSensingSettings* s
             AuthenticationPredicates::IS_AUTHENTICATED,
             nullptr,
             [this]() {
+                CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+                if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+                    return;
+                }
                 if (_powerManager) {
                     _powerManager->notifyActivity(_activityTag);
                 }
@@ -157,6 +232,10 @@ void WifiSensingApiService::begin() {
     // 4. Register CSI Callback
     if (_csiService) {
         _csiService->setCsiCallback([this](const WIFISENSING::CSI::CsiPacket* batch, size_t count) {
+            CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+            if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+                return;
+            }
             if (!batch || count == 0) return;
 
             for (size_t offset = 0; offset < count;) {
@@ -172,7 +251,7 @@ void WifiSensingApiService::begin() {
 
                 // Keep this byte layout aligned with docs/engineering/integrations/csi.md
                 // and interface/src/lib/features/wifisensing/csi/parseCsiFrame.ts.
-                const bool delivered = _csiEndpoint.broadcaster().broadcastSerialized(
+                const bool delivered = _csiEndpoint.broadcaster().broadcastSerializedQueued(
                     reserveLen,
                     [batchStart, batchCount](uint8_t* buffer, size_t capacity) -> size_t {
                         return API::CSI_WIRE::writeBatch(buffer, capacity, batchStart, batchCount);
@@ -187,6 +266,11 @@ void WifiSensingApiService::begin() {
 }
 
 esp_err_t WifiSensingApiService::handleCsiCaptureFrame(httpd_req_t* req, int fd) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return ESP_FAIL;
+    }
+
     if (!req || fd < 0) {
         return ESP_FAIL;
     }
@@ -252,6 +336,7 @@ esp_err_t WifiSensingApiService::handleCsiCaptureFrame(httpd_req_t* req, int fd)
 bool WifiSensingApiService::startCsiCaptureSession(int fd) {
     bool reserved = false;
     uint32_t sessionId = 0;
+    uint32_t sessionGeneration = 0;
     API::CSI_CAPTURE_WIRE::ErrorCode error = API::CSI_CAPTURE_WIRE::ErrorCode::Busy;
 
     {
@@ -272,6 +357,17 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
             } while (sessionId == 0);
 
             _csiCaptureSessionId.store(sessionId, std::memory_order_release);
+            // Publish a monotonic ownership token before the fd. A delayed
+            // disconnect cleanup must not release a newer session after lwIP
+            // reuses the same descriptor.
+            sessionGeneration = _csiCaptureSessionGeneration.fetch_add(
+                                    1, std::memory_order_acq_rel) +
+                                1;
+            if (sessionGeneration == 0) {
+                sessionGeneration = _csiCaptureSessionGeneration.fetch_add(
+                                        1, std::memory_order_acq_rel) +
+                                    1;
+            }
             _csiCaptureClientFd.store(fd, std::memory_order_release);
             _csiCaptureStarting.store(true, std::memory_order_release);
             _csiCaptureAccepting.store(false, std::memory_order_release);
@@ -286,21 +382,24 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
         return false;
     }
 
-    handleCsiCaptureStateChange(true);
-    if (!_csiCaptureEndpoint.broadcaster().isQueueEnabled() ||
-        !_csiService ||
-        !_csiService->isConsumerActive(WIFISENSING::CSI::CsiConsumer::DiagnosticCapture)) {
-        {
-            SYSTEM::ScopeLock lock(_csiCaptureSessionMutex, pdMS_TO_TICKS(250));
-            if (lock.isLocked() && _csiCaptureClientFd.load(std::memory_order_relaxed) == fd) {
-                releaseCsiCaptureSessionLocked();
-            }
-        }
+    const bool activationAccepted = handleCsiCaptureStateChange(true);
+    const auto activationMetrics = _csiService
+                                       ? _csiService->getMetricsSnapshot()
+                                       : WIFISENSING::CSI::CsiMetricsSnapshot{};
+    const bool captureRuntimeReady = isCsiCaptureStartReady(
+        activationAccepted,
+        _csiCaptureEndpoint.broadcaster().isQueueEnabled(),
+        _csiService && _csiService->isRuntimeReady(),
+        activationMetrics.enabled,
+        activationMetrics.diagnosticCaptureConsumerActive,
+        activationMetrics.queueMetricsValid);
+    if (!captureRuntimeReady) {
+        releaseCsiCaptureSessionOrDefer(fd, sessionGeneration);
         sendCsiCaptureError(
             fd,
             sessionId,
             static_cast<uint16_t>(API::CSI_CAPTURE_WIRE::ErrorCode::TransportUnavailable));
-        handleCsiCaptureStateChange(false);
+        (void)handleCsiCaptureStateChange(false);
         return false;
     }
 
@@ -313,10 +412,18 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
         SYSTEM::ScopeLock lock(_csiCaptureSessionMutex, pdMS_TO_TICKS(500));
         if (lock.isLocked() &&
             _csiCaptureClientFd.load(std::memory_order_relaxed) == fd &&
+            _csiCaptureSessionGeneration.load(std::memory_order_relaxed) ==
+                sessionGeneration &&
             _csiCaptureSessionId.load(std::memory_order_relaxed) == sessionId &&
             _csiCaptureStarting.load(std::memory_order_relaxed)) {
             const auto metrics = _csiService->getMetricsSnapshot();
-            metricsValid = metrics.queueMetricsValid;
+            metricsValid = isCsiCaptureStartReady(
+                true,
+                _csiCaptureEndpoint.broadcaster().isQueueEnabled(),
+                _csiService->isRuntimeReady(),
+                metrics.enabled,
+                metrics.diagnosticCaptureConsumerActive,
+                metrics.queueMetricsValid);
             if (metricsValid) {
                 API::CSI_CAPTURE_WIRE::HelloPayload hello;
                 hello.startedAtMs = millis();
@@ -336,7 +443,7 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
                     metrics.motionControlEpoch, std::memory_order_relaxed);
 
                 int target = fd;
-                helloEnqueued = _csiCaptureEndpoint.broadcaster().broadcastSerialized(
+                helloEnqueued = _csiCaptureEndpoint.broadcaster().broadcastSerializedQueued(
                     &target,
                     1,
                     API::CSI_CAPTURE_WIRE::HELLO_MESSAGE_BYTES,
@@ -356,6 +463,10 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
     }
 
     if (!helloEnqueued) {
+        // This is intentionally unconditional. If the HELLO lock timed out,
+        // cleanup becomes durable; if another path already released this
+        // generation, the full ownership token makes the helper a no-op.
+        releaseCsiCaptureSessionOrDefer(fd, sessionGeneration);
         if (!metricsValid) {
             LOGE("CSI capture START rejected: source queue metrics unavailable");
         } else {
@@ -365,7 +476,7 @@ bool WifiSensingApiService::startCsiCaptureSession(int fd) {
             fd,
             sessionId,
             static_cast<uint16_t>(API::CSI_CAPTURE_WIRE::ErrorCode::TransportUnavailable));
-        handleCsiCaptureStateChange(false);
+        (void)handleCsiCaptureStateChange(false);
         return false;
     }
 
@@ -428,7 +539,7 @@ bool WifiSensingApiService::stopCsiCaptureSession(int fd) {
     }
 
     if (endAttempted) {
-        handleCsiCaptureStateChange(false);
+        (void)handleCsiCaptureStateChange(false);
     }
     if (endAttempted && !endEnqueued) {
         LOGE("CSI capture session %lu ended without queued END frame",
@@ -468,6 +579,32 @@ void WifiSensingApiService::releaseCsiCaptureSessionLocked() {
     _csiCaptureStopping.store(false, std::memory_order_release);
     _csiCaptureClientFd.store(-1, std::memory_order_release);
     _csiCaptureDesiredActive.store(false, std::memory_order_release);
+}
+
+void WifiSensingApiService::releaseCsiCaptureSessionOrDefer(
+    int fd,
+    uint32_t sessionGeneration) {
+    {
+        SYSTEM::ScopeLock lock(_csiCaptureSessionMutex, pdMS_TO_TICKS(250));
+        if (lock.isLocked()) {
+            const int activeFd =
+                _csiCaptureClientFd.load(std::memory_order_relaxed);
+            const uint32_t activeGeneration =
+                _csiCaptureSessionGeneration.load(std::memory_order_relaxed);
+            if (CsiCaptureCleanupGate::ownsSession(
+                    fd,
+                    sessionGeneration,
+                    activeFd,
+                    activeGeneration)) {
+                releaseCsiCaptureSessionLocked();
+            }
+            return;
+        }
+    }
+
+    if (scheduleCsiCaptureCleanup(fd, sessionGeneration)) {
+        LOGW("CSI capture session rollback deferred: session lock busy");
+    }
 }
 
 bool WifiSensingApiService::enqueueCsiCaptureEndLocked() {
@@ -532,7 +669,7 @@ bool WifiSensingApiService::enqueueCsiCaptureEndLocked() {
     }
 
     int target = targetFd;
-    const bool enqueued = _csiCaptureEndpoint.broadcaster().broadcastSerialized(
+    const bool enqueued = _csiCaptureEndpoint.broadcaster().broadcastSerializedQueued(
         &target,
         1,
         API::CSI_CAPTURE_WIRE::END_MESSAGE_BYTES,
@@ -550,22 +687,34 @@ void WifiSensingApiService::sendCsiCaptureError(int fd,
         return;
     }
     int target = fd;
-    (void)_csiCaptureEndpoint.broadcaster().broadcastSerialized(
-        &target,
-        1,
-        API::CSI_CAPTURE_WIRE::ERROR_MESSAGE_BYTES,
-        [sessionId, errorCode](uint8_t* buffer, size_t capacity) -> size_t {
-            return API::CSI_CAPTURE_WIRE::writeError(
-                buffer,
-                capacity,
-                sessionId,
-                static_cast<API::CSI_CAPTURE_WIRE::ErrorCode>(errorCode));
-        });
+    const bool enqueued =
+        _csiCaptureEndpoint.broadcaster().broadcastSerializedQueued(
+            &target,
+            1,
+            API::CSI_CAPTURE_WIRE::ERROR_MESSAGE_BYTES,
+            [sessionId, errorCode](uint8_t* buffer, size_t capacity) -> size_t {
+                return API::CSI_CAPTURE_WIRE::writeError(
+                    buffer,
+                    capacity,
+                    sessionId,
+                    static_cast<API::CSI_CAPTURE_WIRE::ErrorCode>(errorCode));
+            });
+    if (!enqueued) {
+        // Capture control traffic must never fall back to a synchronous httpd
+        // send from the request/CSI task. Closing the session gives the client a
+        // deterministic failure instead of silently hanging on an unsent error.
+        _csiCaptureEndpoint.broadcaster().removeClient(fd, true);
+    }
 }
 
 void WifiSensingApiService::offerCsiCaptureBatch(
     const WIFISENSING::CSI::CsiPacket* batch,
     size_t count) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
     if (!batch || count == 0 ||
         (!_csiCaptureStarting.load(std::memory_order_acquire) &&
          !_csiCaptureAccepting.load(std::memory_order_acquire))) {
@@ -658,7 +807,7 @@ void WifiSensingApiService::offerCsiCaptureBatch(
                 API::CSI_CAPTURE_WIRE::BATCH_HEADER_BYTES +
                 (API::CSI_CAPTURE_WIRE::RECORD_MAX_BYTES * captureCount);
             const bool enqueued =
-                _csiCaptureEndpoint.broadcaster().broadcastSerialized(
+                _csiCaptureEndpoint.broadcaster().broadcastSerializedQueued(
                     &target,
                     1,
                     reserveBytes,
@@ -700,7 +849,7 @@ void WifiSensingApiService::offerCsiCaptureBatch(
     if (sessionEnded) {
         // Never disable the CSI consumer synchronously from this processing
         // callback; the deferred worker owns that lifecycle transition.
-        handleCsiCaptureStateChange(false);
+        (void)handleCsiCaptureStateChange(false);
         if (!endEnqueued) {
             LOGE("CSI capture session %lu ended without queued END frame",
                  static_cast<unsigned long>(endedSessionId));
@@ -712,31 +861,59 @@ void WifiSensingApiService::offerCsiCaptureBatch(
 }
 
 void WifiSensingApiService::handleCsiCaptureClientCleanup(int fd) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Snapshot ownership before the bounded lock attempt. If the mutex times
+    // out, this token is persisted for the lifecycle worker instead of losing
+    // the only disconnect notification.
+    const uint32_t observedSessionGeneration =
+        _csiCaptureSessionGeneration.load(std::memory_order_acquire);
     bool wasActive = false;
     bool sessionAlreadyEnded = false;
+    bool cleanupDeferred = false;
     {
         SYSTEM::ScopeLock lock(_csiCaptureSessionMutex, pdMS_TO_TICKS(250));
         if (lock.isLocked()) {
             const int activeFd = _csiCaptureClientFd.load(std::memory_order_relaxed);
-            if (activeFd == fd) {
+            const uint32_t activeGeneration =
+                _csiCaptureSessionGeneration.load(std::memory_order_relaxed);
+            if (CsiCaptureCleanupGate::ownsSession(
+                    fd,
+                    observedSessionGeneration,
+                    activeFd,
+                    activeGeneration)) {
                 releaseCsiCaptureSessionLocked();
                 wasActive = true;
             } else if (activeFd < 0 &&
                        _csiCaptureEndpoint.broadcaster().isQueueEnabled()) {
                 sessionAlreadyEnded = true;
             }
+        } else {
+            cleanupDeferred = true;
         }
     }
 
-    if (wasActive) {
+    if (cleanupDeferred) {
+        if (scheduleCsiCaptureCleanup(fd, observedSessionGeneration)) {
+            LOGW("CSI capture client %d cleanup deferred: session lock busy", fd);
+        }
+    } else if (wasActive) {
         LOGW("CSI capture client %d disconnected without a clean END", fd);
-        handleCsiCaptureStateChange(false);
+        (void)handleCsiCaptureStateChange(false);
     } else if (sessionAlreadyEnded) {
         scheduleCsiCaptureStop();
     }
 }
 
 void WifiSensingApiService::handleCsiFrontendStateChange(bool start) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
     // CSI remains a dedicated data plane. Frontend is just one consumer; future
     // consumers (for example alarms) can keep the service alive independently.
     if (start) {
@@ -746,16 +923,23 @@ void WifiSensingApiService::handleCsiFrontendStateChange(bool start) {
         SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(250));
         if (!lock.isLocked()) {
             LOGW("CSI frontend start deferred: lifecycle lock busy");
+            scheduleCsiFrontendReconcile(millis() + kCsiLifecycleRetryMs);
             return;
         }
 
         if (!ensureCsiTransportReady()) {
             LOGE("Failed to prepare CSI WebSocket transport for frontend");
+            scheduleCsiFrontendReconcile(millis() + kCsiLifecycleRetryMs);
             return;
         }
         if (_csiService) {
-            _csiService->setConsumerActive(WIFISENSING::CSI::CsiConsumer::Frontend, true);
-            LOGI("CSI frontend consumer: ACTIVE");
+            if (_csiService->setConsumerActive(
+                    WIFISENSING::CSI::CsiConsumer::Frontend, true)) {
+                LOGI("CSI frontend consumer: ACTIVE");
+            } else {
+                LOGW("CSI frontend consumer requested; runtime reconciliation pending");
+                scheduleCsiFrontendReconcile(millis() + kCsiLifecycleRetryMs);
+            }
         }
         return;
     }
@@ -764,7 +948,12 @@ void WifiSensingApiService::handleCsiFrontendStateChange(bool start) {
     scheduleCsiFrontendStop();
 }
 
-void WifiSensingApiService::handleCsiCaptureStateChange(bool start) {
+bool WifiSensingApiService::handleCsiCaptureStateChange(bool start) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return false;
+    }
+
     if (start) {
         _csiCaptureDesiredActive.store(true, std::memory_order_release);
         cancelPendingCsiCaptureStop();
@@ -772,26 +961,40 @@ void WifiSensingApiService::handleCsiCaptureStateChange(bool start) {
         SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(250));
         if (!lock.isLocked()) {
             LOGW("CSI capture start deferred: lifecycle lock busy");
-            return;
+            return false;
         }
 
         if (!ensureCsiCaptureTransportReady()) {
             LOGE("Failed to prepare CSI capture WebSocket transport");
-            return;
+            return false;
         }
-        if (_csiService) {
-            _csiService->setConsumerActive(
-                WIFISENSING::CSI::CsiConsumer::DiagnosticCapture, true);
+        if (!_csiService) {
+            return false;
+        }
+
+        const bool activationApplied = _csiService->setConsumerActive(
+            WIFISENSING::CSI::CsiConsumer::DiagnosticCapture, true);
+        const bool runtimeReady =
+            _csiService->isConsumerActive(
+                WIFISENSING::CSI::CsiConsumer::DiagnosticCapture) &&
+            _csiService->isRuntimeReady();
+        if (runtimeReady) {
             LOGI("CSI diagnostic capture consumer: ACTIVE");
+            return true;
         }
-        return;
+
+        LOGW("CSI diagnostic capture runtime unavailable (apply=%d)",
+             activationApplied ? 1 : 0);
+        return false;
     }
 
     // STOP can be completed by the CSI processing task itself. Disabling the
     // last consumer synchronously there would wait on/delete the current task.
-    // The dedicated stop worker performs the transition after the drain grace.
-    _csiCaptureDesiredActive.store(false, std::memory_order_release);
+    // releaseCsiCaptureSessionLocked() already linearized desired=false while
+    // owning the session mutex. Do not write it again here: a newer generation
+    // may have started between the release and this deferred scheduling call.
     scheduleCsiCaptureStop();
+    return true;
 }
 
 bool WifiSensingApiService::ensureCsiTransportReady() {
@@ -830,38 +1033,187 @@ bool WifiSensingApiService::ensureCsiCaptureTransportReady() {
     return true;
 }
 
-void WifiSensingApiService::teardownCsiTransport() {
+bool WifiSensingApiService::teardownCsiTransport() {
     // When the last client leaves, we intentionally drop the dedicated queue.
     // That keeps CSI cheap when the feature is idle and mirrors the previous
     // first-client/last-client semantics.
-    _csiEndpoint.broadcaster().disableQueue();
+    return _csiEndpoint.broadcaster().disableQueue();
 }
 
-void WifiSensingApiService::teardownCsiCaptureTransport() {
-    _csiCaptureEndpoint.broadcaster().disableQueue();
+bool WifiSensingApiService::teardownCsiCaptureTransport() {
+    return _csiCaptureEndpoint.broadcaster().disableQueue();
 }
 
 void WifiSensingApiService::cancelPendingCsiFrontendStop() {
-    _csiFrontendStopDueMs.store(0, std::memory_order_release);
+    bool wakeWorker = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    if (_csiFrontendWorkerGate.hasPendingRequest()) {
+        _csiFrontendScheduleGeneration = _csiFrontendWorkerGate.request();
+        wakeWorker = true;
+    } else {
+        _csiFrontendScheduleGeneration =
+            _csiFrontendWorkerGate.requestedGeneration();
+    }
+    _csiFrontendStopDueMs = 0;
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    if (wakeWorker) {
+        tryStartCsiFrontendLifecycleWorker();
+    }
 }
 
 void WifiSensingApiService::cancelPendingCsiCaptureStop() {
-    _csiCaptureStopDueMs.store(0, std::memory_order_release);
+    bool wakeWorker = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    if (_csiCaptureWorkerGate.hasPendingRequest()) {
+        _csiCaptureScheduleGeneration = _csiCaptureWorkerGate.request();
+        wakeWorker = true;
+    } else {
+        _csiCaptureScheduleGeneration = _csiCaptureWorkerGate.requestedGeneration();
+    }
+    _csiCaptureStopDueMs = 0;
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    if (wakeWorker) {
+        tryStartCsiCaptureLifecycleWorker();
+    }
+}
+
+void WifiSensingApiService::publishCsiFrontendSchedule(uint32_t dueMs) {
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    _csiFrontendScheduleGeneration = _csiFrontendWorkerGate.request();
+    _csiFrontendStopDueMs = nonZeroDeadline(dueMs);
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+}
+
+void WifiSensingApiService::publishCsiCaptureSchedule(uint32_t dueMs) {
+    const uint32_t urgentCleanupDueMs = nonZeroDeadline(millis() + 1);
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    if (_csiCaptureCleanupGate.hasPendingRequest()) {
+        // A later generic STOP must not push an owner rollback back behind the
+        // normal transport grace period.
+        dueMs = urgentCleanupDueMs;
+    }
+    _csiCaptureScheduleGeneration = _csiCaptureWorkerGate.request();
+    _csiCaptureStopDueMs = nonZeroDeadline(dueMs);
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+}
+
+bool WifiSensingApiService::readCsiFrontendSchedule(uint32_t generation,
+                                                   uint32_t& dueMs) {
+    bool matched = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    if (_csiFrontendScheduleGeneration == generation) {
+        dueMs = _csiFrontendStopDueMs;
+        matched = true;
+    }
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    return matched;
+}
+
+bool WifiSensingApiService::readCsiCaptureSchedule(uint32_t generation,
+                                                  uint32_t& dueMs) {
+    bool matched = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    if (_csiCaptureScheduleGeneration == generation) {
+        dueMs = _csiCaptureStopDueMs;
+        matched = true;
+    }
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    return matched;
+}
+
+bool WifiSensingApiService::readCsiCaptureCleanupRequest(
+    CsiCaptureCleanupRequest& request) {
+    bool pending = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    pending = _csiCaptureCleanupGate.snapshot(request);
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    return pending;
+}
+
+bool WifiSensingApiService::completeCsiCaptureCleanupRequest(
+    uint32_t requestGeneration) {
+    bool completed = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    completed =
+        _csiCaptureCleanupGate.completeIfCurrent(requestGeneration);
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    return completed;
+}
+
+void WifiSensingApiService::scheduleCsiFrontendReconcile(uint32_t dueMs) {
+    publishCsiFrontendSchedule(dueMs);
+    tryStartCsiFrontendLifecycleWorker();
+}
+
+bool WifiSensingApiService::scheduleCsiCaptureCleanup(
+    int fd,
+    uint32_t sessionGeneration) {
+    // Ownership cleanup is urgent: the normal transport grace period must not
+    // leave every later START stuck behind a stale `starting`/owner flag.
+    const uint32_t dueMs = nonZeroDeadline(millis() + 1);
+    bool accepted = false;
+    portENTER_CRITICAL(&_csiDeferredScheduleLock);
+    const int activeFd =
+        _csiCaptureClientFd.load(std::memory_order_acquire);
+    const uint32_t activeGeneration =
+        _csiCaptureSessionGeneration.load(std::memory_order_acquire);
+    accepted = _csiCaptureCleanupGate.requestIfOwned(
+                   fd,
+                   sessionGeneration,
+                   activeFd,
+                   activeGeneration) != 0;
+    if (accepted) {
+        _csiCaptureScheduleGeneration = _csiCaptureWorkerGate.request();
+        _csiCaptureStopDueMs = dueMs;
+    }
+    portEXIT_CRITICAL(&_csiDeferredScheduleLock);
+    if (accepted) {
+        tryStartCsiCaptureLifecycleWorker();
+    }
+    return accepted;
 }
 
 void WifiSensingApiService::scheduleCsiFrontendStop() {
-    const uint32_t due = millis() + SENSOR::WIFI_SENSING::CSI_FRONTEND_STOP_GRACE_MS;
-    _csiFrontendStopDueMs.store(due, std::memory_order_release);
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
 
-    bool expected = false;
-    if (!_csiFrontendStopTaskRunning.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel)) {
+    scheduleCsiFrontendReconcile(
+        millis() + SENSOR::WIFI_SENSING::CSI_FRONTEND_STOP_GRACE_MS);
+}
+
+void WifiSensingApiService::scheduleCsiCaptureStop() {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    const uint32_t due = nonZeroDeadline(
+        millis() + SENSOR::WIFI_SENSING::CSI_FRONTEND_STOP_GRACE_MS);
+    publishCsiCaptureSchedule(due);
+    tryStartCsiCaptureLifecycleWorker();
+}
+
+void WifiSensingApiService::tryStartCsiFrontendLifecycleWorker() {
+    if (!_csiFrontendWorkerGate.hasPendingRequest() ||
+        _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    const uint32_t nowMs = millis();
+    const uint32_t retryAtMs =
+        _csiFrontendWorkerSpawnRetryMs.load(std::memory_order_acquire);
+    if (retryAtMs != 0 && static_cast<int32_t>(nowMs - retryAtMs) < 0) {
+        return;
+    }
+    if (!_csiFrontendWorkerGate.tryClaimWorker()) {
         return;
     }
 
     const BaseType_t created = xTaskCreatePinnedToCore(
         csiFrontendStopTask,
-        "csi_ws_stop",
+        "csi_ws_life",
         CONFIG::TASKS::STACK_CSI_FRONTEND_STOP,
         this,
         CONFIG::TASKS::PRIO_CSI_FRONTEND_STOP,
@@ -869,25 +1221,36 @@ void WifiSensingApiService::scheduleCsiFrontendStop() {
         CONFIG::TASKS::CORE_CSI_FRONTEND_STOP);
 
     if (created != pdPASS) {
-        _csiFrontendStopTaskRunning.store(false, std::memory_order_release);
-        LOGW("CSI frontend stop worker creation failed; stopping synchronously");
-        runCsiFrontendStopWorker();
+        _csiFrontendWorkerGate.releaseWorker();
+        _csiFrontendWorkerSpawnRetryMs.store(
+            nonZeroDeadline(nowMs + kCsiLifecycleRetryMs),
+            std::memory_order_release);
+        LOGW("CSI frontend lifecycle worker creation failed; retry pending");
+        return;
     }
+
+    _csiFrontendWorkerSpawnRetryMs.store(0, std::memory_order_release);
 }
 
-void WifiSensingApiService::scheduleCsiCaptureStop() {
-    const uint32_t due = millis() + SENSOR::WIFI_SENSING::CSI_FRONTEND_STOP_GRACE_MS;
-    _csiCaptureStopDueMs.store(due, std::memory_order_release);
+void WifiSensingApiService::tryStartCsiCaptureLifecycleWorker() {
+    if (!_csiCaptureWorkerGate.hasPendingRequest() ||
+        _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
 
-    bool expected = false;
-    if (!_csiCaptureStopTaskRunning.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel)) {
+    const uint32_t nowMs = millis();
+    const uint32_t retryAtMs =
+        _csiCaptureWorkerSpawnRetryMs.load(std::memory_order_acquire);
+    if (retryAtMs != 0 && static_cast<int32_t>(nowMs - retryAtMs) < 0) {
+        return;
+    }
+    if (!_csiCaptureWorkerGate.tryClaimWorker()) {
         return;
     }
 
     const BaseType_t created = xTaskCreatePinnedToCore(
         csiCaptureStopTask,
-        "csi_cap_stop",
+        "csi_cap_life",
         CONFIG::TASKS::STACK_CSI_CAPTURE_STOP,
         this,
         CONFIG::TASKS::PRIO_CSI_CAPTURE_STOP,
@@ -895,105 +1258,250 @@ void WifiSensingApiService::scheduleCsiCaptureStop() {
         CONFIG::TASKS::CORE_CSI_CAPTURE_STOP);
 
     if (created != pdPASS) {
-        _csiCaptureStopTaskRunning.store(false, std::memory_order_release);
-        if (_csiService && _csiService->isProcessingTaskContext()) {
-            LOGE("CSI capture stop worker creation failed in processing task; "
-                 "deferring cleanup until client disconnect");
-            return;
-        }
-        LOGW("CSI capture stop worker creation failed; stopping synchronously");
-        runCsiCaptureStopWorker();
+        _csiCaptureWorkerGate.releaseWorker();
+        _csiCaptureWorkerSpawnRetryMs.store(
+            nonZeroDeadline(nowMs + kCsiLifecycleRetryMs),
+            std::memory_order_release);
+        LOGW("CSI capture lifecycle worker creation failed; retry pending");
+        return;
     }
+
+    _csiCaptureWorkerSpawnRetryMs.store(0, std::memory_order_release);
+}
+
+void WifiSensingApiService::reconcileDeferredCsiLifecycle() {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Main-loop recovery closes the final hole: a transient task-allocation
+    // failure (including one reported from the CSI processing task) cannot leave
+    // a durable request without a future scheduler.
+    tryStartCsiFrontendLifecycleWorker();
+    tryStartCsiCaptureLifecycleWorker();
 }
 
 void WifiSensingApiService::runCsiFrontendStopWorker() {
     while (true) {
-        const uint32_t due = _csiFrontendStopDueMs.load(std::memory_order_acquire);
-        if (due == 0 || _csiFrontendDesiredActive.load(std::memory_order_acquire)) {
-            _csiFrontendStopTaskRunning.store(false, std::memory_order_release);
+        if (_shuttingDown.load(std::memory_order_acquire)) {
+            _csiFrontendWorkerGate.releaseWorker();
             return;
         }
 
-        const uint32_t now = millis();
-        const int32_t remaining = static_cast<int32_t>(due - now);
-        if (remaining <= 0) {
-            break;
+        const uint32_t generation = _csiFrontendWorkerGate.requestedGeneration();
+        if (generation == _csiFrontendWorkerGate.completedGeneration()) {
+            if (!_csiFrontendWorkerGate.releaseWorkerAndTryReclaim()) {
+                return;
+            }
+            continue;
         }
 
-        const uint32_t sleepMs = remaining > 100 ? 100 : static_cast<uint32_t>(remaining);
-        vTaskDelay(pdMS_TO_TICKS(sleepMs));
-    }
+        uint32_t due = 0;
+        if (!readCsiFrontendSchedule(generation, due)) {
+            continue;
+        }
+        if (due == 0) {
+            (void)_csiFrontendWorkerGate.completeCurrentIf(generation, true);
+            continue;
+        }
 
-    SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(1000));
-    if (!lock.isLocked()) {
-        LOGW("CSI frontend stop skipped: lifecycle lock busy");
-        _csiFrontendStopTaskRunning.store(false, std::memory_order_release);
-        return;
-    }
+        const int32_t remaining = static_cast<int32_t>(due - millis());
+        if (remaining > 0) {
+            const uint32_t sleepMs =
+                remaining > 100 ? 100 : static_cast<uint32_t>(remaining);
+            vTaskDelay(pdMS_TO_TICKS(sleepMs));
+            continue;
+        }
 
-    if (_csiFrontendDesiredActive.load(std::memory_order_acquire) ||
-        _csiEndpoint.broadcaster().hasClients()) {
-        _csiFrontendStopTaskRunning.store(false, std::memory_order_release);
-        return;
-    }
+        bool retry = false;
+        bool completed = false;
+        {
+            SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(1000));
+            if (!lock.isLocked()) {
+                LOGW("CSI frontend lifecycle retry: lifecycle lock busy");
+                retry = true;
+            } else if (_csiFrontendWorkerGate.requestedGeneration() != generation) {
+                continue;
+            } else if (_csiFrontendDesiredActive.load(std::memory_order_acquire)) {
+                const bool transportReady = ensureCsiTransportReady();
+                const bool consumerReady =
+                    transportReady && _csiService &&
+                    _csiService->setConsumerActive(
+                        WIFISENSING::CSI::CsiConsumer::Frontend, true);
+                if (consumerReady) {
+                    LOGI("CSI frontend consumer reconciled: ACTIVE");
+                    completed = true;
+                } else {
+                    LOGW("CSI frontend activation retry pending");
+                    retry = true;
+                }
+            } else if (_csiEndpoint.broadcaster().hasClients()) {
+                // A new socket is authoritative even if its start callback is
+                // still queued behind this worker. Never tear its transport down.
+                completed = true;
+            } else {
+                const bool consumerStopped =
+                    !_csiService || _csiService->setConsumerActive(
+                                        WIFISENSING::CSI::CsiConsumer::Frontend,
+                                        false);
+                if (consumerStopped) {
+                    const bool transportStopped = teardownCsiTransport();
+                    if (transportStopped) {
+                        LOGI("CSI frontend consumer reconciled: INACTIVE");
+                        completed = true;
+                    } else {
+                        LOGW("CSI frontend transport teardown retry pending");
+                        retry = true;
+                    }
+                } else {
+                    LOGW("CSI frontend deactivation retry pending");
+                    retry = true;
+                }
+            }
+        }
 
-    if (_csiService) {
-        _csiService->setConsumerActive(WIFISENSING::CSI::CsiConsumer::Frontend, false);
-        LOGI("CSI frontend consumer: INACTIVE");
+        if (_csiFrontendWorkerGate.completeCurrentIf(generation, completed)) {
+            continue;
+        }
+        if (retry) {
+            vTaskDelay(pdMS_TO_TICKS(kCsiLifecycleRetryMs));
+        }
     }
-    teardownCsiTransport();
-    _csiFrontendStopDueMs.store(0, std::memory_order_release);
-    _csiFrontendStopTaskRunning.store(false, std::memory_order_release);
 }
 
 void WifiSensingApiService::runCsiCaptureStopWorker() {
     while (true) {
-        const uint32_t due = _csiCaptureStopDueMs.load(std::memory_order_acquire);
-        if (due == 0 || _csiCaptureDesiredActive.load(std::memory_order_acquire)) {
-            _csiCaptureStopTaskRunning.store(false, std::memory_order_release);
+        if (_shuttingDown.load(std::memory_order_acquire)) {
+            _csiCaptureWorkerGate.releaseWorker();
             return;
         }
 
-        const uint32_t now = millis();
-        const int32_t remaining = static_cast<int32_t>(due - now);
-        if (remaining <= 0) {
-            break;
+        const uint32_t generation = _csiCaptureWorkerGate.requestedGeneration();
+        if (generation == _csiCaptureWorkerGate.completedGeneration()) {
+            if (!_csiCaptureWorkerGate.releaseWorkerAndTryReclaim()) {
+                return;
+            }
+            continue;
         }
 
-        const uint32_t sleepMs = remaining > 100 ? 100 : static_cast<uint32_t>(remaining);
-        vTaskDelay(pdMS_TO_TICKS(sleepMs));
-    }
+        uint32_t due = 0;
+        if (!readCsiCaptureSchedule(generation, due)) {
+            continue;
+        }
+        if (due != 0) {
+            const int32_t remaining = static_cast<int32_t>(due - millis());
+            if (remaining > 0) {
+                const uint32_t sleepMs =
+                    remaining > 100 ? 100 : static_cast<uint32_t>(remaining);
+                vTaskDelay(pdMS_TO_TICKS(sleepMs));
+                continue;
+            }
+        }
 
-    SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(1000));
-    if (!lock.isLocked()) {
-        LOGW("CSI capture stop skipped: lifecycle lock busy");
-        _csiCaptureStopTaskRunning.store(false, std::memory_order_release);
-        return;
-    }
+        CsiCaptureCleanupRequest cleanupRequest;
+        if (readCsiCaptureCleanupRequest(cleanupRequest)) {
+            bool cleanupResolved = false;
+            {
+                SYSTEM::ScopeLock sessionLock(
+                    _csiCaptureSessionMutex, pdMS_TO_TICKS(1000));
+                const auto resolution = CsiCaptureCleanupGate::resolve(
+                    cleanupRequest,
+                    sessionLock.isLocked(),
+                    _csiCaptureClientFd.load(std::memory_order_relaxed),
+                    _csiCaptureSessionGeneration.load(std::memory_order_relaxed));
 
-    if (_csiCaptureDesiredActive.load(std::memory_order_acquire) ||
-        _csiCaptureStarting.load(std::memory_order_acquire) ||
-        _csiCaptureAccepting.load(std::memory_order_acquire) ||
-        _csiCaptureStopping.load(std::memory_order_acquire)) {
-        _csiCaptureStopTaskRunning.store(false, std::memory_order_release);
-        return;
-    }
+                if (resolution == CsiCaptureCleanupResolution::Retry) {
+                    LOGW("CSI capture disconnect cleanup retry: session lock busy");
+                } else if (_csiCaptureWorkerGate.requestedGeneration() != generation) {
+                    continue;
+                } else {
+                    if (resolution ==
+                            CsiCaptureCleanupResolution::ReleaseOwnedSession) {
+                        releaseCsiCaptureSessionLocked();
+                        LOGW("CSI capture disconnected session released by lifecycle worker");
+                    } else if (resolution ==
+                               CsiCaptureCleanupResolution::EnsureInactive) {
+                        releaseCsiCaptureSessionLocked();
+                    }
+                    cleanupResolved = true;
+                }
+            }
 
-    if (_csiService) {
-        _csiService->setConsumerActive(
-            WIFISENSING::CSI::CsiConsumer::DiagnosticCapture, false);
+            if (!cleanupResolved) {
+                vTaskDelay(pdMS_TO_TICKS(kCsiLifecycleRetryMs));
+                continue;
+            }
+            if (!completeCsiCaptureCleanupRequest(
+                    cleanupRequest.requestGeneration)) {
+                continue;
+            }
+        }
+
+        if (due == 0 || _csiCaptureDesiredActive.load(std::memory_order_acquire)) {
+            (void)_csiCaptureWorkerGate.completeCurrentIf(generation, true);
+            continue;
+        }
+
+        if (_csiCaptureStarting.load(std::memory_order_acquire) ||
+            _csiCaptureAccepting.load(std::memory_order_acquire) ||
+            _csiCaptureStopping.load(std::memory_order_acquire)) {
+            vTaskDelay(pdMS_TO_TICKS(kCsiLifecycleRetryMs));
+            continue;
+        }
+
+        bool retry = false;
+        bool completed = false;
+        {
+            SYSTEM::ScopeLock lock(_csiFrontendLifecycleMutex, pdMS_TO_TICKS(1000));
+            if (!lock.isLocked()) {
+                LOGW("CSI capture lifecycle retry: lifecycle lock busy");
+                retry = true;
+            } else if (_csiCaptureWorkerGate.requestedGeneration() != generation) {
+                continue;
+            } else if (_csiCaptureDesiredActive.load(std::memory_order_acquire)) {
+                completed = true;
+            } else {
+                const bool consumerStopped =
+                    !_csiService || _csiService->setConsumerActive(
+                                        WIFISENSING::CSI::CsiConsumer::DiagnosticCapture,
+                                        false);
+                if (consumerStopped) {
+                    bool transportStopped = true;
+                    if (!_csiCaptureEndpoint.broadcaster().hasClients()) {
+                        transportStopped = teardownCsiCaptureTransport();
+                    }
+                    if (transportStopped) {
+                        completed = true;
+                    } else {
+                        LOGW("CSI capture transport teardown retry pending");
+                        retry = true;
+                    }
+                } else {
+                    LOGW("CSI capture deactivation retry pending");
+                    retry = true;
+                }
+            }
+        }
+
+        if (_csiCaptureWorkerGate.completeCurrentIf(generation, completed)) {
+            continue;
+        }
+        if (retry) {
+            vTaskDelay(pdMS_TO_TICKS(kCsiLifecycleRetryMs));
+        }
     }
-    if (!_csiCaptureEndpoint.broadcaster().hasClients()) {
-        teardownCsiCaptureTransport();
-    }
-    _csiCaptureStopDueMs.store(0, std::memory_order_release);
-    _csiCaptureStopTaskRunning.store(false, std::memory_order_release);
 }
 
 void WifiSensingApiService::csiFrontendStopTask(void* context) {
     auto* self = static_cast<WifiSensingApiService*>(context);
     if (self) {
-        self->runCsiFrontendStopWorker();
+        CsiApiShutdownGate::Lease shutdownLease(self->_shutdownGate);
+        if (!shutdownLease || self->_shuttingDown.load(std::memory_order_acquire)) {
+            self->_csiFrontendWorkerGate.releaseWorker();
+        } else {
+            self->runCsiFrontendStopWorker();
+        }
     }
     vTaskDelete(nullptr);
 }
@@ -1001,17 +1509,32 @@ void WifiSensingApiService::csiFrontendStopTask(void* context) {
 void WifiSensingApiService::csiCaptureStopTask(void* context) {
     auto* self = static_cast<WifiSensingApiService*>(context);
     if (self) {
-        self->runCsiCaptureStopWorker();
+        CsiApiShutdownGate::Lease shutdownLease(self->_shutdownGate);
+        if (!shutdownLease || self->_shuttingDown.load(std::memory_order_acquire)) {
+            self->_csiCaptureWorkerGate.releaseWorker();
+        } else {
+            self->runCsiCaptureStopWorker();
+        }
     }
     vTaskDelete(nullptr);
 }
 
 void WifiSensingApiService::cleanupClient(int fd) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return;
+    }
+
     _csiEndpoint.cleanupClient(fd);
     _csiCaptureEndpoint.cleanupClient(fd);
 }
 
 esp_err_t WifiSensingApiService::handleGetStatus(PsychicRequest* request) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return ESP_FAIL;
+    }
+
     RTC::WifiSensingData config{};
     RTC::withConfig([&](const RTC::ConfigStore& cfg) {
         config = cfg.wifiSensing;
@@ -1067,6 +1590,8 @@ esp_err_t WifiSensingApiService::handleGetStatus(PsychicRequest* request) {
 
     writer.key("csi"); writer.raw("{");
     writer.key("enabled"); writer.value(csi.enabled); writer.raw(",");
+    writer.key("runtime_fault"); writer.value(csi.runtimeFault); writer.raw(",");
+    writer.key("runtime_reconcile_pending"); writer.value(csi.runtimeReconcilePending); writer.raw(",");
     writer.key("queue_allocated"); writer.value(csi.queueAllocated); writer.raw(",");
     writer.key("queue_metrics_valid"); writer.value(csi.queueMetricsValid); writer.raw(",");
     writer.key("active_consumer_mask"); writer.value(static_cast<unsigned long>(csi.activeConsumerMask)); writer.raw(",");
@@ -1101,6 +1626,11 @@ esp_err_t WifiSensingApiService::handleGetStatus(PsychicRequest* request) {
     writer.key("state"); writer.string(WIFISENSING::CSI::toString(csi.motion.state)); writer.raw(",");
     writer.key("baseline_ready"); writer.value(csi.motion.baselineReady); writer.raw(",");
     writer.key("detected"); writer.value(csi.motion.motion); writer.raw(",");
+    writer.key("decision_valid"); writer.value(csi.motion.decisionValid); writer.raw(",");
+    writer.key("has_frame"); writer.value(csi.motion.hasFrame); writer.raw(",");
+    writer.key("data_fresh"); writer.value(csi.motionDataFresh); writer.raw(",");
+    writer.key("last_frame_ms"); writer.value(static_cast<unsigned long>(csi.motion.lastFrameMs)); writer.raw(",");
+    writer.key("frame_age_ms"); writer.value(static_cast<unsigned long>(csi.motionFrameAgeMs)); writer.raw(",");
     writer.key("noisy"); writer.value(csi.motion.noisy); writer.raw(",");
     writer.key("needs_calibration"); writer.value(csi.motion.needsCalibration); writer.raw(",");
     writer.key("score"); writer.value(csi.motion.score, 2); writer.raw(",");
@@ -1136,6 +1666,11 @@ esp_err_t WifiSensingApiService::handleGetStatus(PsychicRequest* request) {
 }
 
 esp_err_t WifiSensingApiService::handlePostCsiCalibrate(PsychicRequest* request) {
+    CsiApiShutdownGate::Lease shutdownLease(_shutdownGate);
+    if (!shutdownLease || _shuttingDown.load(std::memory_order_acquire)) {
+        return ESP_FAIL;
+    }
+
     if (!_csiService) {
         return Response::success(request, [](JsonVariant& root) {
             root["ok"] = false;
@@ -1143,7 +1678,9 @@ esp_err_t WifiSensingApiService::handlePostCsiCalibrate(PsychicRequest* request)
         });
     }
 
-    _csiService->requestMotionCalibration();
+    if (!_csiService->requestMotionCalibration()) {
+        return Response::error(request, 503, "csi/calibration_unavailable");
+    }
     return Response::success(request, [](JsonVariant& root) {
         root["ok"] = true;
         root["state"] = "calibrating";

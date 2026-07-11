@@ -40,6 +40,8 @@ const systemInfo = {
 	firmware_version: '2.0.0',
 	firmware_name: 'MatrixHub',
 	firmware_built_target: 'waveshare_esp32s3_matrix',
+	firmware_commit: '0123456789abcdef0123456789abcdef01234567',
+	firmware_dirty: false,
 	cpu_freq_mhz: 240,
 	cpu_type: 'ESP32-S3',
 	cpu_rev: 1,

@@ -581,6 +581,7 @@ const SYSTEM_INFO_STRING_KEYS = [
   "firmware_version",
   "firmware_name",
   "firmware_built_target",
+  "firmware_commit",
   "cpu_type",
   "sdk_version",
   "arduino_version",
@@ -609,6 +610,11 @@ function sanitizeSystemInformation(value: unknown): SystemInformation | undefine
       info[key] = parsed as never;
     }
   });
+
+  const firmwareDirty = optionalBoolean(value.firmware_dirty);
+  if (firmwareDirty !== undefined) {
+    info.firmware_dirty = firmwareDirty;
+  }
 
   const storage = sanitizeSystemStorageInfo(value.storage);
   if (storage) {

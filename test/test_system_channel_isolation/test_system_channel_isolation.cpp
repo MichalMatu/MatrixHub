@@ -179,6 +179,33 @@ void assertSinglePacketMagic(uint8_t expectedMagic) {
 
 } // namespace
 
+void test_queued_only_rejection_can_close_without_sync_httpd_send() {
+    API::WebSocketBroadcaster broadcaster("queued-only-test");
+    registerClient(broadcaster, 71);
+
+    bool writerCalled = false;
+    const bool accepted = broadcaster.broadcastSerializedQueued(
+        8,
+        [&writerCalled](uint8_t* buffer, size_t capacity) -> size_t {
+            writerCalled = true;
+            if (!buffer || capacity < 1) {
+                return 0;
+            }
+            buffer[0] = 0xCC;
+            return 1;
+        });
+
+    TEST_ASSERT_FALSE(accepted);
+    TEST_ASSERT_FALSE(writerCalled);
+    TEST_ASSERT_TRUE(TEST_STUBS::HTTPD::sentPayloads.empty());
+
+    // Capture control uses this policy when its queue is unavailable: reject
+    // the frame and close the client instead of falling back to httpd send.
+    broadcaster.removeClient(71, true);
+    TEST_ASSERT_EQUAL(71, TEST_STUBS::HTTPD::lastClosedFd);
+    TEST_ASSERT_EQUAL_UINT32(0, broadcaster.getClientCount());
+}
+
 void setUp(void) {
     TEST_STUBS::HTTPD::reset();
     TEST_STUBS::SENSORS::updateCallback = nullptr;
@@ -269,6 +296,7 @@ int main(int argc, char** argv) {
     (void)argv;
 
     UNITY_BEGIN();
+    RUN_TEST(test_queued_only_rejection_can_close_without_sync_httpd_send);
     RUN_TEST(test_telemetry_live_packets_only_reach_telemetry_subscribers);
     RUN_TEST(test_macro_live_packets_only_reach_macro_subscribers);
     RUN_TEST(test_system_status_packets_remain_global_without_channel_subscription);

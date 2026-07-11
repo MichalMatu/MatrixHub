@@ -32,7 +32,10 @@ GpioService::~GpioService() {
 
 bool GpioService::begin() {
     GpioData config = CONFIG_STORE::copy();
-    normalizeConfig(config);
+    if (!normalizeConfig(config)) {
+        LOGE("Refusing to start with invalid GPIO configuration");
+        return false;
+    }
 
     {
         SYSTEM::ScopeLock lock(_mutex, kGpioLockTimeout);
@@ -40,6 +43,10 @@ bool GpioService::begin() {
             return false;
         }
         applyConfigLocked(config, millis());
+        LogicalChange initialLevels[kMaxChannels]{};
+        const uint8_t initialLevelCount =
+            snapshotLogicalLevelsLocked(initialLevels, kMaxChannels);
+        dispatchChangesLocked(initialLevels, initialLevelCount);
     }
 
     _running = true;
@@ -64,6 +71,11 @@ bool GpioService::begin() {
 
 void GpioService::stop() {
     _running = false;
+    if (_mutex) {
+        // Callback execution is serialized by the same mutex, so this is also
+        // an in-flight drain barrier before the task or mutex can disappear.
+        (void)setInputChangeCallback(nullptr);
+    }
     if (_taskHandle) {
         TaskHandle_t handle = _taskHandle;
         _taskHandle = nullptr;
@@ -141,6 +153,25 @@ bool GpioService::getLogicalValue(const char* id, bool& outValue) const {
     return true;
 }
 
+bool GpioService::setInputChangeCallback(InputChangeCallback callback) {
+    // GPIO callback work is deliberately restricted to AlarmService's fixed,
+    // non-blocking mailbox. Serializing invocation with this mutex makes a
+    // successful detach a true in-flight barrier without allocating a second
+    // lifecycle primitive.
+    SYSTEM::ScopeLock lock(_mutex, portMAX_DELAY);
+    if (!ensureLock(lock, "setInputChangeCallback")) {
+        return false;
+    }
+    _inputChangeCallback = std::move(callback);
+    if (_inputChangeCallback) {
+        LogicalChange levels[kMaxChannels]{};
+        const uint8_t levelCount =
+            snapshotLogicalLevelsLocked(levels, kMaxChannels);
+        dispatchChangesLocked(levels, levelCount);
+    }
+    return true;
+}
+
 bool GpioService::updateConfig(const GpioData& nextConfig, bool persist) {
     GpioData normalized = nextConfig;
     if (!normalizeConfig(normalized)) {
@@ -158,7 +189,7 @@ bool GpioService::updateConfig(const GpioData& nextConfig, bool persist) {
         if (!ensureLock(lock, "updateConfig")) {
             return false;
         }
-        applyConfigLocked(normalized, millis());
+        applyConfigAndPublishLocked(normalized, millis());
     }
 
     if (persist && !persistConfig()) {
@@ -170,6 +201,8 @@ bool GpioService::updateConfig(const GpioData& nextConfig, bool persist) {
 
 bool GpioService::setOutput(const char* id, bool logicalValue, bool persist) {
     bool changed = false;
+    bool logicalChanged = false;
+    LogicalChange outputChange{};
     {
         SYSTEM::ScopeLock lock(_mutex, kGpioLockTimeout);
         if (!ensureLock(lock, "setOutput")) {
@@ -186,6 +219,7 @@ bool GpioService::setOutput(const char* id, bool logicalValue, bool persist) {
             return false;
         }
 
+        logicalChanged = channel.logicalLevel != logicalValue;
         const bool raw = channel.config.inverted ? !logicalValue : logicalValue;
         digitalWrite(channel.config.pin, raw ? HIGH : LOW);
         channel.rawLevel = raw;
@@ -198,20 +232,27 @@ bool GpioService::setOutput(const char* id, bool logicalValue, bool persist) {
         channel.changedAtMs = channel.sampledAtMs;
         channel.config.initialOutput = logicalValue;
         changed = true;
+        if (logicalChanged) {
+            strlcpy(outputChange.id, channel.config.id, sizeof(outputChange.id));
+            outputChange.logicalValue = logicalValue;
+            dispatchChangesLocked(&outputChange, 1);
+        }
     }
 
     if (!changed) {
         return false;
     }
 
-    if (!CONFIG_STORE::update([&](GpioData& cfg) {
-            for (uint8_t i = 0; i < cfg.channelCount; i++) {
-                if (strncmp(cfg.channels[i].id, id, kMaxIdLen) == 0) {
-                    cfg.channels[i].initialOutput = logicalValue;
-                    break;
-                }
+    const bool configUpdated = CONFIG_STORE::update([&](GpioData& cfg) {
+        for (uint8_t i = 0; i < cfg.channelCount; i++) {
+            if (strncmp(cfg.channels[i].id, id, kMaxIdLen) == 0) {
+                cfg.channels[i].initialOutput = logicalValue;
+                break;
             }
-        })) {
+        }
+    });
+
+    if (!configUpdated) {
         return false;
     }
 
@@ -221,12 +262,7 @@ bool GpioService::setOutput(const char* id, bool logicalValue, bool persist) {
 void GpioService::taskEntry(void* arg) {
     auto* service = static_cast<GpioService*>(arg);
     while (service && service->_running) {
-        {
-            SYSTEM::ScopeLock lock(service->_mutex, kGpioLockTimeout);
-            if (lock.isLocked()) {
-                service->sampleInputsLocked(millis());
-            }
-        }
+        service->sampleAndPublishInputs(millis());
         vTaskDelay(pdMS_TO_TICKS(kPollIntervalMs));
     }
     if (service) {
@@ -266,6 +302,57 @@ void GpioService::applyConfigLocked(const GpioData& config, uint32_t nowMs) {
     }
 }
 
+void GpioService::applyConfigAndPublishLocked(const GpioData& config,
+                                              uint32_t nowMs) {
+    LogicalChange oldActive[kMaxChannels]{};
+    uint8_t oldActiveCount = 0;
+    for (uint8_t i = 0; i < _channelCount && oldActiveCount < kMaxChannels; ++i) {
+        if (_channels[i].config.mode == GpioMode::Disabled ||
+            _channels[i].config.id[0] == '\0') {
+            continue;
+        }
+        strlcpy(oldActive[oldActiveCount].id,
+                _channels[i].config.id,
+                sizeof(oldActive[oldActiveCount].id));
+        ++oldActiveCount;
+    }
+
+    applyConfigLocked(config, nowMs);
+
+    LogicalChange changes[kMaxChannels * 2]{};
+    uint8_t changeCount = 0;
+    for (uint8_t i = 0; i < oldActiveCount; ++i) {
+        // A selector absent from the replacement snapshot has no new channel
+        // from which to publish its state. Emit its terminal clear explicitly.
+        // A retained-but-disabled selector is covered by the full new snapshot
+        // below, which also publishes false.
+        if (findChannelIndexLocked(oldActive[i].id) < 0) {
+            strlcpy(changes[changeCount].id,
+                    oldActive[i].id,
+                    sizeof(changes[changeCount].id));
+            changes[changeCount].logicalValue = false;
+            ++changeCount;
+        }
+    }
+
+    changeCount += snapshotLogicalLevelsLocked(
+        changes + changeCount,
+        static_cast<uint8_t>((kMaxChannels * 2) - changeCount));
+    dispatchChangesLocked(changes, changeCount);
+}
+
+#ifdef UNIT_TEST
+bool GpioService::applyRuntimeConfigForTest(const GpioData& config,
+                                            uint32_t nowMs) {
+    SYSTEM::ScopeLock lock(_mutex, portMAX_DELAY);
+    if (!ensureLock(lock, "applyRuntimeConfigForTest")) {
+        return false;
+    }
+    applyConfigAndPublishLocked(config, nowMs);
+    return true;
+}
+#endif
+
 void GpioService::configureChannelLocked(RuntimeChannel& channel, uint32_t nowMs) {
     channel.configured = false;
     channel.sampledAtMs = nowMs;
@@ -300,15 +387,36 @@ void GpioService::configureChannelLocked(RuntimeChannel& channel, uint32_t nowMs
     channel.configured = true;
 }
 
-void GpioService::sampleInputsLocked(uint32_t nowMs) {
+void GpioService::sampleAndPublishInputs(uint32_t nowMs) {
+    LogicalChange changes[kMaxChannels]{};
+    uint8_t changeCount = 0;
+    SYSTEM::ScopeLock lock(_mutex, kGpioLockTimeout);
+    if (!lock.isLocked()) {
+        return;
+    }
+    sampleInputsLocked(nowMs, changes, changeCount);
+    dispatchChangesLocked(changes, changeCount);
+}
+
+void GpioService::sampleInputsLocked(uint32_t nowMs,
+                                     LogicalChange* changes,
+                                     uint8_t& changeCount) {
+    changeCount = 0;
     for (uint8_t i = 0; i < _channelCount; i++) {
-        if (_channels[i].config.mode == GpioMode::Input) {
-            sampleInputLocked(_channels[i], nowMs);
+        RuntimeChannel& channel = _channels[i];
+        if (channel.config.mode != GpioMode::Input ||
+            !sampleInputLocked(channel, nowMs)) {
+            continue;
+        }
+        if (changes && changeCount < kMaxChannels) {
+            LogicalChange& change = changes[changeCount++];
+            strlcpy(change.id, channel.config.id, sizeof(change.id));
+            change.logicalValue = channel.logicalLevel;
         }
     }
 }
 
-void GpioService::sampleInputLocked(RuntimeChannel& channel, uint32_t nowMs) {
+bool GpioService::sampleInputLocked(RuntimeChannel& channel, uint32_t nowMs) {
     const bool raw = digitalRead(channel.config.pin) == HIGH;
     channel.rawLevel = raw;
     channel.sampledAtMs = nowMs;
@@ -317,7 +425,7 @@ void GpioService::sampleInputLocked(RuntimeChannel& channel, uint32_t nowMs) {
         channel.pendingRawLevel = raw;
         channel.rawChangedAtMs = nowMs;
         channel.stable = false;
-        return;
+        return false;
     }
 
     const uint32_t elapsed = nowMs - channel.rawChangedAtMs;
@@ -326,8 +434,39 @@ void GpioService::sampleInputLocked(RuntimeChannel& channel, uint32_t nowMs) {
         channel.logicalLevel = logicalFromRaw(raw, channel.config.inverted);
         channel.changedAtMs = nowMs;
         channel.stable = true;
+        return true;
     } else if (raw == channel.stableRawLevel && elapsed >= channel.config.debounceMs) {
         channel.stable = true;
+    }
+    return false;
+}
+
+uint8_t GpioService::snapshotLogicalLevelsLocked(LogicalChange* changes,
+                                                 uint8_t maxChanges) const {
+    if (!changes || maxChanges == 0) {
+        return 0;
+    }
+
+    const uint8_t count = _channelCount < maxChanges ? _channelCount : maxChanges;
+    for (uint8_t i = 0; i < count; ++i) {
+        strlcpy(changes[i].id, _channels[i].config.id, sizeof(changes[i].id));
+        changes[i].logicalValue =
+            _channels[i].config.mode == GpioMode::Disabled
+                ? false
+                : _channels[i].logicalLevel;
+    }
+    return count;
+}
+
+void GpioService::dispatchChangesLocked(const LogicalChange* changes,
+                                        uint8_t changeCount) {
+    if (!_inputChangeCallback || !changes) {
+        return;
+    }
+    for (uint8_t i = 0; i < changeCount; ++i) {
+        if (changes[i].id[0] != '\0') {
+            _inputChangeCallback(changes[i].id, changes[i].logicalValue);
+        }
     }
 }
 
@@ -364,4 +503,3 @@ int GpioService::arduinoPinModeFor(const GpioChannelConfig& config) {
 }
 
 }  // namespace GPIO
-

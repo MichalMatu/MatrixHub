@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 #include <functional>
 #include <esp_http_server.h>
 #include "websocket/WsTypes.h"
@@ -36,8 +37,13 @@ public:
     // known up front.
     bool broadcastSerialized(size_t reserveLen, PayloadWriter writer, httpd_ws_type_t type = HTTPD_WS_TYPE_BINARY);
     bool broadcastSerialized(int* fds, size_t count, size_t reserveLen, PayloadWriter writer, httpd_ws_type_t type = HTTPD_WS_TYPE_BINARY);
+    // Queue-only transport for producers that must never synchronously call
+    // into httpd (notably CSI processing and capture control paths).
+    bool broadcastSerializedQueued(size_t reserveLen, PayloadWriter writer, httpd_ws_type_t type = HTTPD_WS_TYPE_BINARY);
+    bool broadcastSerializedQueued(int* fds, size_t count, size_t reserveLen, PayloadWriter writer, httpd_ws_type_t type = HTTPD_WS_TYPE_BINARY);
 
     void enableQueue(size_t queueSize = 10, uint32_t stackSize = 4096, size_t payloadSlotSize = 0);
+    void requestQueueStop();
     bool disableQueue();
 
     bool hasClients() const;
@@ -54,6 +60,7 @@ private:
     WEBSOCKET::WsPayloadPool _pool;
     WEBSOCKET::WsClientManager _clientMgr;
     WEBSOCKET::WsTaskQueue _taskQueue;
+    std::atomic<bool> _poolReady{false};
 
     void processBroadcast(WEBSOCKET::WsMessage& msg);
     size_t snapshotTargetSessions(
@@ -61,7 +68,19 @@ private:
         size_t count,
         int* outTargets,
         WEBSOCKET::WsClientGeneration* outGenerations) const;
-    bool acquirePayload(size_t reserveLen, uint8_t** payload, int16_t* payloadSlot, bool* isAllocated);
+    bool acquirePayload(size_t reserveLen,
+                        bool queued,
+                        uint8_t** payload,
+                        int16_t* payloadSlot,
+                        bool* isAllocated);
+    bool broadcastSerializedInternal(
+        int* fds,
+        size_t count,
+        bool targeted,
+        size_t reserveLen,
+        PayloadWriter writer,
+        httpd_ws_type_t type,
+        bool queuedOnly);
     bool broadcastPrepared(
         int* fds,
         const WEBSOCKET::WsClientGeneration* targetGenerations,
@@ -70,7 +89,8 @@ private:
         size_t len,
         int16_t payloadSlot,
         bool isAllocated,
-        httpd_ws_type_t type);
+        httpd_ws_type_t type,
+        WEBSOCKET::WsTaskQueue::ProducerLease* producerLease);
 };
 
 } // namespace API

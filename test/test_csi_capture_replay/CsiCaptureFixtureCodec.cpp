@@ -9,6 +9,7 @@ namespace NATIVE_CAPTURE {
 namespace {
 
 constexpr uint8_t kMagic[] = {'M', 'H', 'C', 'F'};
+constexpr uint32_t kUint32HalfRange = 0x80000000u;
 
 uint16_t readU16(const uint8_t* value) {
     return static_cast<uint16_t>(value[0]) |
@@ -130,6 +131,7 @@ const char* toString(CsiCaptureError error) {
         case CsiCaptureError::InvalidBooleanMetadata: return "invalid_boolean_metadata";
         case CsiCaptureError::NonZeroReserved: return "non_zero_reserved";
         case CsiCaptureError::SequenceGap: return "sequence_gap";
+        case CsiCaptureError::NonMonotonicProcessTime: return "non_monotonic_process_time";
         case CsiCaptureError::FrameSectionMismatch: return "frame_section_mismatch";
         case CsiCaptureError::OutputTooSmall: return "output_too_small";
         default: return "unknown";
@@ -193,6 +195,7 @@ bool CsiCaptureDecoder::open(const uint8_t* bytes, size_t size) {
     const size_t frameEnd = size;
     size_t offset = CSI_CAPTURE_FILE_HEADER_BYTES;
     uint32_t previousSeq = 0;
+    uint32_t previousProcessNowMs = 0;
     for (uint32_t index = 0; index < frameCount; ++index) {
         if (frameEnd - offset < CSI_CAPTURE_FRAME_HEADER_BYTES) {
             return fail(CsiCaptureError::FrameHeaderTruncated);
@@ -251,10 +254,15 @@ bool CsiCaptureDecoder::open(const uint8_t* bytes, size_t size) {
             return fail(CsiCaptureError::NonZeroReserved);
         }
         const uint32_t acceptedSeq = readU32(bytes + offset + 4);
+        const uint32_t processNowMs = readU32(bytes + offset + 8);
         if (index > 0 && acceptedSeq != previousSeq + 1u) {
             return fail(CsiCaptureError::SequenceGap);
         }
+        if (index > 0 && (processNowMs - previousProcessNowMs) >= kUint32HalfRange) {
+            return fail(CsiCaptureError::NonMonotonicProcessTime);
+        }
         previousSeq = acceptedSeq;
+        previousProcessNowMs = processNowMs;
         if (recordBytes > frameEnd - offset) {
             return fail(CsiCaptureError::FrameSectionMismatch);
         }
@@ -358,6 +366,7 @@ size_t encodedCsiCaptureSize(const CsiCaptureFrame* frames,
 
     uint64_t size = CSI_CAPTURE_FILE_HEADER_BYTES;
     uint32_t previousSeq = 0;
+    uint32_t previousProcessNowMs = 0;
     for (uint32_t index = 0; index < frameCount; ++index) {
         error = validateFrame(frames[index]);
         if (error != CsiCaptureError::None) {
@@ -365,6 +374,11 @@ size_t encodedCsiCaptureSize(const CsiCaptureFrame* frames,
         }
         if (index > 0 && frames[index].acceptedSeq != previousSeq + 1u) {
             error = CsiCaptureError::SequenceGap;
+            return 0;
+        }
+        if (index > 0 &&
+            (frames[index].processNowMs - previousProcessNowMs) >= kUint32HalfRange) {
+            error = CsiCaptureError::NonMonotonicProcessTime;
             return 0;
         }
         if (index == 0 && !frames[index].replayOrigin()) {
@@ -376,6 +390,7 @@ size_t encodedCsiCaptureSize(const CsiCaptureFrame* frames,
             return 0;
         }
         previousSeq = frames[index].acceptedSeq;
+        previousProcessNowMs = frames[index].processNowMs;
         size += CSI_CAPTURE_FRAME_HEADER_BYTES + frames[index].storedLength;
     }
     if (size > CSI_CAPTURE_MAX_BYTES || size > std::numeric_limits<size_t>::max()) {

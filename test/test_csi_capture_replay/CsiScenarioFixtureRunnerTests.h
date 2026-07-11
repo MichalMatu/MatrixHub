@@ -1,0 +1,7 @@
+#pragma once
+
+void test_scenario_parser_requires_reviewed_real_data_contract();
+void test_replay_metrics_measure_errors_latency_hold_and_clear();
+void test_replay_metrics_mark_frame_staleness_unavailable();
+void test_fixture_runner_sha256_matches_known_vector();
+void test_real_csi_fixture_corpus_when_explicitly_enabled();

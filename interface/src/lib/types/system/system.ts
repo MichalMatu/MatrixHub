@@ -34,6 +34,8 @@ export type SystemInformation = {
 	firmware_version: string;
 	firmware_name?: string;
 	firmware_built_target?: string;
+	firmware_commit: string;
+	firmware_dirty: boolean;
 	cpu_freq_mhz: number;
 	cpu_type: string;
 	cpu_rev: number;

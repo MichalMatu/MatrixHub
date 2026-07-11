@@ -9,6 +9,7 @@
 #include <wifi/WiFiSettingsService.h>
 
 #include "../../../config/App.h"
+#include "../../../system/build/FirmwareIdentity.h"
 
 #ifndef APP_VERSION
 #define APP_VERSION APP::VERSION
@@ -136,6 +137,8 @@ SystemInfoSnapshot buildSystemInfoSnapshot(const SystemApiInfoDeps& deps) {
     snapshot.firmwareVersion = APP_VERSION;
     snapshot.firmwareName = APP_NAME;
     snapshot.buildTarget = BUILD_TARGET;
+    snapshot.firmwareCommit = SYSTEM::BUILD::FIRMWARE_COMMIT;
+    snapshot.firmwareDirty = SYSTEM::BUILD::FIRMWARE_DIRTY;
     snapshot.chipModel = ESP.getChipModel();
     snapshot.sdkVersion = ESP.getSdkVersion();
     snapshot.arduinoVersion = ESP_ARDUINO_VERSION_STR;

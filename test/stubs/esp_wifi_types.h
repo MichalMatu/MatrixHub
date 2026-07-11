@@ -5,6 +5,8 @@
 typedef struct {
     int8_t rssi;
     uint32_t timestamp;
+    uint8_t channel;
+    uint8_t secondary_channel;
 } wifi_pkt_rx_ctrl_t;
 
 typedef struct {

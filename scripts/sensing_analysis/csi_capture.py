@@ -93,6 +93,16 @@ OCCUPANCY_VALUES = ("empty", "occupied", "unknown")
 ENVIRONMENT_VALUES = ("stable", "rf_disturbance", "reconnect", "unknown")
 EVIDENCE_VALUES = ("operator", "scripted_action", "video_timestamp", "unknown")
 CONFIDENCE_VALUES = ("high", "medium", "low", "unknown")
+ACCEPTANCE_FIELDS = (
+    "max_false_positive_ms",
+    "max_false_negative_ms",
+    "max_invalid_decision_ms",
+    "max_detection_latency_ms",
+    "max_clear_latency_ms",
+    "max_motion_dropout_ms",
+    "max_missed_motion_intervals",
+    "max_uncleared_transitions",
+)
 
 ERROR_NAMES = {
     1: "busy",
@@ -150,6 +160,18 @@ def parse_milliseconds(value: str) -> int:
     return milliseconds
 
 
+def parse_nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+    if parsed < 0 or parsed >= (1 << 31):
+        raise argparse.ArgumentTypeError(
+            "value must be non-negative and fit the modular uint32 half-range"
+        )
+    return parsed
+
+
 def require_slug(value: str, label: str) -> str:
     normalized = value.strip().lower()
     if not SLUG_RE.fullmatch(normalized):
@@ -192,6 +214,12 @@ def require_promotable_provenance(source: dict[str, Any]) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise CaptureWorkflowError(
             "promotion requires an exact clean 40-hex firmware_commit"
+        )
+    if source.get("firmware_dirty") is not False:
+        raise CaptureWorkflowError("promotion requires firmware_dirty=false")
+    if source.get("firmware_identity_verified") is not True:
+        raise CaptureWorkflowError(
+            "promotion requires collector-verified firmware identity"
         )
     required_fields = (
         "board_env",
@@ -291,6 +319,59 @@ def get_json_object(client: DeviceClient, path: str) -> dict[str, Any]:
     return value
 
 
+def require_capture_ready_status(status: dict[str, Any]) -> None:
+    csi = status.get("csi")
+    if not isinstance(csi, dict):
+        raise CaptureWorkflowError("Wi-Fi sensing status has no csi object")
+    if csi.get("enabled") is not True:
+        raise CaptureWorkflowError("CSI must be enabled before lossless capture")
+    if csi.get("runtime_fault") is not False:
+        raise CaptureWorkflowError("CSI runtime fault must be cleared before lossless capture")
+    if csi.get("runtime_reconcile_pending") is not False:
+        raise CaptureWorkflowError(
+            "CSI runtime reconciliation must finish before lossless capture"
+        )
+    if csi.get("queue_allocated") is not True:
+        raise CaptureWorkflowError("CSI queue must be allocated before lossless capture")
+    if csi.get("calibration_state") != "forced":
+        raise CaptureWorkflowError(
+            "CSI gain must be forced/stable before capture; wait for calibration_state=forced"
+        )
+
+    motion = csi.get("motion")
+    if not isinstance(motion, dict) or motion.get("enabled") is not True:
+        raise CaptureWorkflowError("CSI alarm detector must be active before lossless capture")
+    if motion.get("state") in (None, "disabled", "unavailable"):
+        raise CaptureWorkflowError("CSI alarm detector is unavailable for lossless capture")
+    if motion.get("has_frame") is not True or motion.get("data_fresh") is not True:
+        raise CaptureWorkflowError(
+            "CSI alarm detector requires a fresh valid frame before lossless capture"
+        )
+
+
+def require_capture_ready_config(config: dict[str, Any]) -> None:
+    alarm = config.get("csi_alarm")
+    if not isinstance(alarm, dict):
+        raise CaptureWorkflowError("Wi-Fi sensing config has no csi_alarm object")
+    if alarm.get("enabled") is not True:
+        raise CaptureWorkflowError("CSI alarm must be enabled before lossless capture")
+
+    bands = alarm.get("bands")
+    if not isinstance(bands, list) or not any(
+        isinstance(band, dict)
+        and isinstance(band.get("start"), int)
+        and not isinstance(band.get("start"), bool)
+        and isinstance(band.get("end"), int)
+        and not isinstance(band.get("end"), bool)
+        and 0 <= band["start"] <= band["end"] <= 255
+        for band in bands
+    ):
+        raise CaptureWorkflowError(
+            "CSI alarm requires at least one valid band with integer "
+            "0 <= start <= end <= 255 before lossless capture"
+        )
+
+
 def detector_config(config: dict[str, Any]) -> dict[str, Any]:
     value = config.get("csi_alarm")
     if not isinstance(value, dict):
@@ -303,11 +384,33 @@ def detector_config(config: dict[str, Any]) -> dict[str, Any]:
 def firmware_provenance(
     system_info: dict[str, Any],
     firmware_commit: str,
-) -> dict[str, str]:
+) -> dict[str, Any]:
+    expected = firmware_commit.strip().lower()
+    expected_dirty = expected.endswith("-dirty")
+    expected_commit = expected.removesuffix("-dirty")
+    reported_commit = str(system_info.get("firmware_commit", "")).strip().lower()
+    reported_dirty = system_info.get("firmware_dirty")
+    if not re.fullmatch(r"[0-9a-f]{40}", reported_commit):
+        raise CaptureWorkflowError(
+            "device /api/system/info has no exact 40-hex firmware_commit; "
+            "build and flash firmware with embedded identity"
+        )
+    if not isinstance(reported_dirty, bool):
+        raise CaptureWorkflowError(
+            "device /api/system/info has no boolean firmware_dirty identity"
+        )
+    if reported_commit != expected_commit or reported_dirty != expected_dirty:
+        reported = f"{reported_commit}{'-dirty' if reported_dirty else ''}"
+        raise CaptureWorkflowError(
+            f"flashed firmware identity {reported} does not match expected {expected}"
+        )
+
     mapping = {
         "board_env": BOARD_ENV,
         "firmware_version": str(system_info.get("firmware_version", "unknown")),
-        "firmware_commit": firmware_commit.strip() or "unknown",
+        "firmware_commit": reported_commit + ("-dirty" if reported_dirty else ""),
+        "firmware_dirty": reported_dirty,
+        "firmware_identity_verified": True,
         "build_target": str(system_info.get("firmware_built_target", "unknown")),
         "esp_platform": str(system_info.get("esp_platform", "unknown")),
         "sdk_version": str(system_info.get("sdk_version", "unknown")),
@@ -362,6 +465,10 @@ def initial_scenario(
                     "note": "Unannotated capture interval.",
                 }
             ],
+        },
+        "acceptance": {
+            "reviewed": False,
+            **{field: None for field in ACCEPTANCE_FIELDS},
         },
     }
 
@@ -489,6 +596,18 @@ async def receive_data_until_end(
 async def collect_capture(args: argparse.Namespace) -> Path:
     scenario_id = require_slug(args.scenario_id, "scenario-id")
     raw_root = require_safe_raw_root(args.output_root)
+
+    client = DeviceClient.from_args(args)
+    config_before = get_json_object(client, "/api/wifisensing/config")
+    require_capture_ready_config(config_before)
+    status_before = get_json_object(client, "/api/wifisensing/status")
+    require_capture_ready_status(status_before)
+    system_info = get_json_object(client, "/api/system/info")
+    # Verify device-reported build identity before creating even a partial
+    # artifact. The CLI value is an expected identity, never the evidence
+    # source written into scenario metadata.
+    firmware_provenance(system_info, args.firmware_commit)
+
     raw_root.mkdir(parents=True, exist_ok=True)
     base_name = f"{utc_timestamp()}-{scenario_id}"
     partial_dir = raw_root / f"{base_name}.partial"
@@ -514,12 +633,8 @@ async def collect_capture(args: argparse.Namespace) -> Path:
     }
     atomic_write_json(manifest_path, manifest)
 
-    client = DeviceClient.from_args(args)
     writer: MhcfWriter | None = None
     try:
-        config_before = get_json_object(client, "/api/wifisensing/config")
-        status_before = get_json_object(client, "/api/wifisensing/status")
-        system_info = get_json_object(client, "/api/system/info")
         uri = client.ws_url(CAPTURE_ENDPOINT)
 
         async with connect_ws(uri, client.ws_cookie_header(), client.ws_ssl_context()) as websocket:
@@ -672,7 +787,10 @@ def validate_scenario(
     capture_path: Path,
     *,
     require_reviewed: bool,
+    require_acceptance_reviewed: bool | None = None,
 ) -> None:
+    if require_acceptance_reviewed is None:
+        require_acceptance_reviewed = require_reviewed
     if scenario.get("schema") != SCENARIO_SCHEMA:
         raise CaptureWorkflowError("unsupported scenario schema")
     require_slug(str(scenario.get("fixture_id", "")), "fixture_id")
@@ -738,6 +856,50 @@ def validate_scenario(
         )
     if require_reviewed and known_motion_intervals == 0:
         raise CaptureWorkflowError("reviewed ground truth has no known motion interval")
+    acceptance = scenario.get("acceptance")
+    if acceptance is None and not require_acceptance_reviewed:
+        return
+    if not isinstance(acceptance, dict):
+        raise CaptureWorkflowError("scenario acceptance must be an object")
+    if not isinstance(acceptance.get("reviewed"), bool):
+        raise CaptureWorkflowError("scenario acceptance.reviewed must be a boolean")
+    if require_acceptance_reviewed and acceptance.get("reviewed") is not True:
+        raise CaptureWorkflowError("acceptance thresholds have not been reviewed")
+    for field in ACCEPTANCE_FIELDS:
+        value = acceptance.get(field)
+        if value is None and not require_acceptance_reviewed:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise CaptureWorkflowError(f"acceptance {field} must be a non-negative integer")
+        if value < 0 or value >= (1 << 31):
+            raise CaptureWorkflowError(
+                f"acceptance {field} must fit the modular uint32 half-range"
+            )
+
+
+def set_acceptance(args: argparse.Namespace) -> Path:
+    target = args.target.resolve()
+    capture_path, _, scenario_path = resolve_capture_paths(target)
+    if scenario_path is None:
+        scenario_path = (
+            target / SCENARIO_FILENAME
+            if target.is_dir()
+            else target.with_name(SCENARIO_FILENAME)
+        )
+    scenario = load_json(scenario_path)
+    validate_scenario(
+        scenario,
+        capture_path,
+        require_reviewed=True,
+        require_acceptance_reviewed=False,
+    )
+    scenario["acceptance"] = {
+        "reviewed": True,
+        **{field: getattr(args, field) for field in ACCEPTANCE_FIELDS},
+    }
+    validate_scenario(scenario, capture_path, require_reviewed=True)
+    atomic_write_json(scenario_path, scenario)
+    return scenario_path
 
 
 def overlay_interval(
@@ -817,7 +979,12 @@ def annotate_capture(args: argparse.Namespace) -> Path:
     ground_truth = scenario["ground_truth"]
     if args.review:
         ground_truth["reviewed"] = True
-        validate_scenario(scenario, capture_path, require_reviewed=True)
+        validate_scenario(
+            scenario,
+            capture_path,
+            require_reviewed=True,
+            require_acceptance_reviewed=False,
+        )
         atomic_write_json(scenario_path, scenario)
         return scenario_path
 
@@ -842,6 +1009,14 @@ def annotate_capture(args: argparse.Namespace) -> Path:
         ground_truth["timeline"], replacement, replace_known=args.replace
     )
     ground_truth["reviewed"] = False
+    acceptance = scenario.get("acceptance")
+    if acceptance is None:
+        scenario["acceptance"] = {
+            "reviewed": False,
+            **{field: None for field in ACCEPTANCE_FIELDS},
+        }
+    else:
+        acceptance["reviewed"] = False
     validate_scenario(scenario, capture_path, require_reviewed=False)
     atomic_write_json(scenario_path, scenario)
     return scenario_path
@@ -1141,6 +1316,36 @@ def build_parser() -> argparse.ArgumentParser:
     annotate.add_argument("--replace", action="store_true")
     annotate.add_argument("--review", action="store_true")
 
+    acceptance = subparsers.add_parser(
+        "acceptance",
+        help="Set and review native replay acceptance thresholds.",
+    )
+    acceptance.add_argument("target", type=Path)
+    acceptance.add_argument(
+        "--max-false-positive-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-false-negative-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-invalid-decision-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-detection-latency-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-clear-latency-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-motion-dropout-ms", type=parse_milliseconds, required=True
+    )
+    acceptance.add_argument(
+        "--max-missed-motion-intervals", type=parse_nonnegative_int, required=True
+    )
+    acceptance.add_argument(
+        "--max-uncleared-transitions", type=parse_nonnegative_int, required=True
+    )
+
     verify = subparsers.add_parser("verify", help="Validate capture integrity and sidecars.")
     verify.add_argument("target", type=Path)
     verify.add_argument("--json", action="store_true")
@@ -1171,6 +1376,9 @@ def main(argv: list[str] | None = None) -> int:
             print_result({"ok": True, "capture": str(path)}, as_json=args.json)
         elif args.command == "annotate":
             path = annotate_capture(args)
+            print(path)
+        elif args.command == "acceptance":
+            path = set_acceptance(args)
             print(path)
         elif args.command == "verify":
             print_result(verify_capture(args.target), as_json=args.json)

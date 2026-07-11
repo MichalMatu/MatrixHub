@@ -18,6 +18,9 @@
 #include "../algo/CsiGainController.h"
 #include "../algo/CsiBandMotionDetector.h"
 #include "../algo/CsiVisualizationReducer.h"
+#include "CsiMotionPublicationGate.h"
+#include "CsiMotionControlFence.h"
+#include "CsiMotionBootstrapGate.h"
 
 #include <functional>
 
@@ -36,6 +39,8 @@ enum class CsiConsumer : uint8_t {
 
 struct CsiMetricsSnapshot {
     bool enabled = false;
+    bool runtimeFault = false;
+    bool runtimeReconcilePending = false;
     bool queueAllocated = false;
     bool queueMetricsValid = false;
     uint32_t activeConsumerMask = 0;
@@ -62,6 +67,8 @@ struct CsiMetricsSnapshot {
     uint32_t lastPacketMs = 0;
     uint32_t lastBatchMs = 0;
     uint32_t motionControlEpoch = 0;
+    bool motionDataFresh = false;
+    uint32_t motionFrameAgeMs = 0;
     int calibrationCount = 0;
     int calibrationTarget = CsiGainController::CALIBRATION_PACKETS;
     const char* calibrationState = "unknown";
@@ -78,7 +85,11 @@ public:
     bool isEnabled() const { return _enabled.load(std::memory_order_relaxed); }
     bool setConsumerActive(CsiConsumer consumer, bool active);
     bool isConsumerActive(CsiConsumer consumer) const;
+    bool isRuntimeReady() const;
     bool hasActiveConsumers() const;
+    bool needsRuntimeReconcile();
+    bool reconcileRuntime();
+    bool shutdown();
     bool isProcessingTaskContext() const;
     CsiMetricsSnapshot getMetricsSnapshot() const;
     void recordBatchDelivery(size_t packetCount, bool accepted);
@@ -86,8 +97,10 @@ public:
     // Register a callback to receive processed CSI packets (for API streaming)
     void setCsiCallback(CsiCallback cb);
     void setMotionCallback(MotionCallback cb);
-    void setMotionConfig(const CsiMotionConfig& config);
-    void requestMotionCalibration();
+    bool prepareMotionCallbackBootstrap(bool retainedMotion);
+    bool setMotionConfig(const CsiMotionConfig& config);
+    bool requestMotionCalibration();
+    void restoreRetainedMotion(bool motion);
     /**
      * @brief Request a CSI matrix visualization reducer reset.
      *
@@ -105,6 +118,7 @@ public:
 
     // State
     std::atomic<bool> _enabled{false};
+    std::atomic<bool> _shuttingDown{false};
     std::atomic<bool> _shouldExit{false}; // Graceful shutdown flag
     uint32_t _lastPingTime = 0;
 
@@ -134,22 +148,28 @@ public:
     
     // Internal initialization helper
     bool initCsiConfig();
+    bool applyMotionConfigLocked(const CsiMotionConfig& config);
     bool applyEnabledState(bool enabled);
     bool hasRuntimeResources() const;
     static uint32_t consumerBit(CsiConsumer consumer);
     bool waitForRxCallbacksToDrain(uint32_t timeoutMs);
+    bool attachRxCallbackOwner();
+    void detachRxCallbackOwner();
+    static void* rxCallbackContext();
     void rollbackFailedEnable(bool csiConfigured);
     CsiCallback getCsiCallbackSnapshot();
+    void releaseCsiCallbackSnapshot();
     MotionCallback getMotionCallbackSnapshot();
-    void applyPendingMotionCommandsNonBlocking();
     void applyPendingVisualizationCommandsNonBlocking();
-    CsiMotionSnapshot processMotionPacket(CsiPacket& packet, uint32_t nowMs);
+    CsiMotionSnapshot processMotionPacket(CsiPacket& packet,
+                                          uint32_t nowMs,
+                                          uint32_t expectedControlEpoch);
+    void markMotionDataUnavailableIfStale(uint32_t nowMs,
+                                          uint32_t expectedControlEpoch);
     CsiVisualizationSnapshot processVisualizationPacket(const CsiPacket& packet, uint32_t nowMs);
     void publishMotionSnapshot(const CsiMotionSnapshot& snapshot);
     void publishVisualizationSnapshot(const CsiVisualizationSnapshot& snapshot);
-    void maybePublishMotion(const CsiMotionSnapshot& snapshot, uint32_t nowMs);
-    void publishMotionBoolean(bool motion, uint32_t nowMs);
-    void refreshMotionConfigFromConsumers();
+    void publishMotionValueLocked(bool motion, uint32_t nowMs);
     bool reapStoppedProcessingTask(TickType_t waitTicks);
     void destroyProcessingTaskResources();
     void resetRuntimeMetrics();
@@ -161,17 +181,24 @@ public:
     SemaphoreHandle_t _stateMutex = nullptr;
     SemaphoreHandle_t _callbackMutex = nullptr;
     SemaphoreHandle_t _motionCallbackMutex = nullptr;
+    SemaphoreHandle_t _motionPublishMutex = nullptr;
     SemaphoreHandle_t _motionConfigMutex = nullptr;
+    SemaphoreHandle_t _motionControlMutex = nullptr;
 
+    // Desired consumer ownership. It is committed before lifecycle work so a
+    // transient start/stop failure remains visible and can be reconciled later.
     std::atomic<uint32_t> _activeConsumers{0};
 
     // Static Task Storage
     StackType_t* _taskStack = nullptr;
     StaticTask_t* _taskBuffer = nullptr;
     std::atomic<bool> _rxCallbackEnabled{false};
-    // Shutdown waits for this counter after detaching the callback so the queue can
-    // be destroyed without racing a callback that already started copying data.
-    std::atomic<uint32_t> _rxCallbacksInFlight{0};
+    // Tracks driver ownership separately from the software entry gate. A failed
+    // detach must keep callback-backed resources alive for a later retry.
+    std::atomic<bool> _rxCallbackRegistered{false};
+    // Protects the higher-level processed-batch callback captured by API
+    // services. Callback replacement waits for this count before returning.
+    std::atomic<uint32_t> _csiCallbacksInFlight{0};
 
     std::atomic<uint32_t> _rxFramesTotal{0};
     std::atomic<uint32_t> _rxAcceptedTotal{0};
@@ -192,17 +219,20 @@ public:
     CsiBandMotionDetector _motionDetector;
     CsiVisualizationReducer _visualizationReducer;
     CsiMotionConfig _alarmMotionConfig;
-    CsiMotionConfig _pendingMotionConfig;
-    std::atomic<bool> _motionConfigDirty{false};
-    std::atomic<bool> _motionCalibrationRequested{false};
-    std::atomic<uint32_t> _motionControlEpoch{0};
+    CsiMotionControlFence _motionControlFence;
+    CsiMotionBootstrapGate _motionBootstrapGate;
+    std::atomic<bool> _motionRuntimeFault{false};
+    // The bootstrap gate also mirrors the last definitive/RTC-restored active
+    // decision across detector storage recovery. A successful manual
+    // calibration may clear it only after fresh definitive evidence.
+    bool _motionGainReady = false;
+    CsiMotionSyncMailbox _motionSyncMailbox;
     std::atomic<bool> _visualizationResetRequested{false};
     mutable portMUX_TYPE _motionSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     CsiMotionSnapshot _lastMotionSnapshot;
     mutable portMUX_TYPE _visualizationSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     CsiVisualizationSnapshot _lastVisualizationSnapshot;
-    uint32_t _lastMotionCallbackMs = 0;
-    bool _lastPublishedMotion = false;
+    CsiMotionPublicationGate _motionPublicationGate;
     static constexpr uint32_t MOTION_KEEPALIVE_MS = 3000;
     
     CsiPacket* _batchBuffer = nullptr;

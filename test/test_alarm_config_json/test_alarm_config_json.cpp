@@ -77,6 +77,7 @@ void test_deserialize_source_string_ble_battery() {
     doc["id"] = "test";
     doc["name"] = "test";
     doc["source"] = "ble_battery";
+    doc["ble_device_mac"] = "A4:C1:38:12:34:56";
 
     JsonObject obj = doc.as<JsonObject>();
     ALARMS::AlarmRule rule;
@@ -90,6 +91,7 @@ void test_deserialize_source_string_ble_rssi() {
     doc["id"] = "test";
     doc["name"] = "test";
     doc["source"] = "ble_rssi";
+    doc["ble_device_mac"] = "A4:C1:38:12:34:56";
 
     JsonObject obj = doc.as<JsonObject>();
     ALARMS::AlarmRule rule;
@@ -103,6 +105,7 @@ void test_deserialize_source_int_ble_rssi() {
     doc["id"] = "test";
     doc["name"] = "test";
     doc["source"] = static_cast<int>(ALARMS::AlarmSource::BleRssi);
+    doc["ble_device_mac"] = "A4:C1:38:12:34:56";
 
     JsonObject obj = doc.as<JsonObject>();
     ALARMS::AlarmRule rule;
@@ -135,6 +138,22 @@ void test_deserialize_source_int_wifi_csi_motion() {
 
     TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(obj, rule));
     TEST_ASSERT_EQUAL(ALARMS::AlarmSource::WifiCsiMotion, rule.source);
+}
+
+void test_wifi_csi_motion_rule_is_canonicalized_from_inverse_operator() {
+    JsonDocument doc;
+    doc["id"] = "csi-motion";
+    doc["name"] = "CSI motion";
+    doc["source"] = "wifi_csi_motion";
+    doc["operator"] = "below";
+    doc["threshold"] = 0.9f;
+
+    JsonObject obj = doc.as<JsonObject>();
+    ALARMS::AlarmRule rule;
+
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(obj, rule));
+    TEST_ASSERT_EQUAL(ALARMS::AlarmOperator::Above, rule.op);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, rule.threshold);
 }
 
 void test_deserialize_source_int_after_wifi_csi_motion_maps_to_imu_tamper() {
@@ -183,6 +202,7 @@ void test_deserialize_source_int_after_imu_tamper_maps_to_gpio_digital() {
     doc["id"] = "test";
     doc["name"] = "test";
     doc["source"] = static_cast<int>(ALARMS::AlarmSource::ImuTamper) + 1;
+    doc["gpio_id"] = "gpio38";
 
     JsonObject obj = doc.as<JsonObject>();
     ALARMS::AlarmRule rule;
@@ -313,6 +333,219 @@ void test_deserialize_rules_rejects_more_than_max_rules() {
         static_cast<uint8_t>(error));
 }
 
+void test_deserialize_rule_rejects_lossy_shelly_bindings() {
+    JsonDocument doc;
+    doc["id"] = "shelly-rule";
+    doc["name"] = "Shelly rule";
+    JsonArray devices = doc["shelly_device_ids"].to<JsonArray>();
+    devices.add("relay-1");
+    devices.add("relay-1");
+
+    ALARMS::AlarmRule rule;
+    JsonObject object = doc.as<JsonObject>();
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    devices.clear();
+    for (uint8_t i = 0; i < ALARMS::kMaxShellyPerRule + 1; ++i) {
+        char id[16];
+        snprintf(id, sizeof(id), "relay-%u", i);
+        devices.add(id);
+    }
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    devices.clear();
+    devices.add("");
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    devices.clear();
+    devices.add("12345678901234567890123456789012");
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+}
+
+void test_deserialize_rule_rejects_wrong_shelly_binding_type() {
+    JsonDocument doc;
+    doc["id"] = "shelly-rule";
+    doc["name"] = "Shelly rule";
+    doc["shelly_device_ids"] = "relay-1";
+
+    ALARMS::AlarmRule rule;
+    JsonObject object = doc.as<JsonObject>();
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+}
+
+void test_load_alarms_preserves_full_retained_runtime_for_identity_mapping() {
+    RTC::mockStore = RTC::ConfigStore{};
+    ALARMS::RULES_CONFIG::mockRules = ALARMS::AlarmRulesSnapshot{};
+    RTC::mockStore.alarms.ruleCount = 2;
+    RTC::mockStore.alarms.enabledCount = 2;
+    RTC::mockStore.alarms.ruleRuntimeIdentityHashes[0] = 0x1111ULL;
+    RTC::mockStore.alarms.ruleRuntimeIdentityHashes[1] = 0x2222ULL;
+    RTC::mockStore.alarms.runtimeStates[1].previouslyTriggered = true;
+    RTC::mockStore.alarms.runtimeStates[1].initialized = true;
+    RTC::mockStore.alarms.runtimeStates[1].lastTriggeredMs = 987;
+
+    JsonDocument doc;
+    JsonArray rules = doc["rules"].to<JsonArray>();
+    JsonObject retainedRule = rules.add<JsonObject>();
+    retainedRule["id"] = "retained-second";
+    retainedRule["name"] = "Retained second";
+    retainedRule["enabled"] = true;
+    retainedRule["source"] = "wifi_csi_motion";
+
+    JsonObject object = doc.as<JsonObject>();
+    TEST_ASSERT_TRUE(CONFIG::JSON::loadAlarms(object));
+
+    TEST_ASSERT_EQUAL_UINT8(1, ALARMS::RULES_CONFIG::mockRules.ruleCount);
+    TEST_ASSERT_EQUAL_STRING(
+        "retained-second", ALARMS::RULES_CONFIG::mockRules.rules[0].id);
+    TEST_ASSERT_EQUAL_UINT8(2, RTC::mockStore.alarms.ruleCount);
+    TEST_ASSERT_EQUAL_UINT8(2, RTC::mockStore.alarms.enabledCount);
+    TEST_ASSERT_EQUAL_UINT64(
+        0x1111ULL, RTC::mockStore.alarms.ruleRuntimeIdentityHashes[0]);
+    TEST_ASSERT_EQUAL_UINT64(
+        0x2222ULL, RTC::mockStore.alarms.ruleRuntimeIdentityHashes[1]);
+    TEST_ASSERT_TRUE(
+        RTC::mockStore.alarms.runtimeStates[1].previouslyTriggered);
+    TEST_ASSERT_TRUE(RTC::mockStore.alarms.runtimeStates[1].initialized);
+    TEST_ASSERT_EQUAL_UINT32(
+        987, RTC::mockStore.alarms.runtimeStates[1].lastTriggeredMs);
+}
+
+void test_deserialize_rule_rejects_unknown_channel_bits_and_wrong_types() {
+    JsonDocument doc;
+    doc["id"] = "strict-rule";
+    doc["name"] = "Strict rule";
+    doc["notify_channels"] = 256;
+    JsonObject object = doc.as<JsonObject>();
+    ALARMS::AlarmRule rule;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    doc["notify_channels"] = 257;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    doc["notify_channels"] = 1;
+    doc["enabled"] = "true";
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    doc.remove("enabled");
+    doc["cooldown_seconds"] = "60";
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    doc.remove("cooldown_seconds");
+    doc["created_at"] = -1;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+}
+
+void test_deserialize_rule_validates_cooldown_without_integer_wrap() {
+    JsonDocument doc;
+    doc["id"] = "cooldown-rule";
+    doc["name"] = "Cooldown rule";
+    JsonObject object = doc.as<JsonObject>();
+    ALARMS::AlarmRule rule;
+
+    doc["cooldown_seconds"] = 9;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    doc["cooldown_seconds"] = 10;
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    TEST_ASSERT_EQUAL_UINT32(10, rule.cooldownSeconds);
+    doc["cooldown_seconds"] = 65535;
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    TEST_ASSERT_EQUAL_UINT32(65535, rule.cooldownSeconds);
+    doc["cooldown_seconds"] = 65536;
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    TEST_ASSERT_EQUAL_UINT32(65536, rule.cooldownSeconds);
+    doc["cooldown_seconds"] = 86400;
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    TEST_ASSERT_EQUAL_UINT32(86400, rule.cooldownSeconds);
+    doc["cooldown_seconds"] = 86401;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    doc["cooldown_seconds"] = -1;
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+}
+
+void test_deserialize_rule_requires_valid_source_selector() {
+    JsonDocument doc;
+    doc["id"] = "selector-rule";
+    doc["name"] = "Selector rule";
+    doc["source"] = "ble_temperature";
+    JsonObject object = doc.as<JsonObject>();
+    ALARMS::AlarmRule rule;
+
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    doc["ble_device_mac"] = "not-a-mac";
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    doc["ble_device_mac"] = "A4:C1:38:12:34:56";
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+
+    doc["source"] = "gpio_digital";
+    doc.remove("ble_device_mac");
+    TEST_ASSERT_FALSE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+    doc["gpio_id"] = "gpio38";
+    TEST_ASSERT_TRUE(CONFIG::JSON::deserializeAlarmRule(object, rule));
+}
+
+void test_load_alarms_rejects_entire_corrupt_snapshot() {
+    ALARMS::RULES_CONFIG::mockRules = ALARMS::AlarmRulesSnapshot{};
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].id,
+                 "existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].id) - 1);
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].name,
+                 "Existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].name) - 1);
+    ALARMS::RULES_CONFIG::mockRules.ruleCount = 1;
+
+    JsonDocument doc;
+    JsonArray rules = doc["rules"].to<JsonArray>();
+    addRule(rules, "valid", "Valid");
+    JsonObject invalid = addRule(rules, "invalid", "Invalid");
+    invalid["source"] = "gpio_digital";
+    JsonObject object = doc.as<JsonObject>();
+
+    TEST_ASSERT_FALSE(CONFIG::JSON::loadAlarms(object));
+    TEST_ASSERT_EQUAL_UINT8(1, ALARMS::RULES_CONFIG::mockRules.ruleCount);
+    TEST_ASSERT_EQUAL_STRING(
+        "existing", ALARMS::RULES_CONFIG::mockRules.rules[0].id);
+}
+
+void test_load_alarms_rejects_wrong_rules_container_type() {
+    ALARMS::RULES_CONFIG::mockRules = ALARMS::AlarmRulesSnapshot{};
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].id,
+                 "existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].id) - 1);
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].name,
+                 "Existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].name) - 1);
+    ALARMS::RULES_CONFIG::mockRules.ruleCount = 1;
+
+    JsonDocument doc;
+    doc["rules"] = "not-an-array";
+    JsonObject object = doc.as<JsonObject>();
+
+    TEST_ASSERT_FALSE(CONFIG::JSON::loadAlarms(object));
+    TEST_ASSERT_EQUAL_UINT8(1, ALARMS::RULES_CONFIG::mockRules.ruleCount);
+    TEST_ASSERT_EQUAL_STRING(
+        "existing", ALARMS::RULES_CONFIG::mockRules.rules[0].id);
+}
+
+void test_load_alarms_rejects_incomplete_section_without_rules_snapshot() {
+    ALARMS::RULES_CONFIG::mockRules = ALARMS::AlarmRulesSnapshot{};
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].id,
+                 "existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].id) - 1);
+    std::strncpy(ALARMS::RULES_CONFIG::mockRules.rules[0].name,
+                 "Existing",
+                 sizeof(ALARMS::RULES_CONFIG::mockRules.rules[0].name) - 1);
+    ALARMS::RULES_CONFIG::mockRules.ruleCount = 1;
+
+    JsonDocument doc;
+    JsonObject object = doc.to<JsonObject>();
+
+    TEST_ASSERT_FALSE(CONFIG::JSON::loadAlarms(object));
+    TEST_ASSERT_EQUAL_UINT8(1, ALARMS::RULES_CONFIG::mockRules.ruleCount);
+    TEST_ASSERT_EQUAL_STRING(
+        "existing", ALARMS::RULES_CONFIG::mockRules.rules[0].id);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_deserialize_source_string_wifi_motion);
@@ -322,6 +555,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_deserialize_source_int_ble_rssi);
     RUN_TEST(test_deserialize_source_string_wifi_csi_motion);
     RUN_TEST(test_deserialize_source_int_wifi_csi_motion);
+    RUN_TEST(test_wifi_csi_motion_rule_is_canonicalized_from_inverse_operator);
     RUN_TEST(test_deserialize_source_int_after_wifi_csi_motion_maps_to_imu_tamper);
     RUN_TEST(test_deserialize_source_string_imu_tamper);
     RUN_TEST(test_deserialize_source_string_gpio_digital);
@@ -334,5 +568,14 @@ int main(int argc, char **argv) {
     RUN_TEST(test_deserialize_rules_rejects_duplicate_names);
     RUN_TEST(test_deserialize_rules_rejects_duplicate_names_trimmed_case_insensitive);
     RUN_TEST(test_deserialize_rules_rejects_more_than_max_rules);
+    RUN_TEST(test_deserialize_rule_rejects_lossy_shelly_bindings);
+    RUN_TEST(test_deserialize_rule_rejects_wrong_shelly_binding_type);
+    RUN_TEST(test_load_alarms_preserves_full_retained_runtime_for_identity_mapping);
+    RUN_TEST(test_deserialize_rule_rejects_unknown_channel_bits_and_wrong_types);
+    RUN_TEST(test_deserialize_rule_validates_cooldown_without_integer_wrap);
+    RUN_TEST(test_deserialize_rule_requires_valid_source_selector);
+    RUN_TEST(test_load_alarms_rejects_entire_corrupt_snapshot);
+    RUN_TEST(test_load_alarms_rejects_wrong_rules_container_type);
+    RUN_TEST(test_load_alarms_rejects_incomplete_section_without_rules_snapshot);
     return UNITY_END();
 }

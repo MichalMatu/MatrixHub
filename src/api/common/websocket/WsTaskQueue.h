@@ -20,13 +20,50 @@ class WsTaskQueue {
 public:
     using ProcessCallback = std::function<void(WsMessage& msg)>;
 
+    /**
+     * Keeps the queue and its payload pool owned for one complete producer
+     * transaction.  The lease is acquired before a broadcaster touches pool
+     * storage and is released only after enqueue/drop cleanup has finished.
+     */
+    class ProducerLease {
+    public:
+        ProducerLease() = default;
+        ~ProducerLease();
+
+        ProducerLease(const ProducerLease&) = delete;
+        ProducerLease& operator=(const ProducerLease&) = delete;
+
+        ProducerLease(ProducerLease&& other) noexcept;
+        ProducerLease& operator=(ProducerLease&& other) noexcept;
+
+        explicit operator bool() const { return _owner != nullptr; }
+        bool enqueue(const WsMessage& msg);
+
+    private:
+        friend class WsTaskQueue;
+        ProducerLease(WsTaskQueue* owner, QueueHandle_t queue)
+            : _owner(owner), _queue(queue) {}
+
+        void release();
+
+        WsTaskQueue* _owner = nullptr;
+        QueueHandle_t _queue = nullptr;
+    };
+
     WsTaskQueue(const char* logTag, ProcessCallback processCb, WsPayloadPool* pool);
     ~WsTaskQueue();
 
     void enable(size_t queueSize, uint32_t stackSize);
+    // Fence new messages and ask the worker to stop without waiting for it.
+    // Terminal system transitions use this from the HTTP server task, where a
+    // synchronous drain could deadlock with an in-flight httpd WebSocket send.
+    // The owner must keep this queue and its payload pool alive until reset or
+    // follow with disable() from a context that can safely wait.
+    void requestStop();
     bool disable();
 
     bool isEnabled() const;
+    ProducerLease acquireProducerLease();
     bool enqueue(const WsMessage& msg);
 
 private:
@@ -49,6 +86,8 @@ private:
     StaticTask_t* _taskBuffer = nullptr;
 
     bool isBroadcastTaskContext() const;
+    bool enqueueWithLease(QueueHandle_t queue, const WsMessage& msg);
+    void releaseProducerLease();
     bool reapStoppedTask(TickType_t waitTicks);
     bool waitForEnqueueIdle(TickType_t waitTicks) const;
     void destroyQueueResources();

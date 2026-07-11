@@ -297,6 +297,8 @@ namespace Keys {
     constexpr const char* kFirmwareVersion = "firmware_version";
     constexpr const char* kFirmwareName = "firmware_name";
     constexpr const char* kFirmwareBuiltTarget = "firmware_built_target";
+    constexpr const char* kFirmwareCommit = "firmware_commit";
+    constexpr const char* kFirmwareDirty = "firmware_dirty";
     constexpr const char* kCpuFreqMhz = "cpu_freq_mhz";
     constexpr const char* kCpuType = "cpu_type";
     constexpr const char* kCpuRev = "cpu_rev";

@@ -30,7 +30,10 @@ void CoreServicesInitializer::initialize(
     LOG_PHASE_STEP(coreTimer, "BleService");
 
     alarmService = std::make_unique<ALARMS::AlarmService>(matrixManager, bleService.get());
-    alarmService->begin();
+    if (!alarmService->begin()) {
+        LOGE("AlarmService init failed; refusing to boot without retained-state safety");
+        std::abort();
+    }
     LOG_PHASE_STEP(coreTimer, "AlarmService");
 
     sensorService = std::make_unique<SENSORS::Scd4xSensorService>(compensationService.get());

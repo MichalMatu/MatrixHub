@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AlarmRuleManager.h"
+#include "GpioAlarmEdgeMailbox.h"
 #include "controller/AlarmMatrixController.h"
 #include "../notifier/AlarmNotifier.h"
 #include "../../sensors/model/SensorTypes.h" // For SensorSnapshot
@@ -25,7 +26,13 @@ struct AlarmStateChange {
 };
 
 using AlarmStateCallback = std::function<void(const AlarmStateChange&)>;
-using ShellyActionExecutor = std::function<uint8_t(const AlarmRule&, bool)>;
+enum class ShellyActionResult : uint8_t {
+    Accepted,
+    Retry,
+    Terminal,
+};
+using ShellyActionExecutor =
+    std::function<ShellyActionResult(const AlarmRule&, bool)>;
 
 /**
  * @brief Coordinates the alarm evaluation process.
@@ -48,12 +55,23 @@ public:
     uint8_t process(const SensorSnapshot& sensors,
                     float wifiVariance,
                     float wifiCsiMotion = NAN,
-                    float imuTamper = NAN);
+                    float imuTamper = NAN,
+                    const GpioAlarmEdgeMailbox::PassSnapshot* gpioEdges = nullptr,
+                    bool* evaluationCompleted = nullptr);
     
     // LED Latching logic helpers (exposed if needed by Service to clear LED on reload)
     void clearLatchedLed();
     void reapplyLatchedState();
+    void refreshLatchedStateFromRuntime();
+    void reconcileAllShellyDevices();
+    void retryPendingShellyActions();
     bool isAlarmLatched() const;
+    bool isReady() const {
+        return _processMutex != nullptr &&
+               _pendingEventsBuffer != nullptr &&
+               _pendingShellyReconcileEffects != nullptr;
+    }
+    bool updateRules(const AlarmRule* rules, uint8_t count);
     // Set callback for state changes (WebSocket broadcast)
     void setStateChangeCallback(AlarmStateCallback cb) { _stateChangeCb = cb; }
     void setShellyActionExecutor(ShellyActionExecutor executor) { _shellyActionExecutor = std::move(executor); }
@@ -63,6 +81,11 @@ public:
     void setBleService(BLE::BleService* service) { _bleService = service; }
     void setGpioService(GPIO::GpioService* service) { _gpioService = service; }
     void setMatrixManager(MATRIX_MANAGER::MatrixManagerService* mgr) { _matrixController.setMatrixManager(mgr); }
+
+#ifdef UNIT_TEST
+    bool enqueueShellyReconcileForTest(const char* deviceId);
+    uint8_t pendingShellyReconcileCountForTest();
+#endif
 
 private:
     struct EvaluationPassResult {
@@ -96,14 +119,37 @@ private:
     SemaphoreHandle_t _processMutex = nullptr;
     StaticSemaphore_t _processMutexStorage;
 
+    // In-memory outbox for Shelly global-OR reconciliation. It keeps transient
+    // lifecycle/DeviceManager admission failures pending independently of a
+    // future sensor edge. The ~2 KiB fixed buffer lives in PSRAM.
+    AlarmRuleUpdateEffects* _pendingShellyReconcileEffects = nullptr;
+
     AlarmInputData buildInputData(const SensorSnapshot& sensors,
                                   float wifiVariance,
                                   float wifiCsiMotion,
                                   float imuTamper) const;
-    EvaluationPassResult collectPendingEvents(const AlarmInputData& input, uint32_t now);
+    EvaluationPassResult collectPendingEvents(
+        const AlarmInputData& input,
+        uint32_t now,
+        const GpioAlarmEdgeMailbox::PassSnapshot* gpioEdges);
     uint8_t executePendingEvents(uint8_t pendingCount, const AlarmAggregateState& ledState);
-    uint8_t executeShellyAction(const AlarmRule& rule, bool turnOn) const;
+    ShellyActionResult executeShellyAction(const AlarmRule& rule,
+                                           bool turnOn) const;
+    ShellyActionResult executeShellyDeviceAction(const char* deviceId,
+                                                 bool turnOn) const;
+    bool getShellyDeviceDesiredState(const char* deviceId, bool& desiredOn) const;
+    bool enqueueShellyReconcileLocked(const char* deviceId);
+    void retryPendingShellyActionsLocked();
+    void reconcileAffectedShellyDevices(const AlarmRuleUpdateEffects& effects);
+    void refreshLatchedStateFromRuntimeLocked();
     static float getValueForLogging(const AlarmRule& rule, const AlarmInputData& input);
 };
 
 } // namespace ALARMS
+
+#ifdef UNIT_TEST
+namespace ALARMS::TEST_HOOKS {
+void setAlarmPendingEventsAllocationFailure(bool fail);
+void setAlarmBootShellyAllocationFailure(bool fail);
+}
+#endif

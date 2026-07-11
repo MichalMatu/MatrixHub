@@ -21,11 +21,12 @@ public:
 
     /**
      * Set relay state for a device.
-     * @param id Device ID
+     * @param device Immutable peer snapshot bound to the worker intent.
      * @param turnOn true = ON, false = OFF
-     * @return true if successful
+     * @return true if transport succeeded. Publishing the acknowledged device
+     * state is owned by ShellyWorker after it validates the intent generation.
      */
-    bool setRelay(const char* id, bool turnOn);
+    bool setRelay(const ShellyDevice& device, bool turnOn);
 
 
     /**

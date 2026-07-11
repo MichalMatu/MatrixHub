@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include "CsiService.h"
+#include "CsiRxCallbackFence.h"
 
 #include <cstring>
 #include <esp_timer.h>
@@ -13,21 +14,42 @@
 
 namespace WIFISENSING {
 namespace CSI {
+namespace {
+
+// The context deliberately has process lifetime. The Espressif API does not
+// document unregister as a drain barrier, so a driver-dispatched callback may
+// begin after the owning CsiService has already closed its entry gate.
+CsiRxCallbackFence g_rxCallbackFence;
+
+} // namespace
 
 void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
-    CsiService* self = (CsiService*)ctx;
+    auto* fence = static_cast<CsiRxCallbackFence*>(ctx);
     // This runs on the Wi-Fi driver's task hot path. Keep it copy-only: no heap
     // allocation, no locking, no logging, no PSRAM handoff and no heavy signal
     // processing here.
-    if (!info || !info->buf || !self || !self->_queue) return;
-    if (!self->_rxCallbackEnabled.load(std::memory_order_acquire)) return;
+    if (!fence) return;
 
-    // Count the callback before doing work so shutdown can wait for any instance
-    // that already passed the first gate. The second gate closes the race where
-    // disable happens just after we increment the in-flight counter.
-    self->_rxCallbacksInFlight.fetch_add(1, std::memory_order_acq_rel);
-    if (!self->_rxCallbackEnabled.load(std::memory_order_acquire)) {
-        self->_rxCallbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
+    // Acquire against a stable process-lifetime context before loading the
+    // service pointer. A callback delayed before this first instruction can no
+    // longer dereference a destroyed CsiService after detach.
+    auto* self = static_cast<CsiService*>(fence->enter());
+    if (!self) {
+        fence->leave();
+        return;
+    }
+
+    if (!self->_rxCallbackEnabled.load(std::memory_order_acquire) ||
+        !info || !info->buf) {
+        fence->leave();
+        return;
+    }
+
+    // Keep one stable pointer for the whole protected callback. The queue cannot
+    // be released until this callback decrements the in-flight counter.
+    CsiDataQueue* const queue = self->_queue;
+    if (!queue) {
+        fence->leave();
         return;
     }
 
@@ -44,7 +66,7 @@ void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     uint32_t elapsedUs = nowUs - lastUs;
     if (elapsedUs < CSI_RX_THROTTLE_INTERVAL_US) {
         self->_rxThrottledTotal.fetch_add(1, std::memory_order_relaxed);
-        self->_rxCallbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
+        fence->leave();
         return;
     }
     self->_lastRxAcceptTimeUs.store(nowUs, std::memory_order_relaxed);
@@ -65,10 +87,22 @@ void IRAM_ATTR CsiService::wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info) {
     packet.compensate_gain = 1.0f;
 
     // Queue tracks overflow statistics internally; the callback stays branch-light either way.
-    if (self->_queue->pushFromWifiTask(packet)) {
+    if (queue->pushFromWifiTask(packet)) {
         self->_queuedPacketsTotal.fetch_add(1, std::memory_order_relaxed);
     }
-    self->_rxCallbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
+    fence->leave();
+}
+
+bool CsiService::attachRxCallbackOwner() {
+    return g_rxCallbackFence.attach(this);
+}
+
+void CsiService::detachRxCallbackOwner() {
+    g_rxCallbackFence.detach(this);
+}
+
+void* CsiService::rxCallbackContext() {
+    return &g_rxCallbackFence;
 }
 
 CsiCallback CsiService::getCsiCallbackSnapshot() {
@@ -81,7 +115,15 @@ CsiCallback CsiService::getCsiCallbackSnapshot() {
         return nullptr;
     }
 
-    return _csiCallback;
+    CsiCallback callback = _csiCallback;
+    if (callback) {
+        _csiCallbacksInFlight.fetch_add(1, std::memory_order_acq_rel);
+    }
+    return callback;
+}
+
+void CsiService::releaseCsiCallbackSnapshot() {
+    _csiCallbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 MotionCallback CsiService::getMotionCallbackSnapshot() {
@@ -89,7 +131,7 @@ MotionCallback CsiService::getMotionCallbackSnapshot() {
         return nullptr;
     }
 
-    if (xSemaphoreTake(_motionCallbackMutex, 0) != pdTRUE) {
+    if (xSemaphoreTake(_motionCallbackMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
         return nullptr;
     }
 
@@ -102,7 +144,7 @@ bool CsiService::waitForRxCallbacksToDrain(uint32_t timeoutMs) {
     const uint32_t startMs = millis();
     // Called only after callback registration has been removed, so the counter
     // represents work already in flight rather than new callback arrivals.
-    while (_rxCallbacksInFlight.load(std::memory_order_acquire) != 0) {
+    while (g_rxCallbackFence.hasInFlight()) {
         if ((millis() - startMs) >= timeoutMs) {
             return false;
         }

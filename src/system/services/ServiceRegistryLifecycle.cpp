@@ -120,6 +120,21 @@ API::NotificationsApiService* ServiceRegistry::getNotificationsApiService() cons
     return _api ? _api->notificationsApi.get() : nullptr;
 }
 
+void ServiceRegistry::reconcileDeferredApiLifecycle() {
+    if (_api && _api->wifiSensingApi) {
+        _api->wifiSensingApi->reconcileDeferredCsiLifecycle();
+    }
+}
+
+void ServiceRegistry::shutdownWifiSensingApiLifecycle() {
+    if (_api && _api->wifiSensingApi) {
+        // ShutdownSequence can run inside an HTTP request. Fence the API and
+        // request a non-blocking transport stop so a synchronous WebSocket send
+        // cannot deadlock waiting for the currently occupied httpd task.
+        _api->wifiSensingApi->prepareForSystemShutdown();
+    }
+}
+
 void ServiceRegistry::runInitializationSequence(SemaphoreHandle_t networkMutex,
                                                 SemaphoreHandle_t notifMutex) {
     initializeCoreServices();

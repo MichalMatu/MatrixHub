@@ -28,6 +28,8 @@
 // Additional workers for graceful shutdown
 #include "../../notifications/runtime/NotificationWorker.h"
 #include "../../wifisensing/WifiSensingService.h"
+#include "../../wifisensing/WifiSensingSettings.h"
+#include "../../wifisensing/csi/core/CsiService.h"
 #include "../../airmouse/AirMouseService.h"
 #include "../../sensors/imu/ImuManager.h"
 #include "../../macros/MacroService.h"
@@ -204,10 +206,46 @@ void ShutdownSequence::stopBackgroundTasks(ServiceRegistry& registry) {
         worker->stop();
     }
     
+    // Fence API callbacks and drain deferred frontend/capture lifecycle workers
+    // before shutting down their CSI/RSSI service dependencies.
+    registry.shutdownWifiSensingApiLifecycle();
+
+    // The periodic reconciler runs outside loopTask, so shutdown must fence and
+    // drain it before either sensing service becomes terminal. Keep polling past
+    // the normal diagnostic budget rather than tearing dependencies out from
+    // underneath an in-flight repair.
+    if (auto* wifiSensingSettings = registry.getWifiSensingSettings()) {
+        const uint32_t reconcileStopStartedMs = millis();
+        bool timeoutLogged = false;
+        while (!wifiSensingSettings->shutdownRuntimeReconciler(
+            TIMEOUT::TASK_SHUTDOWN_POLL_TICKS)) {
+            if (!timeoutLogged &&
+                (millis() - reconcileStopStartedMs) >= TIMEOUT::TASK_SHUTDOWN_MS) {
+                LOGW("Waiting for WiFi sensing runtime reconciler to drain");
+                timeoutLogged = true;
+            }
+        }
+    }
+
     // Stop WiFi sensing (if running)
     auto* wifiSensing = registry.getWifiSensingService();
+    bool wifiSensingStopped = wifiSensing == nullptr;
     if (wifiSensing) {
-        wifiSensing->stop();
+        const uint32_t wifiSensingStopStartedMs = millis();
+        do {
+            wifiSensingStopped = wifiSensing->shutdown();
+            if (!wifiSensingStopped) {
+                vTaskDelay(TIMEOUT::TASK_SHUTDOWN_POLL_TICKS);
+            }
+        } while (!wifiSensingStopped &&
+                 (millis() - wifiSensingStopStartedMs) < TIMEOUT::TASK_SHUTDOWN_MS);
+
+        if (!wifiSensingStopped) {
+            wifiSensingStopped = wifiSensing->shutdown();
+        }
+        if (!wifiSensingStopped) {
+            LOGW("RSSI runtime cleanup remains pending before WiFi shutdown");
+        }
     }
     
     // Stop AirMouse service (USB HID)
@@ -251,6 +289,40 @@ void ShutdownSequence::stopBackgroundTasks(ServiceRegistry& registry) {
     // [FIX] Explicitly stop background tasks that might span logs
     LOGI("Stopping MatrixTask...");
     MATRIX::MatrixTask::stop();
+
+    // Matrix visualization is an RSSI sampler reader. If it held the buffer
+    // across the first bounded stop budget, retry once after that final reader
+    // is gone instead of carrying retained PSRAM into the terminal state.
+    if (!wifiSensingStopped && wifiSensing) {
+        wifiSensingStopped = wifiSensing->shutdown();
+        if (!wifiSensingStopped) {
+            LOGW("RSSI sampler cleanup still pending after MatrixTask shutdown");
+        }
+    }
+
+    // CSI owns a Wi-Fi driver callback, ping socket, queue and worker task.
+    // Tear those down explicitly while the Wi-Fi stack is still alive; relying
+    // on WiFi.mode(WIFI_OFF) would bypass callback drain and lifecycle cleanup.
+    if (auto* csiService = registry.getCsiService()) {
+        bool csiStopped = false;
+        const uint32_t csiStopStartedMs = millis();
+        do {
+            csiStopped = csiService->shutdown();
+            if (!csiStopped) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+        } while (!csiStopped &&
+                 (millis() - csiStopStartedMs) < TIMEOUT::TASK_SHUTDOWN_MS);
+
+        // One final reap attempt handles the common case where the worker
+        // reached its suspend point exactly at the deadline.
+        if (!csiStopped) {
+            csiStopped = csiService->shutdown();
+        }
+        if (!csiStopped) {
+            LOGW("CSI runtime cleanup remains pending before WiFi shutdown");
+        }
+    }
 
     LOGI("Stopping ThermalMonitor...");
     ThermalMonitor::instance().stop();

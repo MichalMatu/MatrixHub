@@ -9,6 +9,8 @@ export const SystemInformationSchema = z.object({
 	firmware_version: z.string(),
 	firmware_name: z.string().optional(),
 	firmware_built_target: z.string().optional(),
+	firmware_commit: z.string(),
+	firmware_dirty: z.boolean(),
 	cpu_freq_mhz: z.number(),
 	cpu_type: z.string(),
 	cpu_rev: z.number(),

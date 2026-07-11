@@ -287,6 +287,27 @@ void test_reapply_latched_state_uses_updated_display_mode() {
     assertLastSolid(UI::COLOR::ALARM_WARNING);
 }
 
+void test_update_refreshes_same_severity_when_active_alarm_name_changes() {
+    RTC::mockStore.matrix.alarmMode = RTC::MatrixAlarmMode::SCROLL_TEXT;
+
+    MATRIX_MANAGER::MatrixManagerService manager(nullptr);
+    ALARMS::AlarmMatrixController controller;
+    controller.setMatrixManager(&manager);
+
+    ALARMS::AlarmAggregateState first{};
+    first.active = true;
+    first.maxSeverity = ALARMS::AlarmSeverity::Warning;
+    ALARMS::safeCopyAlarmName(first.alarmName, "First alarm");
+    TEST_ASSERT_TRUE(controller.update(first));
+    assertLastScrollText("First alarm", UI::COLOR::ALARM_WARNING);
+
+    ALARMS::AlarmAggregateState second = first;
+    ALARMS::safeCopyAlarmName(second.alarmName, "Second alarm");
+    TEST_ASSERT_TRUE(controller.update(second));
+    TEST_ASSERT_EQUAL_UINT32(2, MATRIX_MANAGER::g_setLayerCalls);
+    assertLastScrollText("Second alarm", UI::COLOR::ALARM_WARNING);
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -299,6 +320,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_scroll_text_fallback_icon_respects_info_severity_for_empty_name);
     RUN_TEST(test_update_clears_alarm_layer_when_alarm_deactivates);
     RUN_TEST(test_reapply_latched_state_uses_updated_display_mode);
+    RUN_TEST(test_update_refreshes_same_severity_when_active_alarm_name_changes);
     return UNITY_END();
 }
 
