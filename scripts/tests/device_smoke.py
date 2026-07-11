@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -30,6 +31,7 @@ except Exception:  # noqa: BLE001 - WSS checks are optional and reported when un
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPORT_DIR = REPO_ROOT / "artifacts" / "device-smoke"
 DEFAULT_HEAP_DROP_LIMIT_BYTES = 65536
+DEFAULT_EXPECTED_FIRMWARE_COMMIT = os.getenv("DEVICE_EXPECTED_FIRMWARE_COMMIT", "").strip().lower()
 
 JsonValidator = Callable[[Any], list[str]]
 
@@ -72,13 +74,52 @@ def require_type(name: str, value: Any, key: str, expected: type | tuple[type, .
 
 
 def validate_system_info(data: Any) -> list[str]:
-    errors = require_keys("system_info", data, ("firmware_version", "free_heap", "total_heap", "uptime"))
+    errors = require_keys(
+        "system_info",
+        data,
+        (
+            "firmware_version",
+            "firmware_commit",
+            "firmware_dirty",
+            "free_heap",
+            "total_heap",
+            "uptime",
+        ),
+    )
     if not errors:
         if not isinstance(data.get("firmware_version"), str):
             errors.append("system_info.firmware_version must be string")
+        firmware_commit = data.get("firmware_commit")
+        if (
+            not isinstance(firmware_commit, str)
+            or len(firmware_commit) != 40
+            or any(character not in "0123456789abcdef" for character in firmware_commit.lower())
+        ):
+            errors.append("system_info.firmware_commit must be a 40-character hexadecimal SHA")
+        if not isinstance(data.get("firmware_dirty"), bool):
+            errors.append("system_info.firmware_dirty must be bool")
         for key in ("free_heap", "total_heap", "uptime"):
             if not is_number(data.get(key)):
                 errors.append(f"system_info.{key} must be number")
+    return errors
+
+
+def validate_expected_firmware_identity(
+    data: Any,
+    expected_commit: str,
+    *,
+    allow_dirty: bool = False,
+) -> list[str]:
+    errors = validate_system_info(data)
+    if errors:
+        return errors
+
+    actual_commit = str(data["firmware_commit"]).lower()
+    expected = expected_commit.strip().lower()
+    if actual_commit != expected:
+        errors.append(f"firmware commit mismatch: expected {expected}, got {actual_commit}")
+    if data["firmware_dirty"] and not allow_dirty:
+        errors.append("firmware reports a dirty build")
     return errors
 
 
@@ -510,6 +551,58 @@ def run_read_only(client: DeviceClient, timeout: float) -> tuple[list[dict[str, 
         results.append(result)
         bodies[endpoint["name"]] = body
     return results, bodies
+
+
+def run_firmware_identity_check(
+    client: DeviceClient,
+    expected_commit: str,
+    *,
+    allow_dirty: bool,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    read_result, body = http_json_check(
+        client,
+        "firmware.identity.read",
+        "GET",
+        "/api/system/info",
+        validator=validate_system_info,
+        timeout=timeout,
+    )
+    results.append(read_result)
+    if not read_result["ok"]:
+        return results
+
+    errors = validate_expected_firmware_identity(
+        body,
+        expected_commit,
+        allow_dirty=allow_dirty,
+    )
+    append_verify_result(
+        results,
+        "firmware.identity.verify",
+        not errors,
+        details={
+            "expected_commit": expected_commit,
+            "actual_commit": body.get("firmware_commit") if isinstance(body, dict) else None,
+            "firmware_dirty": body.get("firmware_dirty") if isinstance(body, dict) else None,
+            "allow_dirty": allow_dirty,
+        },
+        error="; ".join(errors) if errors else None,
+    )
+    return results
+
+
+def firmware_identity_allows_mutation(results: list[dict[str, Any]]) -> bool:
+    expected_checks = {
+        "firmware.identity.read",
+        "firmware.identity.verify",
+    }
+    return (
+        len(results) == len(expected_checks)
+        and {str(result.get("name")) for result in results} == expected_checks
+        and all(result.get("ok") is True for result in results)
+    )
 
 
 def run_reauth_probe(client: DeviceClient, timeout: float) -> dict[str, Any]:
@@ -1171,6 +1264,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wss-timeout-sec", type=float, default=8.0)
     parser.add_argument("--restart-timeout-sec", type=float, default=75.0)
     parser.add_argument("--login-timeout-sec", type=float, default=75.0)
+    parser.add_argument(
+        "--expected-firmware-commit",
+        default=DEFAULT_EXPECTED_FIRMWARE_COMMIT,
+        help="Require /api/system/info to report this exact 40-character Git SHA. "
+        "Default: DEVICE_EXPECTED_FIRMWARE_COMMIT.",
+    )
+    parser.add_argument(
+        "--allow-dirty-firmware",
+        action="store_true",
+        help="Allow firmware_dirty=true when an expected firmware commit is checked.",
+    )
     parser.add_argument("--max-heap-drop-bytes", type=int, default=DEFAULT_HEAP_DROP_LIMIT_BYTES)
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), help="Directory for JSON/Markdown reports.")
     parser.add_argument("--report-prefix", default="device-smoke")
@@ -1181,6 +1285,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    args.expected_firmware_commit = args.expected_firmware_commit.strip().lower()
+    if args.expected_firmware_commit and (
+        len(args.expected_firmware_commit) != 40
+        or any(character not in "0123456789abcdef" for character in args.expected_firmware_commit)
+    ):
+        parser.error("--expected-firmware-commit must be a 40-character hexadecimal SHA")
     if (
         not args.read_only
         and not args.safe_writes
@@ -1198,6 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
     memory_before: dict[str, Any] = {}
     memory_after: dict[str, Any] = {}
     memory_delta: dict[str, Any] = {}
+    identity_allows_mutation = True
 
     try:
         enforce_https(client.base_url)
@@ -1205,6 +1316,34 @@ def main(argv: list[str] | None = None) -> int:
 
         auth_result = run_reauth_probe(client, args.timeout)
         all_results.append(auth_result)
+
+        if args.expected_firmware_commit:
+            identity_results = run_firmware_identity_check(
+                client,
+                args.expected_firmware_commit,
+                allow_dirty=args.allow_dirty_firmware,
+                timeout=args.timeout,
+            )
+            all_results.extend(identity_results)
+            identity_allows_mutation = firmware_identity_allows_mutation(identity_results)
+
+            requested_mutations = [
+                name
+                for name, requested in (
+                    ("safe_writes", args.safe_writes),
+                    ("power_sleep_smoke", args.power_sleep_smoke),
+                    ("restart", args.restart),
+                )
+                if requested
+            ]
+            if requested_mutations and not identity_allows_mutation:
+                append_verify_result(
+                    all_results,
+                    "firmware.identity.mutation_gate",
+                    False,
+                    details={"skipped_modes": requested_mutations},
+                    error="state-changing checks skipped because firmware identity was not verified",
+                )
 
         before_result, before_body = http_json_check(
             client,
@@ -1221,7 +1360,7 @@ def main(argv: list[str] | None = None) -> int:
             read_results, _bodies = run_read_only(client, args.timeout)
             all_results.extend(read_results)
 
-        if args.safe_writes:
+        if args.safe_writes and identity_allows_mutation:
             all_results.extend(run_safe_writes(client, args.timeout))
 
         if args.wss:
@@ -1230,7 +1369,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.http_redirect:
             all_results.append(run_http_redirect_check(client, args.timeout))
 
-        if args.power_sleep_smoke:
+        if args.power_sleep_smoke and identity_allows_mutation:
             run_power_sleep_smoke(
                 client,
                 all_results,
@@ -1239,7 +1378,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout=args.timeout,
             )
 
-        if args.restart:
+        if args.restart and identity_allows_mutation:
             all_results.append(run_restart_check(client, args.restart_timeout_sec))
 
         after_result, after_body = http_json_check(
@@ -1271,6 +1410,11 @@ def main(argv: list[str] | None = None) -> int:
             "target": client.base_url,
             "https_only": True,
             "jwt_login": True,
+            "firmware_identity": {
+                "expected_commit": args.expected_firmware_commit or None,
+                "allow_dirty": bool(args.allow_dirty_firmware),
+                "mutations_allowed": identity_allows_mutation,
+            },
             "retries": client.retries,
             "started_at": started_at,
             "finished_at": now_iso(),

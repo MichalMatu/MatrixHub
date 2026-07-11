@@ -19,6 +19,35 @@ unsafe current increase.
 - Back up `/api/matrix/settings` and restore it in `finally`, even after a failed
   test. Do not use white at brightness 255 for this gate.
 
+Before collecting optical/current evidence, run the smoke suite with an exact
+identity gate. Supply credentials through environment variables or an existing
+token; do not put a password in the process command line:
+
+```bash
+export DEVICE_URL="https://matrixhub.local"
+export DEVICE_USER="admin"
+read -rsp "Device password: " DEVICE_PASSWORD
+echo
+export DEVICE_PASSWORD
+
+EXPECTED_SHA="$(git rev-parse --verify HEAD)"
+python3 scripts/tests/device_smoke.py \
+  --read-only \
+  --safe-writes \
+  --wss \
+  --expected-firmware-commit "$EXPECTED_SHA" \
+  --report-dir "artifacts/hardware-gates/matrix-thermal/$EXPECTED_SHA/device-smoke" \
+  --report-prefix g2.3a-pre
+
+unset DEVICE_PASSWORD
+```
+
+The command requires a 40-character hexadecimal `firmware_commit` and rejects
+`firmware_dirty=true`. If either identity check fails, all requested safe-write,
+sleep, and restart operations are skipped and the report fails closed.
+`--allow-dirty-firmware` exists only for developer diagnostics and is not valid
+release-gate evidence.
+
 ## Reference frames
 
 1. Select a static red frame (`0xFF0000`) with user brightness 32. A single RGB
