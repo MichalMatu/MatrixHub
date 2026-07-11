@@ -201,6 +201,7 @@ python scripts/sensing_analysis/csi_capture.py collect \
   --device-url https://192.168.0.18 \
   --scenario-id long-motion-inversion-01 \
   --duration 30m \
+  --cleanup-timeout 15s \
   --firmware-commit <git-sha-of-flashed-build> \
   --description "Repeated walk/quiet cycles in a fixed room"
 ```
@@ -221,6 +222,27 @@ allocated queue, no runtime fault or reconciliation is pending, gain calibration
 has reached `forced`, and the active detector has received a fresh valid frame.
 A failed preflight leaves no `.partial` directory; correct the device
 configuration and retry.
+
+On the first accepted `DATA` record the collector writes one flushed
+`CAPTURE_ORIGIN` line to stderr. It contains only the capture session, accepted
+sequence, device `processNowMs`, and host UTC/monotonic timestamps. Stdout stays
+machine-readable for `--json`. The same non-sensitive alignment point is saved
+in `capture.json`, and `collect_capture(..., origin_hook=...)` exposes a
+synchronous callback for later operator/video event alignment without adding
+interactive input to the asyncio receive loop.
+
+After the WebSocket closes, collection polls `/api/wifisensing/status` every
+approximately 250 ms for at most `--cleanup-timeout` (15 seconds by default).
+Finalization succeeds only when
+`csi.diagnostic_capture_consumer_active=false` and every capture lifecycle field
+is exactly quiescent: `queue_enabled=false`, `client_count=0`,
+`starting=false`, `accepting=false`, and `stopping=false`. The immediate and
+settled status, poll count, and elapsed time are persisted under
+`collector_cleanup`. Missing/mistyped fields, request failure, or timeout fail
+closed and leave the directory as `.partial`. Promotion independently requires
+this verified cleanup evidence and matching `CAPTURE_ORIGIN`, so a legacy raw
+capture can still be inspected with `verify` but cannot newly enter the release
+fixture corpus without the lifecycle proof.
 
 The collector writes:
 

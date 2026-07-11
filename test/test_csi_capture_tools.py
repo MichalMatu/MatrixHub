@@ -3,7 +3,9 @@ import json
 import struct
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,17 +19,20 @@ from scripts.sensing_analysis.csi_capture import (
     annotate_capture,
     atomic_write_json,
     build_parser,
+    capture_cleanup_complete,
     collect_capture,
     firmware_provenance,
     initial_scenario,
     parse_milliseconds,
     promote_capture,
+    receive_data_until_end,
     require_capture_ready_config,
     require_capture_ready_status,
     require_safe_raw_root,
     set_acceptance,
     sha256_file,
     verify_capture,
+    wait_for_capture_cleanup,
 )
 from scripts.sensing_analysis.csi_capture_format import (
     BATCH_DATA,
@@ -253,6 +258,20 @@ class CsiCaptureFormatTest(unittest.TestCase):
             ]
         )
         self.assertTrue(args.json)
+        self.assertEqual(args.cleanup_timeout, 15.0)
+
+        configured = build_parser().parse_args(
+            [
+                "collect",
+                "--scenario-id",
+                "smoke",
+                "--firmware-commit",
+                "a" * 40,
+                "--cleanup-timeout",
+                "750ms",
+            ]
+        )
+        self.assertEqual(configured.cleanup_timeout, 0.75)
 
     def test_raw_output_inside_repo_is_limited_to_ignored_artifacts(self):
         from scripts.sensing_analysis.csi_capture import REPO_ROOT
@@ -338,6 +357,239 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                 },
             }
         }
+
+    @staticmethod
+    def capture_cleanup_status(*, active: bool = False) -> dict:
+        return {
+            "csi": {
+                "diagnostic_capture_consumer_active": active,
+                "capture": {
+                    "queue_enabled": active,
+                    "client_count": 1 if active else 0,
+                    "starting": False,
+                    "accepting": active,
+                    "stopping": False,
+                },
+            }
+        }
+
+    def test_capture_cleanup_requires_exact_typed_quiescent_fields(self):
+        self.assertTrue(capture_cleanup_complete(self.capture_cleanup_status()))
+        self.assertFalse(
+            capture_cleanup_complete(self.capture_cleanup_status(active=True))
+        )
+
+        invalid_statuses = []
+        missing_consumer = self.capture_cleanup_status()
+        del missing_consumer["csi"]["diagnostic_capture_consumer_active"]
+        invalid_statuses.append(missing_consumer)
+        numeric_consumer = self.capture_cleanup_status()
+        numeric_consumer["csi"]["diagnostic_capture_consumer_active"] = 0
+        invalid_statuses.append(numeric_consumer)
+        for field in ("queue_enabled", "starting", "accepting", "stopping"):
+            status = self.capture_cleanup_status()
+            status["csi"]["capture"][field] = 0
+            invalid_statuses.append(status)
+        boolean_client_count = self.capture_cleanup_status()
+        boolean_client_count["csi"]["capture"]["client_count"] = False
+        invalid_statuses.append(boolean_client_count)
+
+        for status in invalid_statuses:
+            with self.subTest(status=status), self.assertRaisesRegex(
+                CaptureWorkflowError,
+                "capture cleanup status",
+            ):
+                capture_cleanup_complete(status)
+
+    def test_capture_cleanup_poll_records_immediate_and_settled_status(self):
+        class FakeClock:
+            def __init__(self):
+                self.now = 10.0
+
+            def monotonic(self):
+                return self.now
+
+            async def sleep(self, seconds):
+                self.now += seconds
+
+        clock = FakeClock()
+        active = self.capture_cleanup_status(active=True)
+        settled = self.capture_cleanup_status()
+        statuses = iter((active, settled))
+        request_timeouts = []
+        updates = []
+
+        def fetch_status(request_timeout):
+            request_timeouts.append(request_timeout)
+            return next(statuses)
+
+        evidence = asyncio.run(
+            wait_for_capture_cleanup(
+                fetch_status,
+                1.0,
+                poll_interval=0.25,
+                evidence_hook=updates.append,
+                monotonic=clock.monotonic,
+                sleep=clock.sleep,
+            )
+        )
+
+        self.assertTrue(evidence["verified"])
+        self.assertEqual(evidence["immediate_status"], active)
+        self.assertEqual(evidence["settled_status"], settled)
+        self.assertEqual(evidence["poll_count"], 2)
+        self.assertEqual(evidence["elapsed_ms"], 250)
+        self.assertEqual(request_timeouts, [1.0, 0.75])
+        self.assertFalse(updates[0]["verified"])
+        self.assertTrue(updates[-1]["verified"])
+
+    def test_capture_cleanup_timeout_and_malformed_status_fail_closed(self):
+        class FakeClock:
+            def __init__(self):
+                self.now = 0.0
+
+            def monotonic(self):
+                return self.now
+
+            async def sleep(self, seconds):
+                self.now += seconds
+
+        clock = FakeClock()
+        active = self.capture_cleanup_status(active=True)
+        timeout_updates = []
+        with self.assertRaisesRegex(CaptureWorkflowError, "timed out"):
+            asyncio.run(
+                wait_for_capture_cleanup(
+                    lambda _request_timeout: active,
+                    0.5,
+                    poll_interval=0.25,
+                    evidence_hook=timeout_updates.append,
+                    monotonic=clock.monotonic,
+                    sleep=clock.sleep,
+                )
+            )
+        self.assertEqual(timeout_updates[-1]["immediate_status"], active)
+        self.assertEqual(timeout_updates[-1]["settled_status"], active)
+        self.assertEqual(timeout_updates[-1]["poll_count"], 2)
+        self.assertEqual(timeout_updates[-1]["elapsed_ms"], 500)
+        self.assertFalse(timeout_updates[-1]["verified"])
+
+        late_clock = FakeClock()
+        late_updates = []
+
+        def late_clean_status(_request_timeout):
+            late_clock.now = 0.6
+            return self.capture_cleanup_status()
+
+        with self.assertRaisesRegex(CaptureWorkflowError, "timed out"):
+            asyncio.run(
+                wait_for_capture_cleanup(
+                    late_clean_status,
+                    0.5,
+                    evidence_hook=late_updates.append,
+                    monotonic=late_clock.monotonic,
+                    sleep=late_clock.sleep,
+                )
+            )
+        self.assertFalse(late_updates[-1]["verified"])
+        self.assertEqual(late_updates[-1]["elapsed_ms"], 600)
+
+        malformed = self.capture_cleanup_status()
+        del malformed["csi"]["capture"]["accepting"]
+        malformed_updates = []
+        with self.assertRaisesRegex(CaptureWorkflowError, "accepting must be boolean"):
+            asyncio.run(
+                wait_for_capture_cleanup(
+                    lambda _request_timeout: malformed,
+                    1.0,
+                    evidence_hook=malformed_updates.append,
+                )
+            )
+        self.assertEqual(malformed_updates[-1]["immediate_status"], malformed)
+        self.assertEqual(malformed_updates[-1]["settled_status"], malformed)
+        self.assertEqual(malformed_updates[-1]["poll_count"], 1)
+        self.assertFalse(malformed_updates[-1]["verified"])
+
+    def test_first_data_frame_emits_stderr_origin_and_invokes_hook_once(self):
+        class FakeWebSocket:
+            def __init__(self, messages):
+                self.messages = list(messages)
+                self.sent = []
+
+            async def send(self, message):
+                self.sent.append(message)
+
+            async def recv(self):
+                return self.messages.pop(0)
+
+        session_id = 0x11223344
+        source = bytes.fromhex("101122334455")
+        destination = bytes.fromhex("aabbccddeeff")
+        frames = (
+            make_frame(7, 200, source, destination, replay_origin=True),
+            make_frame(8, 250, source, destination),
+        )
+        end_values = (250, 1, 7, 8, 2, 2, 0, 1, 1, 0, 0, 20, 6, 8, 0, 0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            encoded = root / "encoded.mhcf"
+            write_mhcf(encoded, session_id, frames)
+            data = (
+                batch_header(BATCH_DATA, len(frames), session_id)
+                + encoded.read_bytes()[32:]
+            )
+            end_message = (
+                batch_header(BATCH_END, 0, session_id)
+                + END_PAYLOAD.pack(*end_values)
+            )
+            websocket = FakeWebSocket((data, end_message))
+            writer = MhcfWriter(root / "received.mhcf.partial", session_id)
+            origins = []
+            stderr = StringIO()
+            stdout = StringIO()
+            try:
+                with patch(
+                    "scripts.sensing_analysis.csi_capture.capture_origin_utc",
+                    return_value="2026-07-11T12:34:56.123456Z",
+                ), patch(
+                    "scripts.sensing_analysis.csi_capture.time.monotonic_ns",
+                    return_value=987654321,
+                ), redirect_stderr(stderr), redirect_stdout(stdout):
+                    _, batches = asyncio.run(
+                        receive_data_until_end(
+                            websocket,
+                            writer,
+                            session_id,
+                            deadline=0.0,
+                            stop_timeout=1.0,
+                            origin_hook=origins.append,
+                        )
+                    )
+            finally:
+                writer.abort()
+
+        self.assertEqual(batches, 1)
+        self.assertEqual(websocket.sent, ["STOP"])
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(
+            stderr.getvalue(),
+            "CAPTURE_ORIGIN session=287454020 acceptedSequence=7 "
+            "processNowMs=200 utc=2026-07-11T12:34:56.123456Z "
+            "monotonicNs=987654321\n",
+        )
+        self.assertEqual(
+            origins,
+            [
+                {
+                    "session": session_id,
+                    "accepted_sequence": 7,
+                    "process_now_ms": 200,
+                    "host_utc": "2026-07-11T12:34:56.123456Z",
+                    "host_monotonic_ns": 987654321,
+                }
+            ],
+        )
 
     def test_capture_requires_enabled_alarm_with_at_least_one_valid_band(self):
         require_capture_ready_config(
@@ -503,6 +755,266 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
 
             self.assertFalse(output_root.exists())
 
+    def test_collect_cleanup_gate_controls_finalization_and_failure_evidence(self):
+        class FakeWebSocket:
+            def __init__(self, hello_message):
+                self.hello_message = hello_message
+
+            async def send(self, _message):
+                return None
+
+            async def recv(self):
+                return self.hello_message
+
+        class FakeConnection:
+            def __init__(self, websocket):
+                self.websocket = websocket
+
+            async def __aenter__(self):
+                return self.websocket
+
+            async def __aexit__(self, _exc_type, _exc, _traceback):
+                return False
+
+        config = {
+            "csi_alarm": {
+                "enabled": True,
+                "bands": [{"start": 0, "end": 7}],
+            }
+        }
+        ready_status = self.capture_ready_status()
+        system_info = {
+            "firmware_commit": "a" * 40,
+            "firmware_dirty": False,
+        }
+        session_id = 0xA1B2C3D4
+        hello_payload = HELLO_PAYLOAD.pack(
+            100,
+            10,
+            5,
+            5,
+            0,
+            60000,
+            512,
+            10,
+            64,
+            0x00FF,
+            0,
+            0,
+        )
+        hello_message = (
+            batch_header(BATCH_HELLO, 0, session_id) + hello_payload
+        )
+        source = bytes.fromhex("101122334455")
+        destination = bytes.fromhex("aabbccddeeff")
+
+        async def fake_receive(
+            _websocket,
+            writer,
+            received_session_id,
+            **kwargs,
+        ):
+            frame = make_frame(
+                6,
+                200,
+                source,
+                destination,
+                replay_origin=True,
+            )
+            writer.append(frame)
+            origin_hook = kwargs.get("origin_hook")
+            if origin_hook is not None:
+                origin_hook(
+                    {
+                        "session": received_session_id,
+                        "accepted_sequence": frame.accepted_sequence,
+                        "process_now_ms": frame.process_now_ms,
+                        "host_utc": "2026-07-11T12:34:56.123456Z",
+                        "host_monotonic_ns": 987654321,
+                    }
+                )
+            return CaptureEnd(
+                250,
+                1,
+                6,
+                6,
+                1,
+                1,
+                0,
+                1,
+                1,
+                0,
+                0,
+                20,
+                6,
+                6,
+                0,
+                0,
+            ), 1
+
+        self_outer = self
+
+        class FakeClient:
+            def __init__(self, cleanup_status):
+                self.cleanup_status = cleanup_status
+                self.status_calls = 0
+
+            def json(self, method, path, **_kwargs):
+                self_outer.assertEqual(method, "GET")
+                if path == "/api/wifisensing/config":
+                    return config
+                if path == "/api/wifisensing/status":
+                    self.status_calls += 1
+                    if self.status_calls == 1:
+                        return ready_status
+                    return self.cleanup_status
+                if path == "/api/system/info":
+                    return system_info
+                self_outer.fail(f"unexpected request: {path}")
+
+            def ws_url(self, path):
+                self_outer.assertEqual(path, "/ws/csi-capture/v1")
+                return "wss://device.test/ws/csi-capture/v1"
+
+            def ws_cookie_header(self):
+                return {"Cookie": "test"}
+
+            def ws_ssl_context(self):
+                return None
+
+        malformed = self.capture_cleanup_status()
+        del malformed["csi"]["capture"]["accepting"]
+        cases = (
+            ("malformed-cleanup", malformed, 1.0, "accepting must be boolean"),
+            (
+                "cleanup-timeout",
+                self.capture_cleanup_status(active=True),
+                0.001,
+                "timed out",
+            ),
+        )
+
+        for scenario_id, cleanup_status, cleanup_timeout, error_pattern in cases:
+            with self.subTest(scenario_id=scenario_id), tempfile.TemporaryDirectory() as tmpdir:
+                fake_client = FakeClient(cleanup_status)
+                output_root = Path(tmpdir) / "raw"
+                args = SimpleNamespace(
+                    scenario_id=scenario_id,
+                    output_root=output_root,
+                    firmware_commit="a" * 40,
+                    duration=1.0,
+                    start_timeout=1.0,
+                    stop_timeout=1.0,
+                    cleanup_timeout=cleanup_timeout,
+                    description="Lifecycle failure proof.",
+                )
+                with patch(
+                    "scripts.sensing_analysis.csi_capture.DeviceClient.from_args",
+                    return_value=fake_client,
+                ), patch(
+                    "scripts.sensing_analysis.csi_capture.connect_ws",
+                    return_value=FakeConnection(FakeWebSocket(hello_message)),
+                ), patch(
+                    "scripts.sensing_analysis.csi_capture.receive_data_until_end",
+                    new=fake_receive,
+                ):
+                    with self.assertRaisesRegex(CaptureWorkflowError, error_pattern):
+                        asyncio.run(collect_capture(args))
+
+                outputs = list(output_root.iterdir())
+                self.assertEqual(len(outputs), 1)
+                self.assertTrue(outputs[0].name.endswith(".partial"))
+                manifest = json.loads(
+                    (outputs[0] / MANIFEST_FILENAME).read_text(encoding="utf-8")
+                )
+                cleanup = manifest["collector_cleanup"]
+                self.assertEqual(manifest["state"], "incomplete")
+                self.assertFalse(cleanup["verified"])
+                self.assertEqual(cleanup["immediate_status"], cleanup_status)
+                self.assertEqual(cleanup["settled_status"], cleanup_status)
+                self.assertGreaterEqual(cleanup["poll_count"], 1)
+                self.assertRegex(manifest["error"], error_pattern)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "raw"
+            fake_client = FakeClient(self.capture_cleanup_status())
+            args = SimpleNamespace(
+                scenario_id="verified-cleanup",
+                output_root=output_root,
+                firmware_commit="a" * 40,
+                duration=1.0,
+                start_timeout=1.0,
+                stop_timeout=1.0,
+                cleanup_timeout=1.0,
+                description="Verified collector lifecycle.",
+            )
+            with patch(
+                "scripts.sensing_analysis.csi_capture.DeviceClient.from_args",
+                return_value=fake_client,
+            ), patch(
+                "scripts.sensing_analysis.csi_capture.connect_ws",
+                return_value=FakeConnection(FakeWebSocket(hello_message)),
+            ), patch(
+                "scripts.sensing_analysis.csi_capture.receive_data_until_end",
+                new=fake_receive,
+            ):
+                final_dir = asyncio.run(collect_capture(args))
+
+            self.assertTrue(final_dir.is_dir())
+            self.assertFalse(final_dir.name.endswith(".partial"))
+            self.assertEqual(list(output_root.glob("*.partial")), [])
+            manifest = json.loads(
+                (final_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["state"], "complete")
+            self.assertTrue(manifest["collector_cleanup"]["verified"])
+            self.assertTrue(
+                capture_cleanup_complete(
+                    manifest["collector_cleanup"]["settled_status"]
+                )
+            )
+            self.assertEqual(manifest["capture_origin"]["accepted_sequence"], 6)
+
+        async def failing_receive(*_args, **_kwargs):
+            raise CaptureWorkflowError("synthetic receive failure")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "raw"
+            fake_client = FakeClient(self.capture_cleanup_status())
+            args = SimpleNamespace(
+                scenario_id="failed-receive-cleanup",
+                output_root=output_root,
+                firmware_commit="a" * 40,
+                duration=1.0,
+                start_timeout=1.0,
+                stop_timeout=1.0,
+                cleanup_timeout=1.0,
+                description="Cleanup after receive failure.",
+            )
+            with patch(
+                "scripts.sensing_analysis.csi_capture.DeviceClient.from_args",
+                return_value=fake_client,
+            ), patch(
+                "scripts.sensing_analysis.csi_capture.connect_ws",
+                return_value=FakeConnection(FakeWebSocket(hello_message)),
+            ), patch(
+                "scripts.sensing_analysis.csi_capture.receive_data_until_end",
+                new=failing_receive,
+            ):
+                with self.assertRaisesRegex(
+                    CaptureWorkflowError,
+                    "synthetic receive failure",
+                ):
+                    asyncio.run(collect_capture(args))
+
+            partial_dirs = list(output_root.glob("*.partial"))
+            self.assertEqual(len(partial_dirs), 1)
+            manifest = json.loads(
+                (partial_dirs[0] / MANIFEST_FILENAME).read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["state"], "incomplete")
+            self.assertTrue(manifest["collector_cleanup"]["verified"])
+
     def create_raw_capture(self, root: Path) -> tuple[Path, bytes, bytes]:
         capture_dir = root / "raw-capture"
         capture_dir.mkdir()
@@ -564,11 +1076,27 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                 "first_sequence": 40,
                 "last_sequence": 41,
             },
+            "collector_cleanup": {
+                "verified": True,
+                "timeout_ms": 15000,
+                "poll_interval_ms": 250,
+                "immediate_status": self.capture_cleanup_status(active=True),
+                "settled_status": self.capture_cleanup_status(),
+                "poll_count": 2,
+                "elapsed_ms": 250,
+            },
+            "capture_origin": {
+                "session": 0xA1B2C3D4,
+                "accepted_sequence": 40,
+                "process_now_ms": 1000,
+                "host_utc": "2026-07-11T12:34:56.123456Z",
+                "host_monotonic_ns": 987654321,
+            },
             "snapshots": {
                 "config_before": config,
                 "config_after": json.loads(json.dumps(config)),
                 "status_before": {},
-                "status_after": {},
+                "status_after": self.capture_cleanup_status(),
                 "system_info": system_info,
             },
         }
@@ -735,6 +1263,57 @@ class CsiCaptureWorkflowTest(unittest.TestCase):
                         reviewed=True,
                     )
                 )
+
+    def test_promotion_requires_verified_collector_cleanup_and_origin(self):
+        mutations = (
+            (
+                "missing-cleanup",
+                lambda manifest: manifest.pop("collector_cleanup"),
+                "collector cleanup lifecycle evidence",
+            ),
+            (
+                "unverified-cleanup",
+                lambda manifest: manifest["collector_cleanup"].update(
+                    {"verified": False}
+                ),
+                "collector_cleanup.verified=true",
+            ),
+            (
+                "active-settled-status",
+                lambda manifest: manifest["collector_cleanup"].update(
+                    {"settled_status": self.capture_cleanup_status(active=True)}
+                ),
+                "fully quiescent settled",
+            ),
+            (
+                "missing-origin",
+                lambda manifest: manifest.pop("capture_origin"),
+                "CAPTURE_ORIGIN evidence",
+            ),
+        )
+        for fixture_id, mutate, error_pattern in mutations:
+            with self.subTest(fixture_id=fixture_id), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                capture_dir, _, _ = self.create_raw_capture(root)
+                self.mark_scenario_reviewed(capture_dir)
+                manifest_path = capture_dir / MANIFEST_FILENAME
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                mutate(manifest)
+                atomic_write_json(manifest_path, manifest)
+                if fixture_id == "missing-cleanup":
+                    # Legacy raw artifacts remain inspectable, but cannot be
+                    # promoted into the release corpus without lifecycle proof.
+                    self.assertTrue(verify_capture(capture_dir)["ok"])
+
+                with self.assertRaisesRegex(CaptureWorkflowError, error_pattern):
+                    promote_capture(
+                        SimpleNamespace(
+                            target=capture_dir,
+                            fixture_id=fixture_id,
+                            output_root=root / "fixtures",
+                            reviewed=True,
+                        )
+                    )
 
     def test_promotion_requires_persisted_ground_truth_review(self):
         with tempfile.TemporaryDirectory() as tmpdir:

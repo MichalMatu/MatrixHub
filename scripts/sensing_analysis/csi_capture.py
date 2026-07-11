@@ -23,7 +23,7 @@ import time
 from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 try:
     import websockets
@@ -86,6 +86,8 @@ SCENARIO_FILENAME = "scenario.json"
 MANIFEST_SCHEMA = "matrixhub.csi.capture-manifest/v1"
 SCENARIO_SCHEMA = "matrixhub.csi.scenario/v1"
 CAPTURE_ENDPOINT = "/ws/csi-capture/v1"
+CAPTURE_CLEANUP_STATUS_ENDPOINT = "/api/wifisensing/status"
+CAPTURE_CLEANUP_POLL_INTERVAL_SECONDS = 0.25
 BOARD_ENV = "waveshare_esp32s3_matrix"
 
 MOTION_VALUES = ("none", "present", "unknown")
@@ -320,6 +322,156 @@ def get_json_object(client: DeviceClient, path: str) -> dict[str, Any]:
     return value
 
 
+def capture_cleanup_complete(status: Any) -> bool:
+    """Return whether the diagnostic CSI consumer is fully quiescent.
+
+    Lifecycle evidence is deliberately fail-closed: values which merely compare
+    equal to ``False``/``0`` (for example JSON numbers used as booleans) do not
+    satisfy the contract.
+    """
+
+    if not isinstance(status, dict):
+        raise CaptureWorkflowError("capture cleanup status is not a JSON object")
+    csi = status.get("csi")
+    if not isinstance(csi, dict):
+        raise CaptureWorkflowError("capture cleanup status has no csi object")
+
+    consumer_active = csi.get("diagnostic_capture_consumer_active")
+    if type(consumer_active) is not bool:
+        raise CaptureWorkflowError(
+            "capture cleanup status csi.diagnostic_capture_consumer_active "
+            "must be boolean"
+        )
+
+    capture = csi.get("capture")
+    if not isinstance(capture, dict):
+        raise CaptureWorkflowError("capture cleanup status has no csi.capture object")
+    boolean_fields: dict[str, bool] = {}
+    for field in ("queue_enabled", "starting", "accepting", "stopping"):
+        value = capture.get(field)
+        if type(value) is not bool:
+            raise CaptureWorkflowError(
+                f"capture cleanup status csi.capture.{field} must be boolean"
+            )
+        boolean_fields[field] = value
+
+    client_count = capture.get("client_count")
+    if type(client_count) is not int or client_count < 0:
+        raise CaptureWorkflowError(
+            "capture cleanup status csi.capture.client_count must be a "
+            "non-negative integer"
+        )
+
+    return (
+        consumer_active is False
+        and boolean_fields["queue_enabled"] is False
+        and client_count == 0
+        and boolean_fields["starting"] is False
+        and boolean_fields["accepting"] is False
+        and boolean_fields["stopping"] is False
+    )
+
+
+async def wait_for_capture_cleanup(
+    fetch_status: Callable[[float], Any],
+    cleanup_timeout: float,
+    *,
+    poll_interval: float = CAPTURE_CLEANUP_POLL_INTERVAL_SECONDS,
+    evidence_hook: Callable[[dict[str, Any]], None] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+) -> dict[str, Any]:
+    """Poll until the capture consumer is quiescent and return its evidence."""
+
+    if cleanup_timeout <= 0:
+        raise CaptureWorkflowError("capture cleanup timeout must be greater than zero")
+    if poll_interval <= 0:
+        raise CaptureWorkflowError("capture cleanup poll interval must be greater than zero")
+
+    started = monotonic()
+    deadline = started + cleanup_timeout
+    evidence: dict[str, Any] = {
+        "verified": False,
+        "timeout_ms": round(cleanup_timeout * 1000),
+        "poll_interval_ms": round(poll_interval * 1000),
+        "immediate_status": None,
+        "settled_status": None,
+        "poll_count": 0,
+        "elapsed_ms": 0,
+    }
+
+    def publish() -> None:
+        if evidence_hook is not None:
+            # Isolate the persisted/caller-owned copy from subsequent updates.
+            evidence_hook(json.loads(json.dumps(evidence, allow_nan=False)))
+
+    while True:
+        before_request = monotonic()
+        remaining = deadline - before_request
+        if evidence["poll_count"] and remaining <= 0:
+            evidence["elapsed_ms"] = round((before_request - started) * 1000)
+            evidence["error"] = (
+                "timed out waiting for the diagnostic CSI capture consumer to stop"
+            )
+            publish()
+            raise CaptureWorkflowError(evidence["error"])
+        request_timeout = max(0.001, remaining)
+        evidence["poll_count"] += 1
+        try:
+            status = fetch_status(request_timeout)
+        except Exception as exc:
+            evidence["elapsed_ms"] = round((monotonic() - started) * 1000)
+            evidence["error"] = f"status poll failed: {type(exc).__name__}: {exc}"
+            publish()
+            raise CaptureWorkflowError(evidence["error"]) from exc
+
+        # DeviceClient JSON responses are JSON-compatible, but the round trip
+        # also prevents a mutable test/client object from rewriting evidence.
+        try:
+            snapshot = json.loads(json.dumps(status, allow_nan=False))
+        except (TypeError, ValueError) as exc:
+            evidence["elapsed_ms"] = round((monotonic() - started) * 1000)
+            evidence["error"] = "capture cleanup status is not strict JSON"
+            publish()
+            raise CaptureWorkflowError(evidence["error"]) from exc
+
+        if evidence["immediate_status"] is None:
+            evidence["immediate_status"] = snapshot
+        evidence["settled_status"] = snapshot
+        observed_at = monotonic()
+        evidence["elapsed_ms"] = round((observed_at - started) * 1000)
+
+        try:
+            complete = capture_cleanup_complete(snapshot)
+        except CaptureWorkflowError as exc:
+            evidence["error"] = str(exc)
+            publish()
+            raise
+
+        if observed_at > deadline:
+            evidence["error"] = (
+                "timed out waiting for the diagnostic CSI capture consumer to stop"
+            )
+            publish()
+            raise CaptureWorkflowError(evidence["error"])
+        if complete:
+            evidence["verified"] = True
+            publish()
+            return evidence
+
+        now = monotonic()
+        evidence["elapsed_ms"] = round((now - started) * 1000)
+        if now >= deadline:
+            evidence["error"] = (
+                "timed out waiting for the diagnostic CSI capture consumer to stop"
+            )
+            publish()
+            raise CaptureWorkflowError(evidence["error"])
+
+        publish()
+        await sleep(min(poll_interval, deadline - now))
+
+
 def require_capture_ready_status(status: dict[str, Any]) -> None:
     csi = status.get("csi")
     if not isinstance(csi, dict):
@@ -533,6 +685,43 @@ def validate_end(
         raise CaptureWorkflowError("capture is incomplete: " + "; ".join(failures))
 
 
+def capture_origin_utc() -> str:
+    return (
+        dt.datetime.now(dt.timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def emit_capture_origin(
+    session_id: int,
+    frame: CsiFrame,
+    origin_hook: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Emit the first-frame host/device alignment point without using stdout."""
+
+    origin = {
+        "session": session_id,
+        "accepted_sequence": frame.accepted_sequence,
+        "process_now_ms": frame.process_now_ms,
+        "host_utc": capture_origin_utc(),
+        "host_monotonic_ns": time.monotonic_ns(),
+    }
+    print(
+        "CAPTURE_ORIGIN "
+        f"session={origin['session']} "
+        f"acceptedSequence={origin['accepted_sequence']} "
+        f"processNowMs={origin['process_now_ms']} "
+        f"utc={origin['host_utc']} "
+        f"monotonicNs={origin['host_monotonic_ns']}",
+        file=sys.stderr,
+        flush=True,
+    )
+    if origin_hook is not None:
+        origin_hook(dict(origin))
+    return origin
+
+
 async def receive_data_until_end(
     websocket,
     writer: MhcfWriter,
@@ -540,10 +729,12 @@ async def receive_data_until_end(
     *,
     deadline: float,
     stop_timeout: float,
+    origin_hook: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[CaptureEnd, int]:
     batches = 0
     stop_sent = False
     stop_deadline = 0.0
+    origin_emitted = False
 
     while True:
         now = time.monotonic()
@@ -580,6 +771,9 @@ async def receive_data_until_end(
             _, frames = decode_mhcb_frames(message)
             for frame in frames:
                 writer.append(frame)
+                if not origin_emitted:
+                    emit_capture_origin(session_id, frame, origin_hook)
+                    origin_emitted = True
             batches += 1
             continue
         if header.message_type == BATCH_ERROR:
@@ -594,7 +788,11 @@ async def receive_data_until_end(
             return end, batches
 
 
-async def collect_capture(args: argparse.Namespace) -> Path:
+async def collect_capture(
+    args: argparse.Namespace,
+    *,
+    origin_hook: Callable[[dict[str, Any]], None] | None = None,
+) -> Path:
     scenario_id = require_slug(args.scenario_id, "scenario-id")
     raw_root = require_safe_raw_root(args.output_root)
 
@@ -631,6 +829,17 @@ async def collect_capture(args: argparse.Namespace) -> Path:
         "capture_endpoint": CAPTURE_ENDPOINT,
         "started_utc": started_iso,
         "requested_duration_ms": round(args.duration * 1000),
+        "collector_cleanup": {
+            "verified": False,
+            "timeout_ms": round(args.cleanup_timeout * 1000),
+            "poll_interval_ms": round(
+                CAPTURE_CLEANUP_POLL_INTERVAL_SECONDS * 1000
+            ),
+            "immediate_status": None,
+            "settled_status": None,
+            "poll_count": 0,
+            "elapsed_ms": 0,
+        },
     }
     atomic_write_json(manifest_path, manifest)
 
@@ -638,33 +847,91 @@ async def collect_capture(args: argparse.Namespace) -> Path:
     try:
         uri = client.ws_url(CAPTURE_ENDPOINT)
 
-        async with connect_ws(uri, client.ws_cookie_header(), client.ws_ssl_context()) as websocket:
-            await websocket.send("START")
-            first = await asyncio.wait_for(websocket.recv(), timeout=args.start_timeout)
-            if not isinstance(first, bytes):
-                raise CaptureWorkflowError("capture endpoint returned text instead of HELLO")
-            first_header = decode_mhcb_header(first)
-            if first_header.message_type == BATCH_ERROR:
-                _, code = decode_capture_error(first)
-                raise CaptureWorkflowError(
-                    f"device rejected START: {ERROR_NAMES.get(code, f'error_{code}')}"
+        def persist_origin(origin: dict[str, Any]) -> None:
+            manifest["capture_origin"] = origin
+            atomic_write_json(manifest_path, manifest)
+            if origin_hook is not None:
+                origin_hook(dict(origin))
+
+        def persist_cleanup(evidence: dict[str, Any]) -> None:
+            manifest["collector_cleanup"] = evidence
+            atomic_write_json(manifest_path, manifest)
+
+        websocket_entered = False
+        capture_error: Exception | None = None
+        try:
+            async with connect_ws(
+                uri,
+                client.ws_cookie_header(),
+                client.ws_ssl_context(),
+            ) as websocket:
+                websocket_entered = True
+                await websocket.send("START")
+                first = await asyncio.wait_for(
+                    websocket.recv(),
+                    timeout=args.start_timeout,
                 )
-            if first_header.message_type != BATCH_HELLO:
-                raise CaptureWorkflowError("first capture message was not HELLO")
-            hello_header, hello = decode_capture_hello(first)
-            writer = MhcfWriter(partial_capture, hello_header.session_id)
+                if not isinstance(first, bytes):
+                    raise CaptureWorkflowError(
+                        "capture endpoint returned text instead of HELLO"
+                    )
+                first_header = decode_mhcb_header(first)
+                if first_header.message_type == BATCH_ERROR:
+                    _, code = decode_capture_error(first)
+                    raise CaptureWorkflowError(
+                        "device rejected START: "
+                        f"{ERROR_NAMES.get(code, f'error_{code}')}"
+                    )
+                if first_header.message_type != BATCH_HELLO:
+                    raise CaptureWorkflowError("first capture message was not HELLO")
+                hello_header, hello = decode_capture_hello(first)
+                writer = MhcfWriter(partial_capture, hello_header.session_id)
 
-            deadline = time.monotonic() + args.duration
-            end, batch_count = await receive_data_until_end(
-                websocket,
-                writer,
-                hello_header.session_id,
-                deadline=deadline,
-                stop_timeout=args.stop_timeout,
+                deadline = time.monotonic() + args.duration
+                end, batch_count = await receive_data_until_end(
+                    websocket,
+                    writer,
+                    hello_header.session_id,
+                    deadline=deadline,
+                    stop_timeout=args.stop_timeout,
+                    origin_hook=persist_origin,
+                )
+        except Exception as exc:
+            capture_error = exc
+
+        cleanup: dict[str, Any] | None = None
+        if websocket_entered:
+            try:
+                cleanup = await wait_for_capture_cleanup(
+                    lambda request_timeout: client.json(
+                        "GET",
+                        CAPTURE_CLEANUP_STATUS_ENDPOINT,
+                        timeout=request_timeout,
+                    ),
+                    args.cleanup_timeout,
+                    evidence_hook=persist_cleanup,
+                )
+            except Exception as cleanup_error:
+                if capture_error is not None:
+                    manifest["capture_error_before_cleanup"] = (
+                        f"{type(capture_error).__name__}: {capture_error}"
+                    )
+                    atomic_write_json(manifest_path, manifest)
+                    raise CaptureWorkflowError(
+                        f"capture failed before cleanup ({capture_error}); "
+                        f"collector cleanup also failed ({cleanup_error})"
+                    ) from cleanup_error
+                raise
+
+        if capture_error is not None:
+            raise capture_error
+        if cleanup is None:
+            raise CaptureWorkflowError(
+                "capture WebSocket did not start; collector cleanup was not verified"
             )
-
+        status_after = cleanup["settled_status"]
+        assert isinstance(status_after, dict)
         config_after = get_json_object(client, "/api/wifisensing/config")
-        status_after = get_json_object(client, "/api/wifisensing/status")
         if config_before != config_after:
             raise CaptureWorkflowError("Wi-Fi sensing config changed during capture")
         validate_end(hello, end, writer)
@@ -781,6 +1048,124 @@ def validate_manifest(capture_path: Path, manifest: dict[str, Any]) -> None:
         raise CaptureWorkflowError("capture manifest has no snapshots")
     if snapshots.get("config_before") != snapshots.get("config_after"):
         raise CaptureWorkflowError("Wi-Fi sensing config changed during capture")
+
+
+def require_promotable_collector_evidence(
+    capture_path: Path,
+    manifest: dict[str, Any],
+) -> None:
+    """Require lifecycle/alignment evidence for newly promoted fixtures.
+
+    Generic verification intentionally remains compatible with legacy raw
+    captures, but they cannot enter the release fixture corpus without this
+    collector proof.
+    """
+
+    cleanup = manifest.get("collector_cleanup")
+    if not isinstance(cleanup, dict):
+        raise CaptureWorkflowError(
+            "promotion requires collector cleanup lifecycle evidence"
+        )
+    if cleanup.get("verified") is not True:
+        raise CaptureWorkflowError(
+            "promotion requires collector_cleanup.verified=true"
+        )
+    if "error" in cleanup:
+        raise CaptureWorkflowError(
+            "promotion rejects collector cleanup evidence containing an error"
+        )
+
+    immediate_status = cleanup.get("immediate_status")
+    if not isinstance(immediate_status, dict):
+        raise CaptureWorkflowError(
+            "promotion requires an immediate collector cleanup status"
+        )
+    # The immediate sample may still be active, but it must implement the exact
+    # typed lifecycle contract.
+    capture_cleanup_complete(immediate_status)
+
+    settled_status = cleanup.get("settled_status")
+    if not isinstance(settled_status, dict):
+        raise CaptureWorkflowError(
+            "promotion requires a settled collector cleanup status"
+        )
+    if not capture_cleanup_complete(settled_status):
+        raise CaptureWorkflowError(
+            "promotion requires a fully quiescent settled collector status"
+        )
+    snapshots = manifest.get("snapshots")
+    if (
+        not isinstance(snapshots, dict)
+        or snapshots.get("status_after") != settled_status
+    ):
+        raise CaptureWorkflowError(
+            "promotion requires settled cleanup status to match status_after"
+        )
+
+    poll_count = cleanup.get("poll_count")
+    if type(poll_count) is not int or poll_count < 1:
+        raise CaptureWorkflowError(
+            "promotion requires a positive collector cleanup poll_count"
+        )
+    timeout_ms = cleanup.get("timeout_ms")
+    poll_interval_ms = cleanup.get("poll_interval_ms")
+    if type(timeout_ms) is not int or timeout_ms <= 0:
+        raise CaptureWorkflowError(
+            "promotion requires a positive collector cleanup timeout_ms"
+        )
+    if type(poll_interval_ms) is not int or poll_interval_ms <= 0:
+        raise CaptureWorkflowError(
+            "promotion requires a positive collector cleanup poll_interval_ms"
+        )
+    elapsed_ms = cleanup.get("elapsed_ms")
+    if (
+        isinstance(elapsed_ms, bool)
+        or not isinstance(elapsed_ms, (int, float))
+        or not math.isfinite(elapsed_ms)
+        or elapsed_ms < 0
+        or elapsed_ms > timeout_ms
+    ):
+        raise CaptureWorkflowError(
+            "promotion requires collector cleanup elapsed_ms within its timeout"
+        )
+
+    origin = manifest.get("capture_origin")
+    if not isinstance(origin, dict):
+        raise CaptureWorkflowError("promotion requires first-frame CAPTURE_ORIGIN evidence")
+    validation = validate_mhcf(capture_path)
+    expected_origin = {
+        "session": validation.header.session_id,
+        "accepted_sequence": validation.first_sequence,
+        "process_now_ms": validation.first_process_now_ms,
+    }
+    for field, expected in expected_origin.items():
+        value = origin.get(field)
+        if type(value) is not int or value != expected:
+            raise CaptureWorkflowError(
+                f"promotion CAPTURE_ORIGIN {field} does not match frames.mhcf"
+            )
+    host_utc = origin.get("host_utc")
+    if not isinstance(host_utc, str) or not host_utc.endswith("Z"):
+        raise CaptureWorkflowError(
+            "promotion CAPTURE_ORIGIN host_utc must be a UTC timestamp"
+        )
+    try:
+        parsed_host_utc = dt.datetime.fromisoformat(
+            host_utc.removesuffix("Z") + "+00:00"
+        )
+    except ValueError as exc:
+        raise CaptureWorkflowError(
+            "promotion CAPTURE_ORIGIN host_utc must be a UTC timestamp"
+        ) from exc
+    if parsed_host_utc.utcoffset() != dt.timedelta(0):
+        raise CaptureWorkflowError(
+            "promotion CAPTURE_ORIGIN host_utc must be a UTC timestamp"
+        )
+    host_monotonic_ns = origin.get("host_monotonic_ns")
+    if type(host_monotonic_ns) is not int or host_monotonic_ns < 0:
+        raise CaptureWorkflowError(
+            "promotion CAPTURE_ORIGIN host_monotonic_ns must be non-negative"
+        )
 
 
 def validate_scenario(
@@ -1107,6 +1492,7 @@ def promote_capture(args: argparse.Namespace) -> Path:
     manifest = load_json(manifest_path)
     scenario = load_json(scenario_path)
     validate_manifest(capture_path, manifest)
+    require_promotable_collector_evidence(capture_path, manifest)
     validate_scenario(scenario, capture_path, require_reviewed=True)
     if not args.reviewed:
         raise CaptureWorkflowError("promotion requires explicit --reviewed confirmation")
@@ -1307,6 +1693,15 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--duration", type=parse_duration, default=parse_duration("2m"))
     collect.add_argument("--start-timeout", type=float, default=10.0)
     collect.add_argument("--stop-timeout", type=float, default=10.0)
+    collect.add_argument(
+        "--cleanup-timeout",
+        type=parse_duration,
+        default=parse_duration("15s"),
+        help=(
+            "Maximum time to verify that the diagnostic CSI capture consumer "
+            "has fully stopped. Default: 15s."
+        ),
+    )
     collect.add_argument("--output-root", type=Path, default=DEFAULT_RAW_ROOT)
 
     annotate = subparsers.add_parser("annotate", help="Add human ground truth to a capture.")
