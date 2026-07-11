@@ -69,21 +69,21 @@
 	$effect(() => {
 		if (!editingWakeInterval) {
 			const next = toMinutes(localWakeIntervalMs);
-			if (wakeIntervalMinutes !== next) wakeIntervalMinutes = next;
+			if (!Object.is(wakeIntervalMinutes, next)) wakeIntervalMinutes = next;
 		}
 	});
 
 	$effect(() => {
 		if (!editingTimerAwake) {
 			const next = toMinutes(localTimerWakeAwakeMs);
-			if (timerAwakeMinutes !== next) timerAwakeMinutes = next;
+			if (!Object.is(timerAwakeMinutes, next)) timerAwakeMinutes = next;
 		}
 	});
 
 	$effect(() => {
 		if (!editingButtonAwake) {
 			const next = toMinutes(localButtonWakeAwakeMs);
-			if (buttonAwakeMinutes !== next) buttonAwakeMinutes = next;
+			if (!Object.is(buttonAwakeMinutes, next)) buttonAwakeMinutes = next;
 		}
 	});
 

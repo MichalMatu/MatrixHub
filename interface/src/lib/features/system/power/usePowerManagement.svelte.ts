@@ -5,13 +5,15 @@
 import { PowerApiService } from '$lib/services/api/core/PowerApiService';
 import { usePowerStatus } from './usePowerStatus.svelte';
 import { usePowerConfig } from './usePowerConfig.svelte';
+import { untrack } from 'svelte';
 
 export function usePowerManagement(getApi: () => PowerApiService) {
 	const powerStatus = usePowerStatus(getApi);
 	const powerConfig = usePowerConfig(getApi, () => powerStatus.status, powerStatus.applyConfig);
 
 	$effect(() => {
-		powerConfig.syncFromStatus(powerStatus.status);
+		const status = powerStatus.status;
+		untrack(() => powerConfig.syncFromStatus(status));
 	});
 
 	async function restart() {

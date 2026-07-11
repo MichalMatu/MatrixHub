@@ -128,6 +128,34 @@ describe('usePowerManagement', () => {
 		cleanup?.();
 	});
 
+	it('preserves a dirty draft across consecutive status polls without an effect loop', async () => {
+		let cleanup: (() => void) | undefined;
+
+		await new Promise<void>((resolve) => {
+			cleanup = $effect.root(() => {
+				const power = usePowerManagement(() => api as unknown as PowerApiService);
+
+				void power.fetchStatus().then(async () => {
+					power.localInactivityTimeoutMs = 900000;
+					api.getStatus.mockResolvedValueOnce({
+						...power.status,
+						inactivity_timeout_ms: 300000
+					});
+
+					await power.fetchStatus();
+					setTimeout(() => {
+						expect(power.status?.inactivity_timeout_ms).toBe(300000);
+						expect(power.localInactivityTimeoutMs).toBe(900000);
+						expect(power.hasChanges).toBe(true);
+						resolve();
+					}, 0);
+				});
+			});
+		});
+
+		cleanup?.();
+	});
+
 	it('saves config through config layer and keeps status in sync', async () => {
 		let cleanup: (() => void) | undefined;
 

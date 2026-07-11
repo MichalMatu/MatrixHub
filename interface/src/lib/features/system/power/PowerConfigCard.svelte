@@ -86,14 +86,14 @@
 	$effect(() => {
 		if (!editingInactivity) {
 			const next = toMinutes(localInactivityTimeoutMs);
-			if (inactivityMinutes !== next) inactivityMinutes = next;
+			if (!Object.is(inactivityMinutes, next)) inactivityMinutes = next;
 		}
 	});
 
 	$effect(() => {
 		if (!editingGrace) {
 			const next = toMinutes(localGraceAfterBootMs);
-			if (graceMinutes !== next) graceMinutes = next;
+			if (!Object.is(graceMinutes, next)) graceMinutes = next;
 		}
 	});
 
