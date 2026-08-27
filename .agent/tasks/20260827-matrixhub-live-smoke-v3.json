@@ -1,0 +1,17 @@
+{
+  "id": "20260827-matrixhub-live-smoke-v3",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "command_timeout": 120,
+  "idle_timeout": 60,
+  "task_timeout": 300,
+  "memory_limit_mb": 256,
+  "steps": [
+    {
+      "name": "verify-matrixhub-worker-contract",
+      "timeout": 120,
+      "command": "set -euo pipefail\ntest \"$(git branch --show-current)\" = \"agent-work\"\ntest \"$(git rev-parse HEAD)\" = \"$(git rev-parse origin/main)\"\ntest -f AGENTS.md\ntest -z \"$(git status --porcelain --untracked-files=normal)\"\npython3 - <<'PY'\nimport subprocess\nremote = subprocess.check_output(['git','remote','get-url','origin'], text=True).strip()\nvalid = {\n    'https://github.com/MichalMatu/MatrixHub.git',\n    'git@github.com:MichalMatu/MatrixHub.git',\n    'ssh://git@github.com/MichalMatu/MatrixHub.git',\n    'ssh://git@ssh.github.com:443/MichalMatu/MatrixHub.git',\n}\nif remote not in valid:\n    raise SystemExit(f'unexpected MatrixHub origin: {remote}')\nPY\necho MATRIXHUB_AGENT_SMOKE_V3_OK"
+    }
+  ]
+}
