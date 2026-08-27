@@ -1,0 +1,58 @@
+{
+  "id": "20260827-matrixhub-live-smoke-v3",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "started_at": "2026-08-27T14:37:48.330032+00:00",
+  "command_timeout": 120,
+  "edits": {},
+  "commands": [
+    {
+      "command": "set -euo pipefail\ntest \"$(git branch --show-current)\" = \"agent-work\"\ntest \"$(git rev-parse HEAD)\" = \"$(git rev-parse origin/main)\"\ntest -f AGENTS.md\ntest -z \"$(git status --porcelain --untracked-files=normal)\"\npython3 - <<'PY'\nimport subprocess\nremote = subprocess.check_output(['git','remote','get-url','origin'], text=True).strip()\nvalid = {\n    'https://github.com/MichalMatu/MatrixHub.git',\n    'git@github.com:MichalMatu/MatrixHub.git',\n    'ssh://git@github.com/MichalMatu/MatrixHub.git',\n    'ssh://git@ssh.github.com:443/MichalMatu/MatrixHub.git',\n}\nif remote not in valid:\n    raise SystemExit(f'unexpected MatrixHub origin: {remote}')\nPY\necho MATRIXHUB_AGENT_SMOKE_V3_OK",
+      "exit_code": 0,
+      "output": "MATRIXHUB_AGENT_SMOKE_V3_OK\n",
+      "elapsed_seconds": 0.655,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 3.42,
+      "current_rss_mb": 3.42,
+      "stage_name": "verify-matrixhub-worker-contract",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "stage_timeout": 120
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "verify-matrixhub-worker-contract",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 0.655
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.396
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.173
+  },
+  "finished_at": "2026-08-27T14:37:52.268846+00:00",
+  "task_digest": "cd1c28f8c167fce75ab6ad1d115ad5505e479219ae664a0e27085c67a23d2195",
+  "idle_timeout": 60,
+  "task_timeout": 300,
+  "memory_limit_mb": 256,
+  "attempt_id": "91bff6f9274a6596b712c15f",
+  "daemon_version": "4.10.2"
+}
