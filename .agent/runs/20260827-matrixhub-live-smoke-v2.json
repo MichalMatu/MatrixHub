@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260827-matrixhub-live-smoke-v2",
+  "task_digest": "3f501b1595c4b604355ec6a7595a7f58e978d7d2169945e67da84638bb07deca",
+  "idle_timeout": 60,
+  "task_timeout": 300,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-27T14:35:34.106533+00:00",
+  "attempt_id": "7ae66540da6f267d99ac0c17",
+  "daemon_version": "4.10.2",
+  "daemon_pid": 40630,
+  "updated_at": "2026-08-27T14:35:34.106678+00:00",
+  "pid": 40630
+}
