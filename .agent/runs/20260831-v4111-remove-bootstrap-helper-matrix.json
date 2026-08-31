@@ -1,11 +1,11 @@
 {
-  "event": "result_republished",
+  "event": "recovered_interrupted_attempt",
   "status": "failed",
   "failure_reason": "interrupted_previous_attempt",
   "attempt_id": "b593daf431762b96ec24a761",
   "task_digest": "cb0138d5a4ea206be33797e0555c7fe9fec2573d117f10f3c4ec49d34f3af253",
-  "updated_at": "2026-08-31T18:16:00.245335+00:00",
+  "updated_at": "2026-08-31T18:16:22.789816+00:00",
   "task_id": "20260831-v4111-remove-bootstrap-helper-matrix",
   "daemon_version": "4.11.1",
-  "pid": 40757
+  "pid": 40947
 }
