@@ -1,0 +1,57 @@
+{
+  "id": "20260831-v4112-production-smoke",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "started_at": "2026-08-31T20:50:24.356988+00:00",
+  "command_timeout": 90,
+  "edits": {},
+  "commands": [
+    {
+      "command": "set -euo pipefail; LA=\"$HOME/local-agent\"; test \"$(git -C \"$LA\" branch --show-current)\" = main; test \"$(git -C \"$LA\" rev-parse HEAD)\" = c0aba18a65f98fa7697e1f884d605027d70f8cd9; test -z \"$(git -C \"$LA\" status --porcelain --untracked-files=normal)\"; test \"$($LA/.venv/bin/python -c 'import sys; sys.path.insert(0, \"/Users/michal/local-agent\"); import agent_version; print(agent_version.RELEASE_VERSION)')\" = 4.11.2; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | grep -F '/Users/michal/local-agent/agent_parallel.py' >/dev/null; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | grep -A8 'arguments = {' | grep -F -- '--max-workers' >/dev/null; printf 'v4.11.2 production smoke OK\\n'",
+      "exit_code": 0,
+      "output": "v4.11.2 production smoke OK\n",
+      "elapsed_seconds": 0.878,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 128,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 8.23,
+      "current_rss_mb": 8.23,
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands"
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 0.878
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.548
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.941
+  },
+  "finished_at": "2026-08-31T20:50:31.119165+00:00",
+  "task_digest": "fdd97e2cd1b60bfc12a66ebb1846e09d0489ab83bc05a46b07c250fe53c23a24",
+  "idle_timeout": 300,
+  "task_timeout": 180,
+  "memory_limit_mb": 128,
+  "attempt_id": "5716eb5f6b8a7c8f09199df7",
+  "daemon_version": "4.11.2"
+}
