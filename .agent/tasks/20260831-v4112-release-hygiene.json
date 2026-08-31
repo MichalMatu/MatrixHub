@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4112-release-hygiene",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 256,
+  "command_timeout": 180,
+  "task_timeout": 360,
+  "commands": [
+    "set -euo pipefail; LA=\"$HOME/local-agent\"; WT=\"$HOME/local-agent-v4.11.2-doc-contract-staging\"; SHA=c0aba18a65f98fa7697e1f884d605027d70f8cd9; test \"$(git -C \"$LA\" branch --show-current)\" = main; test \"$(git -C \"$LA\" rev-parse HEAD)\" = \"$SHA\"; test -z \"$(git -C \"$LA\" status --porcelain --untracked-files=normal)\"; REMOTE_STAGING=$(git -C \"$LA\" ls-remote origin refs/heads/v4.11.2-doc-contract-staging | cut -f1); test \"$REMOTE_STAGING\" = \"$SHA\"; if git -C \"$LA\" rev-parse -q --verify refs/tags/v4.11.2 >/dev/null; then test \"$(git -C \"$LA\" rev-parse 'v4.11.2^{}')\" = \"$SHA\"; else git -C \"$LA\" tag -a v4.11.2 \"$SHA\" -m 'local-agent v4.11.2'; fi; git -C \"$LA\" push origin refs/tags/v4.11.2; test \"$(git -C \"$LA\" ls-remote origin 'refs/tags/v4.11.2^{}' | cut -f1)\" = \"$SHA\"; if [ -e \"$WT/.git\" ]; then test -z \"$(git -C \"$WT\" status --porcelain --untracked-files=normal)\"; test \"$(git -C \"$WT\" rev-parse HEAD)\" = \"$SHA\"; git -C \"$LA\" worktree remove \"$WT\"; fi; git -C \"$LA\" worktree prune; if git -C \"$LA\" show-ref --verify --quiet refs/heads/v4.11.2-doc-contract-staging; then test \"$(git -C \"$LA\" rev-parse refs/heads/v4.11.2-doc-contract-staging)\" = \"$SHA\"; git -C \"$LA\" branch -D v4.11.2-doc-contract-staging; fi; git -C \"$LA\" push origin --delete v4.11.2-doc-contract-staging; test -z \"$(git -C \"$LA\" ls-remote origin refs/heads/v4.11.2-doc-contract-staging)\"; test ! -e \"$WT\"; test \"$(git -C \"$LA\" rev-parse 'v4.11.2^{}')\" = \"$SHA\"; test -z \"$(git -C \"$LA\" status --porcelain --untracked-files=normal)\"; ! ps -axo command= | grep -F \"$WT\" | grep -v grep; printf 'v4.11.2 tag and staging cleanup OK\\n'"
+  ]
+}
