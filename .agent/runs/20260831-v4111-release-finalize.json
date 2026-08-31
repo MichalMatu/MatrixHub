@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-release-finalize",
+  "task_digest": "3ea44fc8b4c8db73738a43d5bfd69e4fcaa5f62a033243c9f1a94d135f0f2402",
+  "idle_timeout": 300,
+  "task_timeout": 600,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T20:03:58.054052+00:00",
+  "attempt_id": "9d2aa1e09e849249db7c870b",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 98043,
+  "updated_at": "2026-08-31T20:03:58.054215+00:00",
+  "pid": 98043
+}
