@@ -2,8 +2,8 @@
   "version": 1,
   "daemon_version": "4.11.1",
   "state": "idle",
-  "pid": 76470,
-  "updated_at": "2026-08-31T19:32:13.810818+00:00",
+  "pid": 78565,
+  "updated_at": "2026-08-31T19:41:22.278908+00:00",
   "self_revision": "775c6c08dc03de329ec61c5e55781857673e4a6d",
   "poll_seconds": 15,
   "self_update_seconds": 60,
@@ -22,8 +22,8 @@
   "control_branch": "agent-control",
   "default_branch": "main",
   "execution_model": "multi_repository_worker",
-  "worker_pid": 76470,
+  "worker_pid": 78565,
   "supervisor_pid": 71830,
-  "last_task_id": "20260831-v4111-diagnose-growbox-worker",
+  "last_task_id": "20260831-v4111-macos-metadata-hardening-v2",
   "execution_variant": "parallel"
 }
