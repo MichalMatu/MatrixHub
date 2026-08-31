@@ -50,7 +50,7 @@ replace_once(
 
 notes = root / "docs/RELEASE_NOTES_V4.11.3.md"
 notes.write_text(
-    """# local-agent v4.11.3\n\n"
+    "# local-agent v4.11.3\n\n"
     "v4.11.3 is a repository-onboarding and topology-documentation patch for the v4.11 bounded-parallel release line.\n\n"
     "## Changes\n\n"
     "- adds `MichalMatu/esp32_c6_zigbee` as the fourth registered downstream repository, using repository id `esp32-c6-zigbee`;\n"
@@ -58,7 +58,8 @@ notes.write_text(
     "- synchronizes the canonical downstream-documentation audit list with the new repository;\n"
     "- updates the ESP32-C6 Zigbee repository with a root `AGENTS.md` describing Local Agent task/evidence/resource and ESP-IDF hardware rules;\n"
     "- leaves scheduler behavior, task schema, resource arbitration, watchdogs, execution leases and serial fallback unchanged.\n\n"
-    "The machine-local registry and new `agent-control` workspace are provisioned and verified separately as a live deployment gate before the release is considered complete.\n"
-    """,
+    "The machine-local registry and new `agent-control` workspace are provisioned and verified separately as a live deployment gate before the release is considered complete.\n",
     encoding="utf-8",
 )
+
+print("PATCH_OK")
