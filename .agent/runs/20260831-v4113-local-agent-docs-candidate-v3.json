@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4113-local-agent-docs-candidate-v3",
+  "task_digest": "9cd640318332e63d2ea763732324882f903a7e4c8c185b9b0c778e9ccebef0ba",
+  "idle_timeout": 300,
+  "task_timeout": 900,
+  "memory_limit_mb": 512,
+  "started_at": "2026-08-31T21:07:14.790919+00:00",
+  "attempt_id": "4bc0c0e5b8b7a855054aac6b",
+  "daemon_version": "4.11.2",
+  "daemon_pid": 31844,
+  "updated_at": "2026-08-31T21:07:14.791142+00:00",
+  "pid": 31844
+}
