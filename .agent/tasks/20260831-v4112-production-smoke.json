@@ -1,0 +1,13 @@
+{
+  "id": "20260831-v4112-production-smoke",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "memory_limit_mb": 128,
+  "command_timeout": 90,
+  "task_timeout": 180,
+  "commands": [
+    "set -euo pipefail; LA=\"$HOME/local-agent\"; test \"$(git -C \"$LA\" branch --show-current)\" = main; test \"$(git -C \"$LA\" rev-parse HEAD)\" = c0aba18a65f98fa7697e1f884d605027d70f8cd9; test -z \"$(git -C \"$LA\" status --porcelain --untracked-files=normal)\"; test \"$($LA/.venv/bin/python -c 'import sys; sys.path.insert(0, \"/Users/michal/local-agent\"); import agent_version; print(agent_version.RELEASE_VERSION)')\" = 4.11.2; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | grep -F '/Users/michal/local-agent/agent_parallel.py' >/dev/null; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | grep -A8 'arguments = {' | grep -F -- '--max-workers' >/dev/null; printf 'v4.11.2 production smoke OK\\n'"
+  ]
+}
