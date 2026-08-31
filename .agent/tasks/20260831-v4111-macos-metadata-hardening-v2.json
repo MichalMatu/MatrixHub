@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4111-macos-metadata-hardening-v2",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 1024,
+  "command_timeout": 900,
+  "task_timeout": 2400,
+  "commands": [
+    "/Users/michal/local-agent/.venv/bin/python \"$HOME/agent-workspace/repos/matrixhub/control/.agent/patches/v4111_macos_metadata_hardening.py\""
+  ]
+}
