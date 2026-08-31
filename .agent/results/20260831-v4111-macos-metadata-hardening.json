@@ -1,0 +1,9 @@
+{
+  "id": "20260831-v4111-macos-metadata-hardening",
+  "status": "failed",
+  "failure_reason": "invalid_task_file",
+  "started_at": null,
+  "finished_at": "2026-08-31T19:34:52.988946+00:00",
+  "daemon_version": "4.11.1",
+  "error": "JSONDecodeError: Expecting ',' delimiter: line 10 column 581 (char 797)"
+}
