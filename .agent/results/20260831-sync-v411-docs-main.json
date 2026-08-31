@@ -1,0 +1,154 @@
+{
+  "id": "20260831-sync-v411-docs-main",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": true,
+  "started_at": "2026-08-31T16:01:06.822908+00:00",
+  "command_timeout": 60,
+  "edits": {},
+  "commands": [
+    {
+      "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('AGENTS.md')\ns = p.read_text()\nmarker = '## Build Workflow\\n'\nassert marker in s\nassert '## Local Agent Workflow' not in s\nsection = '''## Local Agent Workflow\n\nThis repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.\n\n- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat its `daemon_version`, `self_revision`, `execution_model`, and `max_parallel_workers` as the running truth.\n- Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.\n- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\n- One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.\n- Resource classification is conservative: omit `resources` for firmware/PlatformIO builds, USB, serial, upload/flash, monitor, hardware access, or uncertain machine-wide tooling; omission means full `machine` exclusivity.\n- Use `resources: []` only for clearly software-only work that is safe to overlap, such as isolated docs/UI/native checks, and set an enabled `memory_limit_mb <= 1024` (normally 512 MiB for lightweight work).\n- Use named resources only when the shared-machine interaction is understood. Never add `resources: []` merely to increase throughput.\n- Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.\n- A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.\n\nWhen the Local Agent task/control/resource/status contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.\n\n'''\ns = s.replace(marker, section + marker)\np.write_text(s)\nPY",
+      "exit_code": 0,
+      "output": "",
+      "elapsed_seconds": 1.212,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": null,
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 5,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "git diff --check -- AGENTS.md",
+      "exit_code": 0,
+      "output": "",
+      "elapsed_seconds": 1.369,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": null,
+      "stage_name": "command-2",
+      "stage_index": 2,
+      "stage_total": 5,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "git diff -- AGENTS.md",
+      "exit_code": 0,
+      "output": "diff --git a/AGENTS.md b/AGENTS.md\nindex 7edb838..0394c03 100644\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -28,6 +28,22 @@ These instructions apply to the whole repository.\n - For host-only code, use the `native` env and keep it under `src/native/` or\n   `test/`. `src/native/**` is intentionally excluded from the ESP32 env.\n \n+## Local Agent Workflow\n+\n+This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.\n+\n+- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat its `daemon_version`, `self_revision`, `execution_model`, and `max_parallel_workers` as the running truth.\n+- Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.\n+- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\n+- One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.\n+- Resource classification is conservative: omit `resources` for firmware/PlatformIO builds, USB, serial, upload/flash, monitor, hardware access, or uncertain machine-wide tooling; omission means full `machine` exclusivity.\n+- Use `resources: []` only for clearly software-only work that is safe to overlap, such as isolated docs/UI/native checks, and set an enabled `memory_limit_mb <= 1024` (normally 512 MiB for lightweight work).\n+- Use named resources only when the shared-machine interaction is understood. Never add `resources: []` merely to increase throughput.\n+- Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.\n+- A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.\n+\n+When the Local Agent task/control/resource/status contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.\n+\n ## Build Workflow\n \n Prefer the helper scripts because they handle the local PlatformIO path and the\n",
+      "elapsed_seconds": 3.293,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": null,
+      "stage_name": "command-3",
+      "stage_index": 3,
+      "stage_total": 5,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "git add AGENTS.md && git commit -m 'Document Local Agent v4.11 workflow'",
+      "exit_code": 0,
+      "output": "[agent-work 0ddd22d] Document Local Agent v4.11 workflow\n 1 file changed, 16 insertions(+)\n",
+      "elapsed_seconds": 1.905,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 8.06,
+      "current_rss_mb": 8.06,
+      "stage_name": "command-4",
+      "stage_index": 4,
+      "stage_total": 5,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "git push origin HEAD:main",
+      "exit_code": 0,
+      "output": "To https://github.com/MichalMatu/MatrixHub.git\n   fea101e..0ddd22d  HEAD -> main\n",
+      "elapsed_seconds": 2.767,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 4.08,
+      "current_rss_mb": 4.08,
+      "stage_name": "command-5",
+      "stage_index": 5,
+      "stage_total": 5,
+      "stage_phase": "commands"
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 5,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.212
+    },
+    {
+      "stage_name": "command-2",
+      "stage_index": 2,
+      "stage_total": 5,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.369
+    },
+    {
+      "stage_name": "command-3",
+      "stage_index": 3,
+      "stage_total": 5,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 3.293
+    },
+    {
+      "stage_name": "command-4",
+      "stage_index": 4,
+      "stage_total": 5,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.905
+    },
+    {
+      "stage_name": "command-5",
+      "stage_index": 5,
+      "stage_total": 5,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 2.767
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.312
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.203
+  },
+  "finished_at": "2026-08-31T16:01:25.400986+00:00",
+  "task_digest": "af3ae151db047f3be27a6481740e70ff9aea14e9ea7b95590eff37dec7e73993",
+  "idle_timeout": 30,
+  "task_timeout": 240,
+  "memory_limit_mb": 256,
+  "attempt_id": "2fe9d8d7ce8ffb4748452cea",
+  "daemon_version": "4.10.2-parallel-staging"
+}
