@@ -1,0 +1,11 @@
+{
+  "id": "20260831-v4111-remove-bootstrap-helper-matrix",
+  "status": "failed",
+  "failure_reason": "interrupted_previous_attempt",
+  "task_digest": "cb0138d5a4ea206be33797e0555c7fe9fec2573d117f10f3c4ec49d34f3af253",
+  "attempt_id": "b593daf431762b96ec24a761",
+  "daemon_version": "4.11.1",
+  "started_at": "2026-08-31T18:01:53.043354+00:00",
+  "finished_at": "2026-08-31T18:02:56.758442+00:00",
+  "error": "Previous daemon instance ended while this task was claimed. Automatic replay was blocked."
+}
