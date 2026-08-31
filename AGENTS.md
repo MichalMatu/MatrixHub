@@ -32,7 +32,7 @@ These instructions apply to the whole repository.
 
 This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.
 
-- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat its `daemon_version`, `self_revision`, `execution_model`, and `max_parallel_workers` as the running truth.
+- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat `daemon_version`, `self_revision`, `execution_model` / `execution_variant`, current task state, and `supervisor_pid` as repository-worker truth. Supervisor-wide fields such as `max_parallel_workers` are not guaranteed to be repeated in every repository-worker snapshot; read the shared supervisor status when that field matters.
 - Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.
 - Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.
 - One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
