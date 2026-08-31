@@ -1,0 +1,11 @@
+{
+  "id": "20260831-v4111-final-host-audit",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 256,
+  "command_timeout": 90,
+  "commands": [
+    "set -euo pipefail; SHA=72e1a51f98e7b2b6c2229175b18b5dcd928bd7d6; LA=\"$HOME/local-agent\"; test \"$(git -C \"$LA\" symbolic-ref --quiet --short HEAD)\" = main; test \"$(git -C \"$LA\" rev-parse HEAD)\" = \"$SHA\"; test \"$(git -C \"$LA\" rev-list -n1 v4.11.1)\" = \"$SHA\"; test -z \"$(git -C \"$LA\" status --porcelain --untracked-files=normal)\"; test \"$(git -C \"$LA\" worktree list --porcelain | grep -c '^worktree ')\" -eq 1; python3 -c 'import json,pathlib; d=pathlib.Path.home()/\"Library/Application Support/local-agent/claims\"; fs=list(d.glob(\"*.json\")); print(\"CLAIMS=\"+str(len(fs))); assert len(fs)==1, fs; x=json.loads(fs[0].read_text()); print(\"CLAIM_ID=\"+str(x.get(\"id\"))); assert x.get(\"id\")==\"20260831-v4111-final-host-audit\"'; python3 -c 'import pathlib; d=pathlib.Path.home()/\"Library/Application Support/local-agent/result-spool\"; fs=list(d.glob(\"*.json\")); print(\"RESULT_SPOOL=\"+str(len(fs))); assert not fs, fs'; test ! -e \"$HOME/Library/Application Support/local-agent/rejected-self-update.json\"; python3 -c 'import json,pathlib; p=pathlib.Path.home()/\"Library/Application Support/local-agent/repositories.json\"; x=json.loads(p.read_text()); repos=x.get(\"repositories\", x if isinstance(x,list) else []); ids=sorted(str(r.get(\"id\")) for r in repos); print(\"REPOS=\"+\",\".join(ids)); assert ids==[\"growbox-ml-controller\",\"litegraph\",\"matrixhub\"], ids'; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | grep -E 'state = running|/Users/michal/local-agent/agent_parallel.py|--max-workers|^[[:space:]]*2$' >/dev/null; if launchctl print \"gui/$(id -u)/com.michal.local-agent-v4111-bootstrap\" >/dev/null 2>&1; then echo BOOTSTRAP_HELPER_STILL_PRESENT; exit 9; fi; echo HOST_AUDIT_OK"
+  ]
+}
