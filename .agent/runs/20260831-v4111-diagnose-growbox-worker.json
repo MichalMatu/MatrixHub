@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-diagnose-growbox-worker",
+  "task_digest": "4d9f475e291f47d47ea635c490481e5849f6cf457e174015b10d4d456352aabd",
+  "idle_timeout": 300,
+  "task_timeout": 1800,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T19:31:50.256386+00:00",
+  "attempt_id": "0e17fc6c874828f9774166fa",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 76470,
+  "updated_at": "2026-08-31T19:31:50.256700+00:00",
+  "pid": 76470
+}
