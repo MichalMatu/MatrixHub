@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4113-local-agent-docs-candidate-v2",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 512,
+  "command_timeout": 600,
+  "task_timeout": 900,
+  "commands": [
+    "set -euo pipefail; LA=\"$HOME/local-agent\"; WT=\"$HOME/local-agent-v4.11.3-repository-onboarding-staging\"; git -C \"$LA\" fetch --quiet origin v4.11.3-repository-onboarding-staging; if [ ! -e \"$WT/.git\" ]; then git -C \"$LA\" worktree add --detach \"$WT\" origin/v4.11.3-repository-onboarding-staging; fi; test \"$(git -C \"$WT\" rev-parse HEAD)\" = c0aba18a65f98fa7697e1f884d605027d70f8cd9; test -z \"$(git -C \"$WT\" status --porcelain --untracked-files=normal)\"; /Users/michal/local-agent/.venv/bin/python \"$HOME/agent-workspace/repos/matrixhub/control/.agent/patches/v4113_onboard_c6_repo.py\"; cd \"$WT\"; git diff --check; test \"$(git diff --name-only | sort | tr '\\n' ' ')\" = 'AGENTS.md README.md agent_version.py docs/SESSION_BOOTSTRAP.md '; test -f docs/RELEASE_NOTES_V4.11.3.md; grep -Fq 'esp32-c6-zigbee' AGENTS.md; grep -Fq 'esp32-c6-zigbee' docs/SESSION_BOOTSTRAP.md; grep -Fq 'RELEASE_VERSION = \"4.11.3\"' agent_version.py; grep -Fq '**Current release:** `v4.11.3`' README.md; env -u LOCAL_AGENT_LEASE_FDS -u LOCAL_AGENT_LEASE_KEYS_DIGEST /Users/michal/local-agent/.venv/bin/python -m unittest discover -q; git add -- AGENTS.md README.md agent_version.py docs/SESSION_BOOTSTRAP.md docs/RELEASE_NOTES_V4.11.3.md; git diff --cached --check; test \"$(git diff --cached --name-only | sort | tr '\\n' ' ')\" = 'AGENTS.md README.md agent_version.py docs/RELEASE_NOTES_V4.11.3.md docs/SESSION_BOOTSTRAP.md '; git commit -m 'Onboard ESP32-C6 Zigbee repository for v4.11.3'; git push origin HEAD:v4.11.3-repository-onboarding-staging; echo CANDIDATE_SHA=$(git rev-parse HEAD); test -z \"$(git status --porcelain --untracked-files=normal)\""
+  ]
+}
