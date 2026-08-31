@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4112-doc-contract-audit-v2",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 256,
+  "command_timeout": 120,
+  "task_timeout": 300,
+  "commands": [
+    "set -euo pipefail; LA=\"$HOME/local-agent\"; echo '=== LOCAL_AGENT ==='; git -C \"$LA\" branch --show-current; git -C \"$LA\" rev-parse HEAD; git -C \"$LA\" status --short; echo '=== REGISTRY ==='; python3 -c 'import json,pathlib; p=pathlib.Path.home()/\"Library/Application Support/local-agent/repositories.json\"; x=json.loads(p.read_text()); [print(r.get(\"id\"), \"repository=\"+str(r.get(\"repository\")), \"legacy_workspace=\"+str(r.get(\"legacy_workspace\",False)), \"control=\"+str(r.get(\"control_dir\")), \"work=\"+str(r.get(\"work_dir\")), \"checkpoints=\"+str(r.get(\"checkpoints_dir\"))) for r in x[\"repositories\"] if r.get(\"enabled\",True)]'; echo '=== LAUNCHD ==='; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | sed -n '1,120p'; echo '=== CANONICAL DOC DRIFT SEARCH ==='; cd \"$LA\"; grep -RInE 'Global execution concurrency is one|global execution concurrency one|agent-workspace/control|agent-workspace/work|agent-workspace/checkpoints|com\\.michal\\.local-agent\\.plist|Current release:|v4\\.11\\.1' AGENTS.md README.md docs --exclude-dir=history || true"
+  ]
+}
