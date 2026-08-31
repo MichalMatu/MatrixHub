@@ -1,0 +1,9 @@
+{
+  "id": "20260831-v4113-local-agent-docs-candidate",
+  "status": "failed",
+  "failure_reason": "invalid_task_file",
+  "started_at": null,
+  "finished_at": "2026-08-31T21:04:18.754493+00:00",
+  "daemon_version": "4.11.2",
+  "error": "JSONDecodeError: Invalid \\escape: line 10 column 976 (char 1192)"
+}
