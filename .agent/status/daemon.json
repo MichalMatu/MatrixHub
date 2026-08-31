@@ -2,8 +2,8 @@
   "version": 1,
   "daemon_version": "4.11.1",
   "state": "idle",
-  "pid": 6506,
-  "updated_at": "2026-08-31T20:21:58.701790+00:00",
+  "pid": 8609,
+  "updated_at": "2026-08-31T20:28:11.443177+00:00",
   "self_revision": "72e1a51f98e7b2b6c2229175b18b5dcd928bd7d6",
   "poll_seconds": 15,
   "self_update_seconds": 60,
@@ -22,8 +22,8 @@
   "control_branch": "agent-control",
   "default_branch": "main",
   "execution_model": "multi_repository_worker",
-  "worker_pid": 6506,
+  "worker_pid": 8609,
   "supervisor_pid": 71830,
-  "last_task_id": "20260831-v4112-doc-contract-audit-v2",
+  "last_task_id": "20260831-v4112-doc-contract-apply",
   "execution_variant": "parallel"
 }
