@@ -28,6 +28,22 @@ These instructions apply to the whole repository.
 - For host-only code, use the `native` env and keep it under `src/native/` or
   `test/`. `src/native/**` is intentionally excluded from the ESP32 env.
 
+## Local Agent Workflow
+
+This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.
+
+- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat its `daemon_version`, `self_revision`, `execution_model`, and `max_parallel_workers` as the running truth.
+- Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.
+- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.
+- One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
+- Resource classification is conservative: omit `resources` for firmware/PlatformIO builds, USB, serial, upload/flash, monitor, hardware access, or uncertain machine-wide tooling; omission means full `machine` exclusivity.
+- Use `resources: []` only for clearly software-only work that is safe to overlap, such as isolated docs/UI/native checks, and set an enabled `memory_limit_mb <= 1024` (normally 512 MiB for lightweight work).
+- Use named resources only when the shared-machine interaction is understood. Never add `resources: []` merely to increase throughput.
+- Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.
+- A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.
+
+When the Local Agent task/control/resource/status contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.
+
 ## Build Workflow
 
 Prefer the helper scripts because they handle the local PlatformIO path and the
