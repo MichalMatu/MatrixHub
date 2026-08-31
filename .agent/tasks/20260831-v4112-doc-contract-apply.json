@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4112-doc-contract-apply",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "memory_limit_mb": 512,
+  "command_timeout": 600,
+  "task_timeout": 900,
+  "commands": [
+    "set -euo pipefail; LA=\"$HOME/local-agent\"; WT=\"$HOME/local-agent-v4.11.2-doc-contract-staging\"; PATCH=\"$HOME/agent-workspace/repos/matrixhub/control/.agent/patches/v4112_doc_contract_alignment.py\"; cd \"$LA\"; git fetch --quiet origin v4.11.2-doc-contract-staging; if git worktree list --porcelain | grep -Fxq \"worktree $WT\"; then git worktree remove --force \"$WT\"; fi; rm -rf \"$WT\"; git worktree add --detach \"$WT\" origin/v4.11.2-doc-contract-staging; /Users/michal/local-agent/.venv/bin/python \"$PATCH\" \"$WT\"; cd \"$WT\"; git diff --check; /Users/michal/local-agent/.venv/bin/python -m py_compile agent_version.py; grep -nE 'Global execution concurrency is one|agent-workspace/control|agent-workspace/work|agent-workspace/checkpoints|deploy/macos/com\\.michal\\.local-agent\\.plist' docs/AUTONOMOUS_CHAT_LOOP.md docs/SESSION_BOOTSTRAP.md || true; test \"$(grep -c 'RELEASE_VERSION = \\\"4.11.2\\\"' agent_version.py)\" -eq 1; /Users/michal/local-agent/.venv/bin/python -m unittest discover -q; git status --short; git add README.md agent_version.py docs/AUTONOMOUS_CHAT_LOOP.md docs/SESSION_BOOTSTRAP.md docs/MULTI_REPOSITORY.md docs/GOLDEN_STANDARD.md docs/OPERATIONS.md docs/PARALLEL_EXECUTION_PLAN.md docs/RELEASE_NOTES_V4.11.2.md; git diff --cached --check; git commit -m 'Align Chat Bridge planner contract for v4.11.2'; git push origin HEAD:v4.11.2-doc-contract-staging; echo CANDIDATE_SHA=$(git rev-parse HEAD); git status --short"
+  ]
+}
