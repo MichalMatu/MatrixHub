@@ -1,0 +1,57 @@
+{
+  "id": "20260831-v4112-doc-contract-audit-v2",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "started_at": "2026-08-31T20:21:42.253079+00:00",
+  "command_timeout": 120,
+  "edits": {},
+  "commands": [
+    {
+      "command": "set -euo pipefail; LA=\"$HOME/local-agent\"; echo '=== LOCAL_AGENT ==='; git -C \"$LA\" branch --show-current; git -C \"$LA\" rev-parse HEAD; git -C \"$LA\" status --short; echo '=== REGISTRY ==='; python3 -c 'import json,pathlib; p=pathlib.Path.home()/\"Library/Application Support/local-agent/repositories.json\"; x=json.loads(p.read_text()); [print(r.get(\"id\"), \"repository=\"+str(r.get(\"repository\")), \"legacy_workspace=\"+str(r.get(\"legacy_workspace\",False)), \"control=\"+str(r.get(\"control_dir\")), \"work=\"+str(r.get(\"work_dir\")), \"checkpoints=\"+str(r.get(\"checkpoints_dir\"))) for r in x[\"repositories\"] if r.get(\"enabled\",True)]'; echo '=== LAUNCHD ==='; launchctl print \"gui/$(id -u)/com.michal.local-agent\" | sed -n '1,120p'; echo '=== CANONICAL DOC DRIFT SEARCH ==='; cd \"$LA\"; grep -RInE 'Global execution concurrency is one|global execution concurrency one|agent-workspace/control|agent-workspace/work|agent-workspace/checkpoints|com\\.michal\\.local-agent\\.plist|Current release:|v4\\.11\\.1' AGENTS.md README.md docs --exclude-dir=history || true",
+      "exit_code": 0,
+      "output": "=== LOCAL_AGENT ===\nmain\n72e1a51f98e7b2b6c2229175b18b5dcd928bd7d6\n=== REGISTRY ===\nlitegraph repository=MichalMatu/esp32s3_LiteGraph legacy_workspace=False control=None work=None checkpoints=None\ngrowbox-ml-controller repository=MichalMatu/growbox-ml-controller legacy_workspace=False control=None work=None checkpoints=None\nmatrixhub repository=MichalMatu/MatrixHub legacy_workspace=False control=None work=None checkpoints=None\n=== LAUNCHD ===\ngui/501/com.michal.local-agent = {\n\tactive count = 1\n\tpath = /Users/michal/Library/LaunchAgents/com.michal.local-agent.plist\n\ttype = LaunchAgent\n\tstate = running\n\n\tprogram = /Users/michal/local-agent/.venv/bin/python\n\targuments = {\n\t\t/Users/michal/local-agent/.venv/bin/python\n\t\t/Users/michal/local-agent/agent_parallel.py\n\t\t--registry\n\t\t/Users/michal/Library/Application Support/local-agent/repositories.json\n\t\t--max-workers\n\t\t2\n\t}\n\n\tworking directory = /Users/michal/local-agent\n\n\tstdout path = /Users/michal/Library/Logs/local-agent.log\n\tstderr path = /Users/michal/Library/Logs/local-agent-error.log\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/com.apple.launchd.UfMkw9K8s1/Listeners\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPATH => /Users/michal/.platformio/penv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n\t\tHOME => /Users/michal\n\t\tXPC_SERVICE_NAME => com.michal.local-agent\n\t}\n\n\tdomain = gui/501 [100023]\n\tasid = 100023\n\tminimum runtime = 10\n\texit timeout = 5\n\truns = 273\n\tpid = 71830\n\timmediate reason = inefficient\n\tforks = 2970\n\texecs = 6\n\tinitialized = 1\n\ttrampolined = 1\n\tstarted suspended = 0\n\tproxy started suspended = 0\n\tchecked allocations = 0 (queried = 1)\n\tchecked allocations reason = no host\n\tchecked allocations flags = 0x0\n\tlast exit code = 143\n\n\tresource coalition = {\n\t\tID = 145269\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.michal.local-agent\n\t}\n\n\tjetsam coalition = {\n\t\tID = 145270\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t\tname = com.michal.local-agent\n\t}\n\n\tspawn type = background (5)\n\tjetsam priority = 40\n\tjetsam memory limit (active) = (unlimited)\n\tjetsam memory limit (inactive) = (unlimited)\n\tjetsamproperties category = daemon\n\tjetsam thread limit = 32\n\tcpumon = default\n\n\tproperties = keepalive | runatload | inferred program\n}\n=== CANONICAL DOC DRIFT SEARCH ===\nREADME.md:11:**Current release:** `v4.11.1`\ndocs/MULTI_REPOSITORY.md:9:`agent_multirepo.py` remains the direct serial fallback with global execution concurrency one. Both supervisors:\ndocs/SESSION_BOOTSTRAP.md:20:~/agent-workspace/control\ndocs/SESSION_BOOTSTRAP.md:21:~/agent-workspace/work\ndocs/SESSION_BOOTSTRAP.md:22:~/agent-workspace/checkpoints\ndocs/SESSION_BOOTSTRAP.md:24:~/Library/LaunchAgents/com.michal.local-agent.plist\ndocs/SESSION_BOOTSTRAP.md:30:The repository copy of the LaunchAgent now lives at `deploy/macos/com.michal.local-agent.plist`. It contains machine-specific paths and is documentation of the established installation, not a generic installer.\ndocs/PARALLEL_EXECUTION_PLAN.md:36:## v4.11.1 operational hardening\ndocs/PARALLEL_EXECUTION_PLAN.md:38:The patch release re-audited recovery, operator observability and the global control path after the first production deployment. The following additional findings were fixed before the v4.11.1 release was accepted:\ndocs/PARALLEL_EXECUTION_PLAN.md:46:The v4.11.1 release gate therefore includes exact-SHA Linux CI, macOS smoke, repeated SIGKILL recovery, full local unittest discovery, live control delivery while workers are active, production self-update/restart, readable operator-log verification and the existing real overlap/machine-exclusion checks.\ndocs/RELEASE_NOTES_V4.11.1.md:1:# local-agent v4.11.1\ndocs/RELEASE_NOTES_V4.11.1.md:3:v4.11.1 is a logging/readability patch release for the bounded-parallel supervisor.\ndocs/AUTONOMOUS_CHAT_LOOP.md:82:Global execution concurrency is one, so the planner should prefer one small verifiable task at a time even when multiple repositories are configured.\n",
+      "elapsed_seconds": 0.983,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 7.52,
+      "current_rss_mb": 7.52,
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands"
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "command-1",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 0.983
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.316
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.227
+  },
+  "finished_at": "2026-08-31T20:21:46.601031+00:00",
+  "task_digest": "dda61a2e173f9c48e19c0a609b44946f75c8553d84d393fffb0596c473dfdc8f",
+  "idle_timeout": 300,
+  "task_timeout": 300,
+  "memory_limit_mb": 256,
+  "attempt_id": "a0ae77468cfc33b964122c82",
+  "daemon_version": "4.11.1"
+}
