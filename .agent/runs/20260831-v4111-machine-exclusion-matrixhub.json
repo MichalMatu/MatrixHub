@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-machine-exclusion-matrixhub",
+  "task_digest": "37013fabd00bd92804add810998f04cabe66a49a87c5867372ee1a90ae9fb5cc",
+  "idle_timeout": 300,
+  "task_timeout": 1800,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T19:55:03.986796+00:00",
+  "attempt_id": "649c2c5316a52a525affb472",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 93753,
+  "updated_at": "2026-08-31T19:55:03.986924+00:00",
+  "pid": 93753
+}
