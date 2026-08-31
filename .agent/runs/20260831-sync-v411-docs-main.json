@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 1,
+  "index": 5,
   "total": 5,
-  "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('AGENTS.md')\ns = p.read_text()\nmarker = '## Build Workflow\\n'\nassert marker in s\nassert '## Local Agent Workflow' not in s\nsection = '''## Local Agent Workflow\n\nThis repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.\n\n- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat its `daemon_version`, `self_revision`, `execution_model`, and `max_parallel_workers` as the running truth.\n- Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.\n- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\n- One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.\n- Resource classification is conservative: omit `resources` for firmware/PlatformIO builds, USB, serial, upload/flash, monitor, hardware access, or uncertain machine-wide tooling; omission means full `machine` exclusivity.\n- Use `resources: []` only for clearly software-only work that is safe to overlap, such as isolated docs/UI/native checks, and set an enabled `memory_limit_mb <= 1024` (normally 512 MiB for lightweight work).\n- Use named resources only when the shared-machine interaction is understood. Never add `resources: []` merely to increase throughput.\n- Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.\n- A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.\n\nWhen the Local Agent task/control/resource/status contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.\n\n'''\ns = s.replace(marker, section + marker)\np.write_text(s)\nPY",
-  "pid": 65454,
+  "command": "git push origin HEAD:main",
+  "pid": 65595,
   "timeout": 60,
   "idle_timeout": 30,
   "memory_limit_mb": 256,
-  "started_at": "2026-08-31T16:01:14.338392+00:00",
-  "stage_name": "command-1",
-  "stage_index": 1,
+  "started_at": "2026-08-31T16:01:22.125741+00:00",
+  "stage_name": "command-5",
+  "stage_index": 5,
   "stage_total": 5,
   "stage_phase": "commands",
   "task_id": "20260831-sync-v411-docs-main",
@@ -18,5 +18,5 @@
   "task_digest": "af3ae151db047f3be27a6481740e70ff9aea14e9ea7b95590eff37dec7e73993",
   "daemon_version": "4.10.2-parallel-staging",
   "daemon_pid": 65333,
-  "updated_at": "2026-08-31T16:01:14.339034+00:00"
+  "updated_at": "2026-08-31T16:01:22.236343+00:00"
 }
