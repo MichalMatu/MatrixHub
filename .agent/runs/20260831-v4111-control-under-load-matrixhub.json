@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-control-under-load-matrixhub",
+  "task_digest": "a0e838c3bebe1b2a38f73cd1587c239ae34961bddb66dbe87273e12d22e90213",
+  "idle_timeout": 300,
+  "task_timeout": 1800,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T19:56:07.289814+00:00",
+  "attempt_id": "4bc6b2fb9021c36257a08d0f",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 94400,
+  "updated_at": "2026-08-31T19:56:07.290039+00:00",
+  "pid": 94400
+}
