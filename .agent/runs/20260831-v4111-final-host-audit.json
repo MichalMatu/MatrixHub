@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-final-host-audit",
+  "task_digest": "f687529b036d94647006c9e39543ee53cda0a0a41eb08a44815e03b950ef3430",
+  "idle_timeout": 300,
+  "task_timeout": 1800,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T20:05:41.974473+00:00",
+  "attempt_id": "ca6d794652ab5176e3e4bdcc",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 99085,
+  "updated_at": "2026-08-31T20:05:41.998712+00:00",
+  "pid": 99085
+}
