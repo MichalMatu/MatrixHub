@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4111-overlap-matrixhub",
+  "task_digest": "0009d83f69c7f28e29e6f5ad015d65ac63c10b29e34e793523d69592a49b54bb",
+  "idle_timeout": 300,
+  "task_timeout": 1800,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T19:27:41.524382+00:00",
+  "attempt_id": "81b09e484cdd76899dbda2f3",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 74413,
+  "updated_at": "2026-08-31T19:27:41.524651+00:00",
+  "pid": 74413
+}
