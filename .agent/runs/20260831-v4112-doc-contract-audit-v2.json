@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260831-v4112-doc-contract-audit-v2",
+  "task_digest": "dda61a2e173f9c48e19c0a609b44946f75c8553d84d393fffb0596c473dfdc8f",
+  "idle_timeout": 300,
+  "task_timeout": 300,
+  "memory_limit_mb": 256,
+  "started_at": "2026-08-31T20:21:42.252999+00:00",
+  "attempt_id": "a0ae77468cfc33b964122c82",
+  "daemon_version": "4.11.1",
+  "daemon_pid": 6506,
+  "updated_at": "2026-08-31T20:21:42.253145+00:00",
+  "pid": 6506
+}
