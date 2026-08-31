@@ -1,0 +1,12 @@
+{
+  "id": "20260831-v4111-control-under-load-matrixhub",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "memory_limit_mb": 256,
+  "command_timeout": 90,
+  "commands": [
+    "python3 -c 'import datetime,time; print(\"LOAD_START=\"+datetime.datetime.now(datetime.timezone.utc).isoformat(), flush=True); time.sleep(35); print(\"LOAD_END=\"+datetime.datetime.now(datetime.timezone.utc).isoformat(), flush=True)'"
+  ]
+}
