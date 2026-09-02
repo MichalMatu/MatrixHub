@@ -36,9 +36,10 @@ This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use th
 - Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.
 - Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.
 - One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
-- Resource classification is conservative: omit `resources` for firmware/PlatformIO builds, USB, serial, upload/flash, monitor, hardware access, or uncertain machine-wide tooling; omission means full `machine` exclusivity.
-- Use `resources: []` only for clearly software-only work that is safe to overlap, such as isolated docs/UI/native checks, and set an enabled `memory_limit_mb <= 1024` (normally 512 MiB for lightweight work).
-- Use named resources only when the shared-machine interaction is understood. Never add `resources: []` merely to increase throughput.
+- Every task must declare `resources` explicitly; missing, malformed, duplicated, oversized, or non-canonical declarations are terminal task-contract errors with no compatibility fallback.
+- Use `resources: []` for repository-local software work, including PlatformIO builds/tests, when no exclusive external device or host-global state is used. `memory_limit_mb` is an independent RSS watchdog and does not determine resource classification.
+- Use stable named resources such as `board:matrixhub-s3` for USB, serial, upload/flash, monitor, and hardware work so only tasks sharing that concrete resource serialize.
+- Use `resources: ["machine"]` only for genuine whole-host operations such as global Local Agent maintenance or host-global toolchain mutation. Resource contention is a wait state and must continue with `NEXT`, not `STOP`.
 - Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.
 - A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.
 
