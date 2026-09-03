@@ -30,10 +30,21 @@ These instructions apply to the whole repository.
 
 ## Local Agent Workflow
 
-This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.
+This repository is hard-bound as:
 
-- Inspect `.agent/status/daemon.json` on `agent-control` before queueing work. Treat `daemon_version`, `self_revision`, `execution_model` / `execution_variant`, current task state, and `supervisor_pid` as repository-worker truth. Supervisor-wide fields such as `max_parallel_workers` are not guaranteed to be repeated in every repository-worker snapshot; read the shared supervisor status when that field matters.
-- Queue immutable tasks under `.agent/tasks/<task-id>.json`, follow `.agent/runs/<task-id>.json`, and read `.agent/results/<task-id>.json` before reporting completion.
+- repository id: `matrixhub`;
+- repository: `MichalMatu/MatrixHub`;
+- agent binding: `033327ab-700d-43b4-9b3b-caff1acaa2c7`;
+- control branch: `agent-control`.
+
+Use this repository's own `agent-control` branch for tasks and evidence; never route MatrixHub work through another repository's control branch.
+
+If Chat Bridge is active, the wake envelope must identify exactly `LA_AGENT=033327ab-700d-43b4-9b3b-caff1acaa2c7`, `LA_REPO=matrixhub`, and `LA_REPOSITORY=MichalMatu/MatrixHub`. Never infer or switch repositories from conversation history. A different repository requires explicit Bridge **Rebind**.
+
+- Inspect `.agent/binding.json` and `.agent/status/daemon.json` on `agent-control` before queueing work when Local Agent compatibility matters. The control binding must match the identity above.
+- Treat `daemon_version`, `self_revision`, `execution_model` / `execution_variant`, current task state, and `supervisor_pid` as repository-worker truth. Supervisor-wide fields such as `max_parallel_workers` are not guaranteed to be repeated in every repository-worker snapshot; read the shared supervisor status when that field matters.
+- Queue immutable tasks under `.agent/tasks/<task-id>.json`; every executable task must contain exactly `"agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7"`. Follow `.agent/runs/<task-id>.json` and read `.agent/results/<task-id>.json` before reporting completion.
+- Local Agent requires local registry binding == `.agent/binding.json` binding == task `agent_binding` before claim/execution. Missing repository binding reports `unbound`; a control mismatch reports `binding_error`; missing/wrong task binding is terminally rejected before any task command runs. The serial fallback enforces the same contract.
 - Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.
 - One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
 - Every task must declare `resources` explicitly; missing, malformed, duplicated, oversized, or non-canonical declarations are terminal task-contract errors with no compatibility fallback.
@@ -41,9 +52,10 @@ This repository is registered as `matrixhub` in `MichalMatu/local-agent`. Use th
 - Use stable named resources such as `board:matrixhub-s3` for USB, serial, upload/flash, monitor, and hardware work so only tasks sharing that concrete resource serialize.
 - Use `resources: ["machine"]` only for genuine whole-host operations such as global Local Agent maintenance or host-global toolchain mutation. Resource contention is a wait state and must continue with `NEXT`, not `STOP`.
 - Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.
+- Binding failures are safety evidence, not routing hints. Do not guess, rotate, or borrow another repository's binding to make a task execute.
 - A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.
 
-When the Local Agent task/control/resource/status contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.
+When the Local Agent task/control/resource/status/binding contract changes, update this section together with the canonical `MichalMatu/local-agent` documentation rather than relying on remembered chat context.
 
 ## Build Workflow
 
