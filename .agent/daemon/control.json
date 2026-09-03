@@ -1,0 +1,5 @@
+{
+  "id": "20260903-cancel-probe-control-v1",
+  "action": "cancel_task",
+  "task_id": "20260903-cancel-probe-v2"
+}
