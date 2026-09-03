@@ -1,9 +1,0 @@
-{
-  "event": "invalid_task_rejected",
-  "status": "failed",
-  "failure_reason": "invalid_task_file",
-  "updated_at": "2026-08-31T19:34:57.241961+00:00",
-  "task_id": "20260831-v4111-macos-metadata-hardening",
-  "daemon_version": "4.11.1",
-  "pid": 77849
-}

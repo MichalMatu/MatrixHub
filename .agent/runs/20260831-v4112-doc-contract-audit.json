@@ -1,9 +1,0 @@
-{
-  "event": "invalid_task_rejected",
-  "status": "failed",
-  "failure_reason": "invalid_task_file",
-  "updated_at": "2026-08-31T20:21:08.427626+00:00",
-  "task_id": "20260831-v4112-doc-contract-audit",
-  "daemon_version": "4.11.1",
-  "pid": 6135
-}
