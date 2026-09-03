@@ -1,9 +1,9 @@
 {
   "version": 1,
   "daemon_version": "4.14.3",
-  "state": "idle",
-  "pid": 20207,
-  "updated_at": "2026-09-03T01:41:50.889722+00:00",
+  "state": "running",
+  "pid": 20864,
+  "updated_at": "2026-09-03T01:42:17.800576+00:00",
   "self_revision": "14706bb68c3dfcc6e8aebe915b3dbeee124790bc",
   "poll_seconds": 15,
   "self_update_seconds": 60,
@@ -14,7 +14,7 @@
   "task_timeout_default": 1800,
   "task_timeout_max": 21600,
   "memory_limit_mb_default": 4096,
-  "current_task_id": null,
+  "current_task_id": "20260903-cancel-probe-v2",
   "current_attempt_id": null,
   "current_task_digest": null,
   "repository_id": "matrixhub",
@@ -22,8 +22,8 @@
   "control_branch": "agent-control",
   "default_branch": "main",
   "execution_model": "multi_repository_worker",
-  "worker_pid": 20207,
+  "worker_pid": 20864,
   "supervisor_pid": 19126,
-  "last_task_id": "20260903-cancel-probe-v1",
+  "active_resources": [],
   "execution_variant": "parallel"
 }
