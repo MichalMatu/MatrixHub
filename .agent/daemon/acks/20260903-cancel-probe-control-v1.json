@@ -1,0 +1,14 @@
+{
+  "id": "20260903-cancel-probe-control-v1",
+  "action": "cancel_task",
+  "status": "completed",
+  "daemon_version": "4.15.0",
+  "updated_at": "2026-09-03T03:38:18.082047+00:00",
+  "repository_id": "matrixhub",
+  "repository": "MichalMatu/MatrixHub",
+  "control_branch": "agent-control",
+  "default_branch": "main",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "task_id": "20260903-cancel-probe-v2",
+  "result": "already_terminal"
+}
