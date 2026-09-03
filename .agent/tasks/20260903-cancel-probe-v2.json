@@ -1,0 +1,12 @@
+{
+  "id": "20260903-cancel-probe-v2",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 360,
+  "task_timeout": 900,
+  "commands": [
+    "python3 -c 'import time; print(\"CANCEL_PROBE_STARTED\", flush=True); time.sleep(300)'"
+  ]
+}
