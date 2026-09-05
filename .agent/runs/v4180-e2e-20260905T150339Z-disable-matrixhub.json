@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "v4180-e2e-20260905T150339Z-disable-matrixhub",
+  "task_digest": "5d15ad2d898bd12cb95cb60b1bd896a880c6dd43c85ce2c63a458db2a63179e9",
+  "idle_timeout": 360,
+  "task_timeout": 600,
+  "memory_limit_mb": 256,
+  "started_at": "2026-09-05T15:08:46.639411+00:00",
+  "attempt_id": "c5d578818d8de697fbc9c402",
+  "daemon_version": "4.18.0",
+  "daemon_pid": 73162,
+  "updated_at": "2026-09-05T15:08:46.639598+00:00",
+  "pid": 73162
+}
