@@ -1,0 +1,19 @@
+{
+  "id": "v4180-e2e-20260905T150339Z-probe-matrixhub",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 360,
+  "idle_timeout": 360,
+  "task_timeout": 600,
+  "memory_limit_mb": 256,
+  "steps": [
+    {
+      "name": "release-e2e-probe",
+      "command": "python3 -u -c 'import os,time; print('\"'\"'LA418_E2E_STARTED v4180-e2e-20260905T150339Z-probe-matrixhub'\"'\"', os.getpid(), flush=True); time.sleep(0); print('\"'\"'LA418_E2E_COMPLETED v4180-e2e-20260905T150339Z-probe-matrixhub'\"'\"', flush=True)'",
+      "timeout": 360
+    }
+  ]
+}
