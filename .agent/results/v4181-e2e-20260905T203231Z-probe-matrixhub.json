@@ -1,0 +1,61 @@
+{
+  "id": "v4181-e2e-20260905T203231Z-probe-matrixhub",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "started_at": "2026-09-05T20:32:42.217333+00:00",
+  "command_timeout": 360,
+  "edits": {},
+  "commands": [
+    {
+      "command": "python3 -u -c 'import os,time; print('\"'\"'LA418_E2E_STARTED v4181-e2e-20260905T203231Z-probe-matrixhub'\"'\"', os.getpid(), flush=True); time.sleep(0); print('\"'\"'LA418_E2E_COMPLETED v4181-e2e-20260905T203231Z-probe-matrixhub'\"'\"', flush=True)'",
+      "exit_code": 0,
+      "output": "LA418_E2E_STARTED v4181-e2e-20260905T203231Z-probe-matrixhub 36071\nLA418_E2E_COMPLETED v4181-e2e-20260905T203231Z-probe-matrixhub\n",
+      "elapsed_seconds": 0.391,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 256,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 1.67,
+      "output_policy": "stream",
+      "captured_output_chars": 130,
+      "output_truncated": false,
+      "current_rss_mb": 1.67,
+      "stage_name": "release-e2e-probe",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "stage_timeout": 360
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "release-e2e-probe",
+      "stage_index": 1,
+      "stage_total": 1,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 0.391
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.099
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.07
+  },
+  "finished_at": "2026-09-05T20:32:44.531500+00:00",
+  "task_digest": "3040accd3b1ffd23bb9c1446c1989754ce963614af2f7b0b1408f36bb49a75f0",
+  "idle_timeout": 360,
+  "task_timeout": 600,
+  "memory_limit_mb": 256,
+  "attempt_id": "3833fa19dd6ca8ca1632edb5",
+  "daemon_version": "4.18.1"
+}
