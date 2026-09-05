@@ -1,14 +1,13 @@
 {
-  "event": "task_started",
+  "event": "task_finished",
   "task_id": "v4181-e2e-20260905T203231Z-probe-matrixhub",
   "task_digest": "3040accd3b1ffd23bb9c1446c1989754ce963614af2f7b0b1408f36bb49a75f0",
-  "idle_timeout": 360,
-  "task_timeout": 600,
-  "memory_limit_mb": 256,
-  "started_at": "2026-09-05T20:32:42.217218+00:00",
+  "status": "done",
+  "failure_reason": null,
+  "finished_at": "2026-09-05T20:32:44.531500+00:00",
   "attempt_id": "3833fa19dd6ca8ca1632edb5",
   "daemon_version": "4.18.1",
   "daemon_pid": 35925,
-  "updated_at": "2026-09-05T20:32:42.217394+00:00",
+  "updated_at": "2026-09-05T20:32:44.811317+00:00",
   "pid": 35925
 }
