@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260906-develop-release-baseline-publish-v4",
+  "task_digest": "bc1f126c60b950d1d2bd9fdcd1d67c4cf48c7f13e151f731240742e80b16e169",
+  "idle_timeout": 120,
+  "task_timeout": 600,
+  "memory_limit_mb": 512,
+  "started_at": "2026-09-06T04:40:22.358275+00:00",
+  "attempt_id": "be613bc017fed68a2599dc12",
+  "daemon_version": "4.18.4",
+  "daemon_pid": 11710,
+  "updated_at": "2026-09-06T04:40:22.358326+00:00",
+  "pid": 11710
+}
