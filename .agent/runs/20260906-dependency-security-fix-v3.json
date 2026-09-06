@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 3,
+  "index": 4,
   "total": 7,
-  "command": "set -euo pipefail; cd interface; npm audit --json >/tmp/matrixhub-final-audit-v3.json || true; npm audit --omit=dev --json >/tmp/matrixhub-final-prod-audit-v3.json || true; python3 - <<'PY'\nimport json,sys\nfor label,path in [('ALL','/tmp/matrixhub-final-audit-v3.json'),('PROD','/tmp/matrixhub-final-prod-audit-v3.json')]:\n d=json.load(open(path)); v=d.get('metadata',{}).get('vulnerabilities',{}); print(label, json.dumps(v, sort_keys=True));\n if v.get('total',0): sys.exit(2)\nPY",
-  "pid": 61994,
+  "command": "set -euo pipefail; cd interface; npm run quality:frontend",
+  "pid": 62042,
   "timeout": 1800,
   "idle_timeout": 300,
   "memory_limit_mb": 3072,
-  "started_at": "2026-09-06T05:28:33.917630+00:00",
-  "stage_name": "security-audit-zero",
-  "stage_index": 3,
+  "started_at": "2026-09-06T05:28:35.882697+00:00",
+  "stage_name": "frontend-quality",
+  "stage_index": 4,
   "stage_total": 7,
   "stage_phase": "commands",
   "task_id": "20260906-dependency-security-fix-v3",
@@ -18,5 +18,5 @@
   "task_digest": "a82ff5d891c9148b40586c50d9d451b77498d1b6f0294e802e40909b451dee8f",
   "daemon_version": "4.18.4",
   "daemon_pid": 61696,
-  "updated_at": "2026-09-06T05:28:34.014140+00:00"
+  "updated_at": "2026-09-06T05:28:35.955828+00:00"
 }
