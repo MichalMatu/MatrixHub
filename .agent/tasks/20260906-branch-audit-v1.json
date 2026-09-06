@@ -1,0 +1,34 @@
+{
+  "id": "20260906-branch-audit-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 180,
+  "idle_timeout": 180,
+  "task_timeout": 420,
+  "memory_limit_mb": 512,
+  "steps": [
+    {
+      "name": "branch-identity",
+      "command": "set -e; echo '=== STATUS ==='; git status --short --branch; echo '=== REFS ==='; printf 'HEAD '; git rev-parse HEAD; printf 'main '; git rev-parse origin/main; printf 'develop '; git rev-parse origin/develop; printf 'merge-base '; git merge-base origin/main origin/develop",
+      "timeout": 60
+    },
+    {
+      "name": "branch-cherry-audit",
+      "command": "set -e; echo '=== LEFT main / RIGHT develop; = patch-equivalent ==='; git log --left-right --cherry-mark --oneline origin/main...origin/develop; echo '=== COUNTS AFTER PATCH-EQUIVALENCE ==='; git rev-list --left-right --count --cherry-pick origin/main...origin/develop",
+      "timeout": 60
+    },
+    {
+      "name": "merge-dry-run",
+      "command": "set +e; echo '=== DRY MERGE main INTO develop ==='; git merge-tree --write-tree origin/develop origin/main > /tmp/matrixhub-merge-tree.txt 2>&1; rc=$?; cat /tmp/matrixhub-merge-tree.txt; echo MERGE_TREE_RC=$rc; exit 0",
+      "timeout": 60
+    },
+    {
+      "name": "delta-summary",
+      "command": "set -e; echo '=== MAIN-ONLY FILES ==='; git diff --name-status origin/develop...origin/main; echo '=== DEVELOP-ONLY CHANGE SUMMARY ==='; git diff --stat origin/main...origin/develop",
+      "timeout": 120
+    }
+  ]
+}
