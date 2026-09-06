@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260906-fix-frontend-quality-debt-v6",
+  "task_digest": "51f9c0e7b01a23bc62bace6c7d641802659abe6eb3d64f34238dae2bde000455",
+  "idle_timeout": 300,
+  "task_timeout": 4200,
+  "memory_limit_mb": 3072,
+  "started_at": "2026-09-06T05:01:36.130147+00:00",
+  "attempt_id": "595602e13c0e84c8f1a37d31",
+  "daemon_version": "4.18.4",
+  "daemon_pid": 35014,
+  "updated_at": "2026-09-06T05:01:36.130329+00:00",
+  "pid": 35014
+}
