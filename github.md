@@ -56,3 +56,6 @@ Gdy uzytkownik wklei ten plik do czatu, oznacza to:
 - `main` ma pokazywac tylko kolejne wersje jako pojedyncze commity.
 - `develop` jest miejscem, gdzie zostaje szczegolowa historia zmian.
 - Nie nadpisuj ani nie cofaj lokalnych zmian uzytkownika bez wyraznej prosby.
+- Nie merguj `main` z powrotem do `develop` tylko po to, aby zsynchronizowac snapshot wydania.
+- Po wydaniu zsynchronizuj do `develop` tylko metadane bazowej wersji (np. `APP_VERSION` i wersje pakietu), jesli release podbil je wylacznie na `main`.
+- Rozbieznosc historii `main` i `develop` jest oczekiwana w tym modelu: `main` przechowuje snapshoty wydan, a `develop` szczegolowa historie rozwoju.
