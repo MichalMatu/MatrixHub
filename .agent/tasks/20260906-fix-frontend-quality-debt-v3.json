@@ -1,0 +1,38 @@
+{
+  "id": "20260906-fix-frontend-quality-debt-v3",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 3600,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"9d64c8ea61909349e307596753dd2444ad00a775\"; test -z \"$(git status --porcelain)\""
+    },
+    {
+      "name": "restore-and-finish-fixes",
+      "command": "set -euo pipefail; checkpoint='/Users/michal/agent-workspace/repos/matrixhub/checkpoints/20260906-fix-frontend-quality-debt-v2/1788670460410385000-task-exit'; test -f \"$checkpoint/tracked.patch\"; git apply \"$checkpoint/tracked.patch\"; mkdir -p interface/src/test; cp \"$checkpoint/untracked/interface/src/test/setup.ts\" interface/src/test/setup.ts; python3 - <<'PY'\nfrom pathlib import Path\np = Path('interface/src/lib/features/system/matrix/matrixModel.ts')\ns = p.read_text()\nline = 'const MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE = 1 satisfies MatrixDataVisualizationMode;\\n'\nif s.count(line) != 1:\n    raise SystemExit(f'expected one center ripple declaration, found {s.count(line)}')\np.write_text(s.replace(line, '', 1))\nPY\ngit diff --check; git status --short"
+    },
+    {
+      "name": "prepare-frontend",
+      "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts; npx prettier --write project.inlang/.meta.json project.inlang/README.md; cd ..; git diff --check"
+    },
+    {
+      "name": "frontend-quality",
+      "command": "set -euo pipefail; cd interface; npm run quality:frontend"
+    },
+    {
+      "name": "native-tests",
+      "command": "set -euo pipefail; $HOME/.platformio/penv/bin/pio test -e native"
+    },
+    {
+      "name": "commit-and-push",
+      "command": "set -euo pipefail; git diff --check; git add interface/vite.config.ts interface/src/test/setup.ts interface/src/lib/storage.svelte.ts interface/src/routes/charts/components/DateSelector.svelte interface/src/lib/features/gpio/gpioModel.ts interface/src/lib/features/system/power/powerConfigModel.ts interface/src/lib/features/system/matrix/matrixNavigation.ts interface/src/lib/features/system/matrix/matrixModel.ts interface/src/lib/features/usb/terminal/usbTerminalCommandPresets.ts interface/src/lib/features/usb/terminal/useUsbTerminalQuickScripts.svelte.ts; git diff --cached --check; git commit -m 'Fix frontend quality debt'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"9d64c8ea61909349e307596753dd2444ad00a775\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)"
+    }
+  ]
+}
