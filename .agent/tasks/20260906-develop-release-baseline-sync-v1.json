@@ -1,0 +1,30 @@
+{
+  "id": "20260906-develop-release-baseline-sync-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 2400,
+  "memory_limit_mb": 2048,
+  "steps": [
+    {
+      "name": "preflight-and-release-audit",
+      "command": "set -euo pipefail; git fetch --prune origin; echo BRANCH=$(git branch --show-current); echo DEVELOP=$(git rev-parse origin/develop); echo MAIN=$(git rev-parse origin/main); test \"$(git rev-parse origin/develop)\" = \"e4a8f31288eb7f000643cecdd6c5351510a89ce6\"; test -z \"$(git status --porcelain)\"; echo '=== release commit ==='; git show --stat --oneline --summary fea101e53d38e9a964485ff31c394226afd51831; echo '=== release/version metadata diff ==='; git diff origin/develop origin/main -- platformio.ini interface/package.json interface/package-lock.json github.md AGENTS.md"
+    },
+    {
+      "name": "sync-release-baseline-and-document-policy",
+      "command": "set -euo pipefail; python3 - <<'PY'\nfrom pathlib import Path\nimport json\n\np = Path('platformio.ini')\ns = p.read_text()\nold = '-DAPP_VERSION=\\\\\"1.0.0\\\\\"'\nnew = '-DAPP_VERSION=\\\\\"1.0.1\\\\\"'\nif old not in s:\n    raise SystemExit('expected APP_VERSION 1.0.0 not found')\np.write_text(s.replace(old, new, 1))\n\nfor name in ['interface/package.json', 'interface/package-lock.json']:\n    p = Path(name)\n    data = json.loads(p.read_text())\n    if name.endswith('package.json'):\n        if data.get('version') != '1.0.0':\n            raise SystemExit(f'{name}: expected version 1.0.0, got {data.get(\"version\")}')\n        data['version'] = '1.0.1'\n    else:\n        if data.get('version') == '1.0.0':\n            data['version'] = '1.0.1'\n        root = data.get('packages', {}).get('')\n        if isinstance(root, dict) and root.get('version') == '1.0.0':\n            root['version'] = '1.0.1'\n    p.write_text(json.dumps(data, ensure_ascii=False, indent='\\t') + '\\n')\n\np = Path('github.md')\ns = p.read_text()\nanchor = '- Nie nadpisuj ani nie cofaj lokalnych zmian uzytkownika bez wyraznej prosby.\\n'\naddition = '''- Nie merguj `main` z powrotem do `develop` tylko po to, aby zsynchronizowac snapshot wydania.\\n- Po wydaniu zsynchronizuj do `develop` tylko metadane bazowej wersji (np. `APP_VERSION` i wersje pakietu), jesli release podbil je wylacznie na `main`.\\n- Rozbieznosc historii `main` i `develop` jest oczekiwana w tym modelu: `main` przechowuje snapshoty wydan, a `develop` szczegolowa historie rozwoju.\\n'''\nif addition.strip() not in s:\n    if anchor not in s:\n        raise SystemExit('github.md policy anchor not found')\n    s = s.replace(anchor, anchor + addition, 1)\n    p.write_text(s)\n\np = Path('AGENTS.md')\ns = p.read_text()\nanchor = '- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\\n'\naddition = '- For release snapshots and post-release branch synchronization, follow `github.md`; do not merge `main` back into `develop` merely to import a release snapshot.\\n'\nif addition not in s:\n    if anchor not in s:\n        raise SystemExit('AGENTS.md branch-policy anchor not found')\n    s = s.replace(anchor, anchor + addition, 1)\n    p.write_text(s)\nPY\n\necho '=== changed files ==='; git status --short; echo '=== diff ==='; git diff --check; git diff -- platformio.ini interface/package.json interface/package-lock.json github.md AGENTS.md"
+    },
+    {
+      "name": "verify",
+      "command": "set -euo pipefail; $HOME/.platformio/penv/bin/pio test -e native; cd interface; npm run quality:frontend:fast"
+    },
+    {
+      "name": "commit-and-publish-develop",
+      "command": "set -euo pipefail; git diff --check; git status --short; git add platformio.ini interface/package.json interface/package-lock.json github.md AGENTS.md; git diff --cached --check; git commit -m 'Sync develop with 1.0.1 release baseline'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"e4a8f31288eb7f000643cecdd6c5351510a89ce6\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)"
+    }
+  ]
+}
