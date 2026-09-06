@@ -1,0 +1,26 @@
+{
+  "id": "20260906-quality-debt-audit-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 180,
+  "idle_timeout": 180,
+  "task_timeout": 600,
+  "memory_limit_mb": 512,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "git fetch --prune origin && git rev-parse origin/develop && git status --short"
+    },
+    {
+      "name": "unused-symbol-references",
+      "command": "rg -n 'normalizeDebounce|getGpioPullLabel|MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE|MATRIX_NATIVE_3D_EFFECT_CATEGORIES|MATRIX_TAB_PATHS|MS_PER_MIN|UsbTerminalPresetOsOption|HostQuickAction' interface/src"
+    },
+    {
+      "name": "form-and-test-config",
+      "command": "rg -n 'type=\"date\"|input input-bordered|setupFiles|jsdom|localStorage' interface/src interface/vite.config.ts interface/package.json"
+    }
+  ]
+}
