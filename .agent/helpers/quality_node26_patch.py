@@ -40,11 +40,20 @@ Path("interface/scripts/run-vitest.mjs").write_text(
 import { fileURLToPath } from 'node:url';
 
 const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);
+const disableNodeWebStorage = nodeMajor >= 25;
 const vitestCli = fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url));
-const nodeArgs = nodeMajor >= 25 ? ['--no-experimental-webstorage'] : [];
+const nodeArgs = disableNodeWebStorage ? ['--no-experimental-webstorage'] : [];
+const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim() ?? '';
+const nodeOptions = [
+\tinheritedNodeOptions,
+\tdisableNodeWebStorage ? '--no-experimental-webstorage' : ''
+]
+\t.filter(Boolean)
+\t.join(' ');
+const env = nodeOptions ? { ...process.env, NODE_OPTIONS: nodeOptions } : process.env;
 const result = spawnSync(process.execPath, [...nodeArgs, vitestCli, ...process.argv.slice(2)], {
 \tstdio: 'inherit',
-\tenv: process.env
+\tenv
 });
 
 if (result.error) {
