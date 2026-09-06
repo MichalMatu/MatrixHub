@@ -1,0 +1,88 @@
+{
+  "id": "20260906-quality-debt-audit-v1",
+  "status": "failed",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": false,
+  "started_at": "2026-09-06T04:47:34.758852+00:00",
+  "command_timeout": 180,
+  "edits": {},
+  "commands": [
+    {
+      "command": "git fetch --prune origin && git rev-parse origin/develop && git status --short",
+      "exit_code": 0,
+      "output": "From https://github.com/MichalMatu/MatrixHub\n   5e92156..2a8fd07  agent-control -> origin/agent-control\n9d64c8ea61909349e307596753dd2444ad00a775\n",
+      "elapsed_seconds": 1.321,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 512,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 2.02,
+      "output_policy": "stream",
+      "captured_output_chars": 145,
+      "output_truncated": false,
+      "current_rss_mb": 2.02,
+      "stage_name": "preflight",
+      "stage_index": 1,
+      "stage_total": 3,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "rg -n 'normalizeDebounce|getGpioPullLabel|MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE|MATRIX_NATIVE_3D_EFFECT_CATEGORIES|MATRIX_TAB_PATHS|MS_PER_MIN|UsbTerminalPresetOsOption|HostQuickAction' interface/src",
+      "exit_code": 127,
+      "output": "/bin/sh: rg: command not found\n",
+      "elapsed_seconds": 0.13,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 512,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": null,
+      "output_policy": "stream",
+      "captured_output_chars": 31,
+      "output_truncated": false,
+      "stage_name": "unused-symbol-references",
+      "stage_index": 2,
+      "stage_total": 3,
+      "stage_phase": "commands"
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "preflight",
+      "stage_index": 1,
+      "stage_total": 3,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.321
+    },
+    {
+      "stage_name": "unused-symbol-references",
+      "stage_index": 2,
+      "stage_total": 3,
+      "stage_phase": "commands",
+      "outcome": "failed",
+      "elapsed_seconds": 0.13
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.146
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.07
+  },
+  "failure_reason": "command_failed",
+  "finished_at": "2026-09-06T04:47:38.222536+00:00",
+  "task_digest": "eae9ada5245d6d2c0ce194393dea4ee3873429ac68ab74e020bc998fb0bebfb8",
+  "idle_timeout": 180,
+  "task_timeout": 600,
+  "memory_limit_mb": 512,
+  "attempt_id": "7d74996044e983f139f404cb",
+  "daemon_version": "4.18.4"
+}
