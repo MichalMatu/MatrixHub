@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 2,
+  "index": 3,
   "total": 5,
-  "command": "set -euo pipefail; python3 - <<'PY'\nfrom pathlib import Path\n\np = Path('platformio.ini')\ns = p.read_text()\nold = '-DAPP_VERSION=\\\\\"1.0.0\\\\\"'\nnew = '-DAPP_VERSION=\\\\\"1.0.1\\\\\"'\nif s.count(old) != 1:\n    raise SystemExit(f'expected exactly one APP_VERSION 1.0.0, found {s.count(old)}')\np.write_text(s.replace(old, new, 1))\n\np = Path('github.md')\ns = p.read_text()\nanchor = '- Nie nadpisuj ani nie cofaj lokalnych zmian uzytkownika bez wyraznej prosby.\\n'\naddition = '''- Nie merguj `main` z powrotem do `develop` tylko po to, aby zsynchronizowac snapshot wydania.\\n- Po wydaniu zsynchronizuj do `develop` tylko metadane bazowej wersji (np. `APP_VERSION` i wersje pakietu), jesli release podbil je wylacznie na `main`.\\n- Rozbieznosc historii `main` i `develop` jest oczekiwana w tym modelu: `main` przechowuje snapshoty wydan, a `develop` szczegolowa historie rozwoju.\\n'''\nif addition.strip() not in s:\n    if anchor not in s:\n        raise SystemExit('github.md policy anchor not found')\n    p.write_text(s.replace(anchor, anchor + addition, 1))\n\np = Path('AGENTS.md')\ns = p.read_text()\nanchor = '- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\\n'\naddition = '- For release snapshots and post-release branch synchronization, follow `github.md`; do not merge `main` back into `develop` merely to import a release snapshot.\\n'\nif addition not in s:\n    if anchor not in s:\n        raise SystemExit('AGENTS.md branch-policy anchor not found')\n    p.write_text(s.replace(anchor, anchor + addition, 1))\nPY\ncd interface; npm version 1.0.1 --no-git-tag-version --ignore-scripts >/dev/null; cd ..; echo '=== diff stat ==='; git diff --stat; echo '=== diff ==='; git diff -- platformio.ini interface/package.json interface/package-lock.json github.md AGENTS.md; git diff --check",
-  "pid": 3312,
+  "command": "set -euo pipefail; test -z \"$(git diff --name-only | grep -v -E '^(platformio.ini|interface/package.json|interface/package-lock.json|github.md|AGENTS.md)$' || true)\"; $HOME/.platformio/penv/bin/pio test -e native; cd interface; npm run lint; npm run check; npm run test:run; npm run unused:check",
+  "pid": 3343,
   "timeout": 1800,
   "idle_timeout": 300,
   "memory_limit_mb": 2048,
-  "started_at": "2026-09-06T04:33:00.836556+00:00",
-  "stage_name": "sync-release-baseline",
-  "stage_index": 2,
+  "started_at": "2026-09-06T04:33:01.631234+00:00",
+  "stage_name": "verify-isolated",
+  "stage_index": 3,
   "stage_total": 5,
   "stage_phase": "commands",
   "task_id": "20260906-develop-release-baseline-sync-v2",
@@ -18,5 +18,5 @@
   "task_digest": "f6c5d8eda3eecf099c938a3d7eb44ed87631c63aa12e750ab5ac767b04b61bea",
   "daemon_version": "4.18.4",
   "daemon_pid": 3137,
-  "updated_at": "2026-09-06T04:33:00.930976+00:00"
+  "updated_at": "2026-09-06T04:33:01.711878+00:00"
 }
