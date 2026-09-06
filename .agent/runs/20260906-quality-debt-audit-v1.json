@@ -1,14 +1,13 @@
 {
-  "event": "task_started",
+  "event": "task_finished",
   "task_id": "20260906-quality-debt-audit-v1",
   "task_digest": "eae9ada5245d6d2c0ce194393dea4ee3873429ac68ab74e020bc998fb0bebfb8",
-  "idle_timeout": 180,
-  "task_timeout": 600,
-  "memory_limit_mb": 512,
-  "started_at": "2026-09-06T04:47:34.758758+00:00",
+  "status": "failed",
+  "failure_reason": "command_failed",
+  "finished_at": "2026-09-06T04:47:38.222536+00:00",
   "attempt_id": "7d74996044e983f139f404cb",
   "daemon_version": "4.18.4",
   "daemon_pid": 16802,
-  "updated_at": "2026-09-06T04:47:34.758925+00:00",
+  "updated_at": "2026-09-06T04:47:38.575516+00:00",
   "pid": 16802
 }
