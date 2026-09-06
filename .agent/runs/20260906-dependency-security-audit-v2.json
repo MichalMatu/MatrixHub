@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 2,
+  "index": 3,
   "total": 4,
-  "command": "set -euo pipefail; cd interface; npm audit --json >/tmp/matrixhub-audit-v2.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-audit-v2.json'))\nprint('SUMMARY', json.dumps(d['metadata']['vulnerabilities'], sort_keys=True))\nfor name,v in sorted(d.get('vulnerabilities',{}).items()):\n    if v.get('isDirect'):\n        print('DIRECT', json.dumps({'name':name,'severity':v.get('severity'),'range':v.get('range'),'fixAvailable':v.get('fixAvailable'),'effects':v.get('effects')}, sort_keys=True))\nprint('ALL_NAMES', ' '.join(sorted(d.get('vulnerabilities',{}))))\nPY",
-  "pid": 50872,
+  "command": "set -euo pipefail; cd interface; npm outdated --json >/tmp/matrixhub-outdated-v2.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-outdated-v2.json'))\nfor name,v in sorted(d.items()): print('OUTDATED', json.dumps({'name':name,'current':v.get('current'),'wanted':v.get('wanted'),'latest':v.get('latest'),'type':v.get('type')}, sort_keys=True))\nPY",
+  "pid": 50908,
   "timeout": 1200,
   "idle_timeout": 300,
   "memory_limit_mb": 2048,
-  "started_at": "2026-09-06T05:21:57.183995+00:00",
-  "stage_name": "direct-vulnerabilities",
-  "stage_index": 2,
+  "started_at": "2026-09-06T05:21:59.163144+00:00",
+  "stage_name": "outdated",
+  "stage_index": 3,
   "stage_total": 4,
   "stage_phase": "commands",
   "task_id": "20260906-dependency-security-audit-v2",
@@ -18,5 +18,5 @@
   "task_digest": "1a854223d6f5c475e3c355337d46bb488a31f2ed4366f2d0cb2fb2f614c931a4",
   "daemon_version": "4.18.4",
   "daemon_pid": 50618,
-  "updated_at": "2026-09-06T05:21:57.263913+00:00"
+  "updated_at": "2026-09-06T05:21:59.249336+00:00"
 }
