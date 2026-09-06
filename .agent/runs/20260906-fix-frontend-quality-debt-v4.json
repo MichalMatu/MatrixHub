@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 4,
+  "index": 5,
   "total": 8,
-  "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts; npx prettier --write project.inlang/.meta.json project.inlang/README.md; cd ..; git diff --check",
-  "pid": 32315,
+  "command": "set -euo pipefail; cd interface; npx vitest run src/lib/stores/theme.test.svelte.ts src/lib/stores/user.test.ts src/lib/stores/system/parsers.test.ts",
+  "pid": 32543,
   "timeout": 1800,
   "idle_timeout": 300,
   "memory_limit_mb": 3072,
-  "started_at": "2026-09-06T04:58:15.285170+00:00",
-  "stage_name": "prepare-frontend",
-  "stage_index": 4,
+  "started_at": "2026-09-06T04:58:27.027596+00:00",
+  "stage_name": "focused-storage-tests",
+  "stage_index": 5,
   "stage_total": 8,
   "stage_phase": "commands",
   "task_id": "20260906-fix-frontend-quality-debt-v4",
@@ -18,5 +18,5 @@
   "task_digest": "0bd7fd9830eed90afd934b474842ace3a7d7d62dac12d60d9c973cfa8de846ba",
   "daemon_version": "4.18.4",
   "daemon_pid": 32118,
-  "updated_at": "2026-09-06T04:58:15.359149+00:00"
+  "updated_at": "2026-09-06T04:58:27.117679+00:00"
 }
