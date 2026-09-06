@@ -1,0 +1,38 @@
+{
+  "id": "20260906-dependency-security-fix-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 5400,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; test -z \"$(git status --porcelain)\""
+    },
+    {
+      "name": "update-security-dependencies",
+      "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts >/dev/null; npm uninstall --save-dev --ignore-scripts size-limit @size-limit/preset-app; npm uninstall --ignore-scripts glob; npm install --save-dev --ignore-scripts 'glob@^13.0.6'; npm install --save-exact --ignore-scripts svelte@5.57.0; npm install --save-dev --save-exact --ignore-scripts @inlang/paraglide-js@2.25.0 @sveltejs/kit@2.70.3 vite@7.3.6; npm install --save-dev --ignore-scripts vitest@4.1.11 @vitest/ui@4.1.11 @vitest/coverage-v8@4.1.11 dependency-cruiser@17.4.3 rollup@4.63.1; npm update --ignore-scripts; cd ..; git diff --check; git diff --stat; git status --short"
+    },
+    {
+      "name": "security-audit",
+      "command": "set -euo pipefail; cd interface; npm audit --json >/tmp/matrixhub-security-after.json || true; python3 - <<'PY'\nimport json,sys\nd=json.load(open('/tmp/matrixhub-security-after.json'))\nv=d.get('metadata',{}).get('vulnerabilities',{})\nprint('AFTER_AUDIT', json.dumps(v, sort_keys=True))\nfor name,item in sorted(d.get('vulnerabilities',{}).items()): print(json.dumps({'name':name,'severity':item.get('severity'),'isDirect':item.get('isDirect'),'range':item.get('range'),'fixAvailable':item.get('fixAvailable')}, sort_keys=True))\nif v.get('total',0): sys.exit(2)\nPY"
+    },
+    {
+      "name": "frontend-quality",
+      "command": "set -euo pipefail; cd interface; npm run quality:frontend"
+    },
+    {
+      "name": "native-tests",
+      "command": "set -euo pipefail; $HOME/.platformio/penv/bin/pio test -e native"
+    },
+    {
+      "name": "commit-and-push",
+      "command": "set -euo pipefail; git diff --check; git add interface/package.json interface/package-lock.json; git diff --cached --check; git commit -m 'Harden frontend dependencies'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)"
+    }
+  ]
+}
