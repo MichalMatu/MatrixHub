@@ -1,0 +1,26 @@
+{
+  "id": "20260906-develop-release-baseline-publish-v5",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 300,
+  "idle_timeout": 120,
+  "task_timeout": 600,
+  "memory_limit_mb": 512,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"e4a8f31288eb7f000643cecdd6c5351510a89ce6\"; test -z \"$(git status --porcelain)\""
+    },
+    {
+      "name": "apply-verified-baseline-sync",
+      "command": "set -euo pipefail; python3 - <<'PY'\nfrom pathlib import Path\n\np=Path('platformio.ini'); s=p.read_text(); old='-DAPP_VERSION=\\\\\"1.0.0\\\\\"'; new='-DAPP_VERSION=\\\\\"1.0.1\\\\\"'; assert s.count(old)==1; p.write_text(s.replace(old,new,1))\n\np=Path('interface/package.json'); s=p.read_text(); old='\\t\"version\": \"1.0.0\",'; new='\\t\"version\": \"1.0.1\",'; assert s.count(old)==1; p.write_text(s.replace(old,new,1))\n\np=Path('interface/package-lock.json'); s=p.read_text();\nold1='\\t\"version\": \"1.0.0\",\\n\\t\"lockfileVersion\"'; new1='\\t\"version\": \"1.0.1\",\\n\\t\"lockfileVersion\"';\nold2='\\t\\t\\t\"version\": \"1.0.0\",\\n\\t\\t\\t\"dependencies\"'; new2='\\t\\t\\t\"version\": \"1.0.1\",\\n\\t\\t\\t\"dependencies\"';\nassert s.count(old1)==1; assert s.count(old2)==1; s=s.replace(old1,new1,1).replace(old2,new2,1); p.write_text(s)\n\np=Path('github.md'); s=p.read_text(); anchor='- Nie nadpisuj ani nie cofaj lokalnych zmian uzytkownika bez wyraznej prosby.\\n'; addition='- Nie merguj `main` z powrotem do `develop` tylko po to, aby zsynchronizowac snapshot wydania.\\n- Po wydaniu zsynchronizuj do `develop` tylko metadane bazowej wersji (np. `APP_VERSION` i wersje pakietu), jesli release podbil je wylacznie na `main`.\\n- Rozbieznosc historii `main` i `develop` jest oczekiwana w tym modelu: `main` przechowuje snapshoty wydan, a `develop` szczegolowa historie rozwoju.\\n'; assert anchor in s; p.write_text(s.replace(anchor,anchor+addition,1))\n\np=Path('AGENTS.md'); s=p.read_text(); anchor='- Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.\\n'; addition='- For release snapshots and post-release branch synchronization, follow `github.md`; do not merge `main` back into `develop` merely to import a release snapshot.\\n'; assert anchor in s; p.write_text(s.replace(anchor,anchor+addition,1))\nPY\nfiles=$(git diff --name-only); printf '%s\\n' \"$files\"; test \"$(printf '%s\\n' \"$files\" | wc -l | tr -d ' ')\" = 5; test -z \"$(printf '%s\\n' \"$files\" | grep -v -E '^(AGENTS.md|github.md|interface/package-lock.json|interface/package.json|platformio.ini)$' || true)\"; git diff --check; git diff --stat"
+    },
+    {
+      "name": "commit-and-push",
+      "command": "set -euo pipefail; git add AGENTS.md github.md interface/package-lock.json interface/package.json platformio.ini; git diff --cached --check; git commit -m 'Sync develop with 1.0.1 release baseline'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"e4a8f31288eb7f000643cecdd6c5351510a89ce6\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)"
+    }
+  ]
+}
