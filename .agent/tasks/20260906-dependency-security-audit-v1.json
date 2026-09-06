@@ -1,0 +1,34 @@
+{
+  "id": "20260906-dependency-security-audit-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 1200,
+  "idle_timeout": 300,
+  "task_timeout": 2400,
+  "memory_limit_mb": 2048,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; test -z \"$(git status --porcelain)\"; node --version; npm --version"
+    },
+    {
+      "name": "audit-all",
+      "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts >/dev/null; npm audit --json >/tmp/matrixhub-audit-all.json || true; python3 - <<'PY'\nimport json\np='/tmp/matrixhub-audit-all.json'\nd=json.load(open(p))\nprint('METADATA', json.dumps(d.get('metadata',{}).get('vulnerabilities',{}), sort_keys=True))\nfor name,v in sorted(d.get('vulnerabilities',{}).items(), key=lambda kv: ({'critical':0,'high':1,'moderate':2,'low':3,'info':4}.get(kv[1].get('severity'),9), kv[0])):\n    print(json.dumps({'name':name,'severity':v.get('severity'),'isDirect':v.get('isDirect'),'range':v.get('range'),'nodes':v.get('nodes'),'via':v.get('via'),'effects':v.get('effects'),'fixAvailable':v.get('fixAvailable')}, sort_keys=True))\nPY"
+    },
+    {
+      "name": "audit-production",
+      "command": "set -euo pipefail; cd interface; npm audit --omit=dev --json >/tmp/matrixhub-audit-prod.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-audit-prod.json'))\nprint('PROD_METADATA', json.dumps(d.get('metadata',{}).get('vulnerabilities',{}), sort_keys=True))\nfor name,v in sorted(d.get('vulnerabilities',{}).items()): print(json.dumps({'name':name,'severity':v.get('severity'),'isDirect':v.get('isDirect'),'range':v.get('range'),'fixAvailable':v.get('fixAvailable'),'via':v.get('via')}, sort_keys=True))\nPY"
+    },
+    {
+      "name": "dry-run-fix",
+      "command": "set -euo pipefail; cd interface; npm audit fix --dry-run --json >/tmp/matrixhub-audit-fix.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-audit-fix.json'))\nprint('FIX_CHANGE_COUNTS', json.dumps({k:d.get(k) for k in ('added','removed','changed') if k in d}, sort_keys=True))\nprint('FIX_AUDIT_METADATA', json.dumps(d.get('audit',{}).get('metadata',{}).get('vulnerabilities', d.get('metadata',{}).get('vulnerabilities',{})), sort_keys=True))\nfor a in d.get('audit',{}).get('advisories',{}).values(): print('ADVISORY', json.dumps({'module_name':a.get('module_name'),'severity':a.get('severity'),'patched_versions':a.get('patched_versions'),'recommendation':a.get('recommendation')}, sort_keys=True))\nPY"
+    },
+    {
+      "name": "outdated",
+      "command": "set -euo pipefail; cd interface; npm outdated --json >/tmp/matrixhub-outdated.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-outdated.json'))\nfor name,v in sorted(d.items()): print(json.dumps({'name':name,'current':v.get('current'),'wanted':v.get('wanted'),'latest':v.get('latest'),'type':v.get('type')}, sort_keys=True))\nPY"
+    }
+  ]
+}
