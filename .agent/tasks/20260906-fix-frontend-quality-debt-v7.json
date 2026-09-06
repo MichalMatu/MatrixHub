@@ -1,0 +1,21 @@
+{
+  "id": "20260906-fix-frontend-quality-debt-v7",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 4200,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {"name":"preflight","command":"set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"9d64c8ea61909349e307596753dd2444ad00a775\"; test -z \"$(git status --porcelain)\"; node --version"},
+    {"name":"restore-fixes","command":"set -euo pipefail; git apply /Users/michal/agent-workspace/repos/matrixhub/checkpoints/20260906-fix-frontend-quality-debt-v3/1788670596080693000-task-exit/tracked.patch; git show origin/agent-control:.agent/helpers/quality_node26_patch.py > /tmp/matrixhub-quality-patch.py; python3 /tmp/matrixhub-quality-patch.py; git diff --check"},
+    {"name":"prepare","command":"set -euo pipefail; cd interface; npm ci --ignore-scripts; npx prettier --write project.inlang/.meta.json project.inlang/README.md scripts/run-vitest.mjs; cd ..; git diff --check","timeout":1800},
+    {"name":"focused-tests","command":"set -euo pipefail; cd interface; node ./scripts/run-vitest.mjs run src/lib/stores/theme.test.svelte.ts src/lib/stores/user.test.ts src/lib/stores/system/parsers.test.ts","timeout":600},
+    {"name":"frontend-quality","command":"set -euo pipefail; cd interface; npm run quality:frontend","timeout":1800},
+    {"name":"native-tests","command":"set -euo pipefail; $HOME/.platformio/penv/bin/pio test -e native","timeout":1800},
+    {"name":"commit-and-push","command":"set -euo pipefail; git diff --check; git add interface/package.json interface/scripts/run-vitest.mjs interface/src/lib/storage.svelte.ts interface/src/routes/charts/components/DateSelector.svelte interface/src/lib/features/gpio/gpioModel.ts interface/src/lib/features/system/power/powerConfigModel.ts interface/src/lib/features/system/matrix/matrixNavigation.ts interface/src/lib/features/system/matrix/matrixModel.ts interface/src/lib/features/usb/terminal/usbTerminalCommandPresets.ts interface/src/lib/features/usb/terminal/useUsbTerminalQuickScripts.svelte.ts; git diff --cached --check; git commit -m 'Fix frontend quality debt'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"9d64c8ea61909349e307596753dd2444ad00a775\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)","timeout":300}
+  ]
+}
