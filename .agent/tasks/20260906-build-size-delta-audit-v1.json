@@ -1,0 +1,26 @@
+{
+  "id": "20260906-build-size-delta-audit-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 4200,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; test -z \"$(git status --porcelain)\""
+    },
+    {
+      "name": "baseline-build",
+      "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts >/dev/null; npm run build >/tmp/matrixhub-baseline-build.log 2>&1; python3 - <<'PY'\nfrom pathlib import Path\nroot=Path('build')\nrows=[]\nfor p in root.rglob('*'):\n if p.is_file() and not p.name.endswith('.gz'):\n  rows.append((p.stat().st_size,str(p.relative_to(root))))\nprint('BASE_TOTAL',sum(s for s,_ in rows),'FILES',len(rows))\nfor s,p in sorted(rows,reverse=True)[:30]: print('BASE',s,p)\nPath('/tmp/matrixhub-base-sizes.tsv').write_text('\\n'.join(f'{p}\\t{s}' for s,p in rows))\nPY"
+    },
+    {
+      "name": "updated-build",
+      "command": "set -euo pipefail; cd ..; rm -rf interface/build interface/.svelte-kit; git apply /Users/michal/agent-workspace/repos/matrixhub/checkpoints/20260906-dependency-security-fix-v5/1788672879169142000-task-exit/tracked.patch; cd interface; npm ci --ignore-scripts >/dev/null; npm run build >/tmp/matrixhub-updated-build.log 2>&1; python3 - <<'PY'\nfrom pathlib import Path\nroot=Path('build')\nbase={}\nfor line in Path('/tmp/matrixhub-base-sizes.tsv').read_text().splitlines():\n p,s=line.rsplit('\\t',1); base[p]=int(s)\nnow={}\nfor p in root.rglob('*'):\n if p.is_file() and not p.name.endswith('.gz'): now[str(p.relative_to(root))]=p.stat().st_size\nprint('UPDATED_TOTAL',sum(now.values()),'FILES',len(now),'DELTA',sum(now.values())-sum(base.values()))\nchanges=[]\nfor p in set(base)|set(now): changes.append((now.get(p,0)-base.get(p,0),p,base.get(p,0),now.get(p,0)))\nfor d,p,b,n in sorted(changes,reverse=True)[:40]: print('DELTA',d,'BASE',b,'NOW',n,p)\nprint('TOP_UPDATED')\nfor p,s in sorted(now.items(), key=lambda kv:kv[1], reverse=True)[:30]: print('NOW',s,p)\nPY\ngit diff --check"
+    }
+  ]
+}
