@@ -1,0 +1,42 @@
+{
+  "id": "20260906-dependency-security-fix-v4",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 7200,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {
+      "name": "restore",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; test -z \"$(git status --porcelain)\"; git apply /Users/michal/agent-workspace/repos/matrixhub/checkpoints/20260906-dependency-security-fix-v2/1788672458768070000-task-exit/tracked.patch; git diff --check"
+    },
+    {
+      "name": "pin-quality-tools",
+      "command": "set -euo pipefail; cd interface; npm ci --ignore-scripts; npm install --save-dev --ignore-scripts knip@5.82.1 prettier@3.8.1; npm ci --ignore-scripts; cd ..; git diff --check; git diff --stat"
+    },
+    {
+      "name": "security-audit-zero",
+      "command": "set -euo pipefail; cd interface; npm audit --json >/tmp/matrixhub-final-audit-v4.json || true; npm audit --omit=dev --json >/tmp/matrixhub-final-prod-audit-v4.json || true; python3 - <<'PY'\nimport json,sys\nfor label,path in [('ALL','/tmp/matrixhub-final-audit-v4.json'),('PROD','/tmp/matrixhub-final-prod-audit-v4.json')]:\n d=json.load(open(path)); v=d.get('metadata',{}).get('vulnerabilities',{}); print(label, json.dumps(v, sort_keys=True));\n if v.get('total',0):\n  for name,item in sorted(d.get('vulnerabilities',{}).items()): print(label,name,item.get('severity'),item.get('range'),item.get('fixAvailable'))\n  sys.exit(2)\nPY"
+    },
+    {
+      "name": "frontend-quality",
+      "command": "set -euo pipefail; cd interface; npm run quality:frontend"
+    },
+    {
+      "name": "frontend-e2e",
+      "command": "set -euo pipefail; cd interface; npx playwright install chromium; npm run quality:frontend:e2e"
+    },
+    {
+      "name": "native-tests",
+      "command": "set -euo pipefail; $HOME/.platformio/penv/bin/pio test -e native"
+    },
+    {
+      "name": "commit-and-push",
+      "command": "set -euo pipefail; git diff --check; git status --short; git add interface/package.json interface/package-lock.json; git diff --cached --check; git commit -m 'Harden frontend dependencies'; git fetch origin develop; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; git push origin HEAD:develop; echo NEW_DEVELOP=$(git rev-parse HEAD)"
+    }
+  ]
+}
