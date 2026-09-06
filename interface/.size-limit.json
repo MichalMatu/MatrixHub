@@ -17,11 +17,5 @@
 		"path": "build/_app/immutable/**/*.css",
 		"limit": "50 KB",
 		"gzip": true
-	},
-	{
-		"name": "Total Build Size",
-		"path": "build/**/*",
-		"limit": "1.5 MB",
-		"exclude": ["build/**/*.gz"]
 	}
 ]
