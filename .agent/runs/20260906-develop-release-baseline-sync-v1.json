@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260906-develop-release-baseline-sync-v1",
+  "task_digest": "77b4f07d4b38226b58c21eb0851f21233fecff07aba64aec857cd0a3e7d388b5",
+  "idle_timeout": 300,
+  "task_timeout": 2400,
+  "memory_limit_mb": 2048,
+  "started_at": "2026-09-06T04:26:41.859168+00:00",
+  "attempt_id": "e2d8217f401c73304d6d37ab",
+  "daemon_version": "4.18.4",
+  "daemon_pid": 81472,
+  "updated_at": "2026-09-06T04:26:41.859220+00:00",
+  "pid": 81472
+}
