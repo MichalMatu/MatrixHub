@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260906-dependency-security-audit-v1",
+  "task_digest": "3699ac2893e8576c643894f6414250df1d0f43571b12deecaaf726b99674d000",
+  "idle_timeout": 300,
+  "task_timeout": 2400,
+  "memory_limit_mb": 2048,
+  "started_at": "2026-09-06T05:20:06.361570+00:00",
+  "attempt_id": "09385e31c3c1e2295ac0074c",
+  "daemon_version": "4.18.4",
+  "daemon_pid": 49244,
+  "updated_at": "2026-09-06T05:20:06.361728+00:00",
+  "pid": 49244
+}
