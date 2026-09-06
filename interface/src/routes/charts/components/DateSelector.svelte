@@ -12,6 +12,7 @@
 	} = $props();
 
 	import HelpTriggerButton from '$lib/components/help/HelpTriggerButton.svelte';
+	import FormInput from '$lib/components/shared/forms/FormInput.svelte';
 	import { i18n } from '$lib/i18n.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -81,43 +82,29 @@
 
 <div class="mb-4 rounded-md border border-base-content/10 bg-base-100/35 p-3">
 	<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-		<label class="form-control min-w-0">
-			<span class="label py-1">
-				<span
-					class="label-text text-xs font-semibold uppercase tracking-normal text-base-content/60"
-				>
-					{m.charts_range_from({ locale: i18n.languageTag })}
-				</span>
-			</span>
-			<input
+		<div class="min-w-0">
+			<FormInput
+				label={m.charts_range_from({ locale: i18n.languageTag })}
 				type="date"
-				class="input input-bordered input-sm w-full"
 				value={startDate}
 				min={minDate}
 				max={maxDate}
 				disabled={sortedDates.length === 0}
 				onchange={handleStartInput}
 			/>
-		</label>
+		</div>
 
-		<label class="form-control min-w-0">
-			<span class="label py-1">
-				<span
-					class="label-text text-xs font-semibold uppercase tracking-normal text-base-content/60"
-				>
-					{m.charts_range_to({ locale: i18n.languageTag })}
-				</span>
-			</span>
-			<input
+		<div class="min-w-0">
+			<FormInput
+				label={m.charts_range_to({ locale: i18n.languageTag })}
 				type="date"
-				class="input input-bordered input-sm w-full"
 				value={endDate}
 				min={minDate}
 				max={maxDate}
 				disabled={sortedDates.length === 0}
 				onchange={handleEndInput}
 			/>
-		</label>
+		</div>
 
 		<div
 			class="flex items-center justify-between gap-2 pb-1 text-xs text-base-content/55 sm:min-w-40 sm:justify-end"

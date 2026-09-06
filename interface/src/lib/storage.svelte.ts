@@ -4,7 +4,7 @@ export function createPersistentLanguage(key: string, initialValue: string) {
 
 	// Synchronously checking storage in browser environment
 	if (typeof window !== 'undefined') {
-		const stored = localStorage.getItem(key);
+		const stored = window.localStorage.getItem(key);
 		if (stored) {
 			currentValue = stored;
 		}
@@ -20,7 +20,7 @@ export function createPersistentLanguage(key: string, initialValue: string) {
 		set value(v: string) {
 			state = v;
 			if (typeof window !== 'undefined') {
-				localStorage.setItem(key, v);
+				window.localStorage.setItem(key, v);
 			}
 		}
 	};

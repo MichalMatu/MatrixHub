@@ -159,7 +159,6 @@ export const MATRIX_DATA_METRIC_RSSI = 3 satisfies MatrixDataVisualizationMetric
 export const MATRIX_DATA_METRIC_SIGNAL_QUALITY = 4 satisfies MatrixDataVisualizationMetric;
 export const MATRIX_DATA_METRIC_CSI_MOTION = 5 satisfies MatrixDataVisualizationMetric;
 export const MATRIX_DATA_VIZ_MODE_GAUGE = 0 satisfies MatrixDataVisualizationMode;
-export const MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE = 1 satisfies MatrixDataVisualizationMode;
 export const MATRIX_DATA_VIZ_MODE_HEATMAP = 2 satisfies MatrixDataVisualizationMode;
 export const MATRIX_DATA_VIZ_MODE_TREND = 3 satisfies MatrixDataVisualizationMode;
 export const MATRIX_DATA_VIZ_MODE_SPECTRUM_BARS = 4 satisfies MatrixDataVisualizationMode;
@@ -369,7 +368,7 @@ export const MATRIX_EFFECT_CATEGORIES: MatrixEffectCategoryDefinition[] = [
 	}
 ];
 
-export const MATRIX_NATIVE_3D_EFFECT_CATEGORIES: MatrixEffectCategoryDefinition[] = [
+const MATRIX_NATIVE_3D_EFFECT_CATEGORIES: MatrixEffectCategoryDefinition[] = [
 	{
 		value: 'recommended',
 		effectIds: [0, 1, 3, 4, 5, 7, 10, 14]

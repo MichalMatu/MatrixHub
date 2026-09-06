@@ -1,4 +1,4 @@
-export interface UsbTerminalPresetOsOption {
+interface UsbTerminalPresetOsOption {
 	value: string;
 	label: string;
 }

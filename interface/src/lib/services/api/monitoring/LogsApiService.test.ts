@@ -48,7 +48,9 @@ describe('LogsApiService', () => {
 				})
 			})
 		);
-		expect(await blob.text()).toBe('demo-binary');
+		expect(blob).toBeInstanceOf(Blob);
+		expect(blob.size).toBe('demo-binary'.length);
+		expect(blob.type).toBe('application/octet-stream');
 	});
 
 	it('downloads historical chart data by full log path', async () => {

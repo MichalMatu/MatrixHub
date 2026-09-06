@@ -3,7 +3,7 @@ import { browser } from '$app/environment';
 export const MATRIX_DISPLAY_TAB_PATH = '/system/matrix';
 export const MATRIX_LAST_TAB_STORAGE_KEY = 'matrixhub.matrix.lastTab';
 
-export const MATRIX_TAB_PATHS = [
+const MATRIX_TAB_PATHS = [
 	MATRIX_DISPLAY_TAB_PATH,
 	'/system/matrix/alarms',
 	'/system/matrix/effects',

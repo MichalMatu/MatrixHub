@@ -1,6 +1,6 @@
 import type { PowerConfig } from '$lib/types/system/power';
 
-export const MS_PER_MIN = 60000;
+const MS_PER_MIN = 60000;
 export const INACTIVITY_MIN_MINUTES = 5;
 export const INACTIVITY_MAX_MINUTES = 1440;
 export const GRACE_MIN_MINUTES = 1;

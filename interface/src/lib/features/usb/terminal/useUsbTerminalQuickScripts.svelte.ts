@@ -25,7 +25,7 @@ interface MacroChannelStore {
 	unsubscribeChannel(channel: string): void;
 }
 
-export interface HostQuickAction {
+interface HostQuickAction {
 	id: string;
 	name: string;
 }

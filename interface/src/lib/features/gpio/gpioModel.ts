@@ -11,7 +11,7 @@ export function cloneGpioConfig(config: GpioConfig): GpioConfig {
 	};
 }
 
-export function normalizeDebounce(value: number): number {
+function normalizeDebounce(value: number): number {
 	if (!Number.isFinite(value)) return 50;
 	return Math.min(GPIO_DEBOUNCE_MAX_MS, Math.max(GPIO_DEBOUNCE_MIN_MS, Math.round(value)));
 }
@@ -51,7 +51,7 @@ export function getGpioModeLabel(mode: GpioMode): string {
 	}
 }
 
-export function getGpioPullLabel(pull: GpioPull): string {
+function getGpioPullLabel(pull: GpioPull): string {
 	switch (pull) {
 		case 'none':
 			return m.gpio_pull_none({ locale: i18n.languageTag });
