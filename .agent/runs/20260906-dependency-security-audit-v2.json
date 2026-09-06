@@ -1,16 +1,16 @@
 {
   "event": "command_started",
   "phase": "commands",
-  "index": 3,
+  "index": 4,
   "total": 4,
-  "command": "set -euo pipefail; cd interface; npm outdated --json >/tmp/matrixhub-outdated-v2.json || true; python3 - <<'PY'\nimport json\nd=json.load(open('/tmp/matrixhub-outdated-v2.json'))\nfor name,v in sorted(d.items()): print('OUTDATED', json.dumps({'name':name,'current':v.get('current'),'wanted':v.get('wanted'),'latest':v.get('latest'),'type':v.get('type')}, sort_keys=True))\nPY",
-  "pid": 50908,
+  "command": "set -euo pipefail; cd interface; for p in vitest @vitest/ui @vitest/coverage-v8 @inlang/paraglide-js @sveltejs/kit svelte basic-ftp minimatch @isaacs/brace-expansion devalue; do echo ===$p===; npm explain \"$p\" 2>/dev/null | head -80 || true; done",
+  "pid": 50939,
   "timeout": 1200,
   "idle_timeout": 300,
   "memory_limit_mb": 2048,
-  "started_at": "2026-09-06T05:21:59.163144+00:00",
-  "stage_name": "outdated",
-  "stage_index": 3,
+  "started_at": "2026-09-06T05:22:01.522348+00:00",
+  "stage_name": "dependency-paths",
+  "stage_index": 4,
   "stage_total": 4,
   "stage_phase": "commands",
   "task_id": "20260906-dependency-security-audit-v2",
@@ -18,5 +18,5 @@
   "task_digest": "1a854223d6f5c475e3c355337d46bb488a31f2ed4366f2d0cb2fb2f614c931a4",
   "daemon_version": "4.18.4",
   "daemon_pid": 50618,
-  "updated_at": "2026-09-06T05:21:59.249336+00:00"
+  "updated_at": "2026-09-06T05:22:01.610972+00:00"
 }
