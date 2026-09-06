@@ -1,0 +1,116 @@
+{
+  "id": "20260906-quality-debt-audit-v2",
+  "status": "done",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": false,
+  "started_at": "2026-09-06T04:47:58.279911+00:00",
+  "command_timeout": 180,
+  "edits": {},
+  "commands": [
+    {
+      "command": "git fetch --prune origin && git rev-parse origin/develop && git status --short",
+      "exit_code": 0,
+      "output": "From https://github.com/MichalMatu/MatrixHub\n   2a8fd07..526cad5  agent-control -> origin/agent-control\n9d64c8ea61909349e307596753dd2444ad00a775\n",
+      "elapsed_seconds": 1.251,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 512,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 1.73,
+      "output_policy": "stream",
+      "captured_output_chars": 145,
+      "output_truncated": false,
+      "current_rss_mb": 1.73,
+      "stage_name": "preflight",
+      "stage_index": 1,
+      "stage_total": 3,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "grep -RInE 'normalizeDebounce|getGpioPullLabel|MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE|MATRIX_NATIVE_3D_EFFECT_CATEGORIES|MATRIX_TAB_PATHS|MS_PER_MIN|UsbTerminalPresetOsOption|HostQuickAction' interface/src || true",
+      "exit_code": 0,
+      "output": "interface/src/lib/features/usb/terminal/useUsbTerminalQuickScripts.svelte.ts:28:export interface HostQuickAction {\ninterface/src/lib/features/usb/terminal/useUsbTerminalQuickScripts.svelte.ts:46:const HOST_QUICK_ACTIONS: HostQuickAction[] = [\ninterface/src/lib/features/usb/terminal/usbTerminalCommandPresets.ts:1:export interface UsbTerminalPresetOsOption {\ninterface/src/lib/features/usb/terminal/usbTerminalCommandPresets.ts:13:export const USB_TERMINAL_PRESET_OS_OPTIONS: UsbTerminalPresetOsOption[] = [\ninterface/src/lib/features/system/power/powerConfigModel.ts:3:export const MS_PER_MIN = 60000;\ninterface/src/lib/features/system/power/powerConfigModel.ts:88:\tconst inactivityMinutes = settings.inactivity_timeout_ms / MS_PER_MIN;\ninterface/src/lib/features/system/power/powerConfigModel.ts:89:\tconst graceMinutes = settings.grace_after_boot_ms / MS_PER_MIN;\ninterface/src/lib/features/system/power/powerConfigModel.ts:90:\tconst wakeIntervalMinutes = settings.wake_interval_ms / MS_PER_MIN;\ninterface/src/lib/features/system/power/powerConfigModel.ts:91:\tconst timerAwakeMinutes = settings.timer_wake_awake_ms / MS_PER_MIN;\ninterface/src/lib/features/system/power/powerConfigModel.ts:92:\tconst buttonAwakeMinutes = settings.button_wake_awake_ms / MS_PER_MIN;\ninterface/src/lib/features/system/power/powerConfigModel.ts:133:\treturn Math.max(0, Math.round(ms / MS_PER_MIN));\ninterface/src/lib/features/system/power/powerConfigModel.ts:137:\treturn Math.max(0, Math.round(minutes)) * MS_PER_MIN;\ninterface/src/lib/features/system/matrix/matrixNavigation.ts:6:export const MATRIX_TAB_PATHS = [\ninterface/src/lib/features/system/matrix/matrixNavigation.ts:13:export type MatrixTabPath = (typeof MATRIX_TAB_PATHS)[number];\ninterface/src/lib/features/system/matrix/matrixNavigation.ts:16:\treturn MATRIX_TAB_PATHS.includes(path as MatrixTabPath);\ninterface/src/lib/features/system/matrix/matrixModel.ts:162:export const MATRIX_DATA_VIZ_MODE_CENTER_RIPPLE = 1 satisfies MatrixDataVisualizationMode;\ninterface/src/lib/features/system/matrix/matrixModel.ts:372:export const MATRIX_NATIVE_3D_EFFECT_CATEGORIES: MatrixEffectCategoryDefinition[] = [\ninterface/src/lib/features/system/matrix/matrixModel.ts:441:\t\t? MATRIX_NATIVE_3D_EFFECT_CATEGORIES\ninterface/src/lib/features/gpio/gpioModel.ts:14:export function normalizeDebounce(value: number): number {\ninterface/src/lib/features/gpio/gpioModel.ts:22:\t\tdebounce_ms: normalizeDebounce(channel.debounce_ms)\ninterface/src/lib/features/gpio/gpioModel.ts:54:export function getGpioPullLabel(pull: GpioPull): string {\ninterface/src/lib/features/gpio/gpioModel.ts:76:\t\t{ value: 'none', label: getGpioPullLabel('none') },\ninterface/src/lib/features/gpio/gpioModel.ts:77:\t\t{ value: 'up', label: getGpioPullLabel('up'), disabled: options.allowPullup === false },\ninterface/src/lib/features/gpio/gpioModel.ts:78:\t\t{ value: 'down', label: getGpioPullLabel('down'), disabled: options.allowPulldown === false }\n",
+      "elapsed_seconds": 1.12,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 512,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 2.5,
+      "output_policy": "stream",
+      "captured_output_chars": 2942,
+      "output_truncated": false,
+      "current_rss_mb": 2.5,
+      "stage_name": "unused-symbol-references",
+      "stage_index": 2,
+      "stage_total": 3,
+      "stage_phase": "commands"
+    },
+    {
+      "command": "grep -RInE 'type=\"date\"|input input-bordered|setupFiles|jsdom|localStorage' interface/src interface/vite.config.ts interface/package.json | head -250 || true",
+      "exit_code": 0,
+      "output": "interface/src/lib/paraglide/runtime.js:31:export const localStorageKey = \"PARAGLIDE_LOCALE\";\ninterface/src/lib/paraglide/runtime.js:33: * @type {Array<\"cookie\" | \"baseLocale\" | \"globalVariable\" | \"url\" | \"preferredLanguage\" | \"localStorage\" | `custom-${string}`>}\ninterface/src/lib/paraglide/runtime.js:122: * The locale is resolved using your configured strategies (URL, cookie, localStorage, etc.)\ninterface/src/lib/paraglide/runtime.js:175:            strat === \"localStorage\" &&\ninterface/src/lib/paraglide/runtime.js:177:            locale = localStorage.getItem(localStorageKey) ?? undefined;\ninterface/src/lib/paraglide/runtime.js:246: * Updates the locale using your configured strategies (cookie, localStorage, URL, etc.).\ninterface/src/lib/paraglide/runtime.js:322:            strat === \"localStorage\" &&\ninterface/src/lib/paraglide/runtime.js:324:            // set the localStorage\ninterface/src/lib/paraglide/runtime.js:325:            localStorage.setItem(localStorageKey, newLocale);\ninterface/src/lib/paraglide/runtime.js:489:        else if (strat === \"localStorage\") {\ninterface/src/lib/paraglide/runtime.js:1385: * @typedef {\"cookie\" | \"baseLocale\" | \"globalVariable\" | \"url\" | \"preferredLanguage\" | \"localStorage\"} BuiltInStrategy\ninterface/src/lib/features/settings/sensors/imu/ImuPage.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/features/settings/sensors/compensation/CompensationPage.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/features/wifisensing/csi/CsiAlarmControls.svelte:191:\t\t\t\t<label class=\"join-item input input-bordered input-sm flex items-center gap-1\">\ninterface/src/lib/features/wifisensing/csi/CsiAlarmControls.svelte:203:\t\t\t\t<label class=\"join-item input input-bordered input-sm flex items-center gap-1\">\ninterface/src/lib/features/auth/LoginForm.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/features/system/matrix/matrixNavigation.ts:21:\tlocalStorage.setItem(MATRIX_LAST_TAB_STORAGE_KEY, path);\ninterface/src/lib/features/system/matrix/matrixNavigation.ts:26:\tconst path = localStorage.getItem(MATRIX_LAST_TAB_STORAGE_KEY);\ninterface/src/lib/features/system/matrix/MatrixDataVisualization.test.svelte.ts:1:// @vitest-environment jsdom\ninterface/src/lib/features/system/matrix/matrixNavigation.test.ts:11:\t\tlocalStorage.clear();\ninterface/src/lib/features/system/matrix/matrixNavigation.test.ts:17:\t\texpect(localStorage.getItem(MATRIX_LAST_TAB_STORAGE_KEY)).toBe('/system/matrix/data');\ninterface/src/lib/features/system/matrix/matrixNavigation.test.ts:22:\t\texpect(localStorage.getItem(MATRIX_LAST_TAB_STORAGE_KEY)).toBe('/system/matrix/data');\ninterface/src/lib/features/system/matrix/matrixNavigation.test.ts:26:\t\tlocalStorage.setItem(MATRIX_LAST_TAB_STORAGE_KEY, '/system/unknown');\ninterface/src/lib/features/system/matrix/MatrixCards.test.svelte.ts:1:// @vitest-environment jsdom\ninterface/src/lib/stores/user.test.ts:17:\t\tlocalStorage.clear();\ninterface/src/lib/stores/user.test.ts:56:\t\tlocalStorage.setItem(\ninterface/src/lib/stores/user.test.ts:68:\t\texpect(localStorage.getItem('user')).toBeNull();\ninterface/src/lib/stores/user.test.ts:77:\t\tlocalStorage.setItem(\ninterface/src/lib/stores/user.test.ts:113:\t\texpect(localStorage.getItem('user')).toBeNull();\ninterface/src/lib/stores/user.svelte.ts:36:\t\t\tconst stored = localStorage.getItem(USER_STORAGE_KEY);\ninterface/src/lib/stores/user.svelte.ts:43:\t\t\t\t\tlocalStorage.removeItem(USER_STORAGE_KEY);\ninterface/src/lib/stores/user.svelte.ts:99:\t\t\tlocalStorage.removeItem(USER_STORAGE_KEY);\ninterface/src/lib/stores/user.svelte.ts:105:\t\t\tlocalStorage.setItem(\ninterface/src/lib/stores/theme.svelte.ts:66:\tconst stored = localStorage.getItem(THEME_STORAGE_KEY);\ninterface/src/lib/stores/theme.svelte.ts:111:\t\t\tlocalStorage.setItem(THEME_STORAGE_KEY, serializeSettings(settings));\ninterface/src/lib/stores/theme.test.svelte.ts:1:// @vitest-environment jsdom\ninterface/src/lib/stores/theme.test.svelte.ts:8:\t\tlocalStorage.clear();\ninterface/src/lib/stores/theme.test.svelte.ts:26:\t\texpect(localStorage.getItem('theme_settings')).toBeNull();\ninterface/src/lib/stores/theme.test.svelte.ts:31:\t\texpect(localStorage.getItem('theme_settings')).toContain('\"theme\":\"night\"');\ninterface/src/lib/stores/theme.test.svelte.ts:47:\t\tlocalStorage.setItem(\ninterface/src/lib/stores/system/socketTransport.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/utils/api/usePolling.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/storage.svelte.ts:7:\t\tconst stored = localStorage.getItem(key);\ninterface/src/lib/storage.svelte.ts:23:\t\t\t\tlocalStorage.setItem(key, v);\ninterface/src/lib/styles/design-system/variants/inputs.ts:6:\tbase: 'input input-bordered input-sm w-full',\ninterface/src/lib/styles/design-system/variants/inputs.ts:7:\tconstrained: 'input input-bordered input-sm w-full max-w-xs',\ninterface/src/lib/styles/design-system/variants/inputs.ts:8:\terror: 'input input-bordered input-sm w-full border-error border-2',\ninterface/src/lib/styles/design-system/variants/inputs.ts:9:\tconstrainedError: 'input input-bordered input-sm w-full max-w-xs border-error border-2'\ninterface/src/lib/components/forms/FormPrimitivesHarness.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/components/layout/SettingsCard.test.svelte.ts:1:// @vitest-environment jsdom\ninterface/src/lib/components/shared/forms/FormColorInput.svelte:21:\t\t`input input-bordered h-8 w-12 cursor-pointer p-0 ${className}`.trim()\ninterface/src/lib/components/macros/MacroList.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/components/macros/MacroCard.test.ts:1:// @vitest-environment jsdom\ninterface/src/lib/components/keyboard/KeyboardPanel.test.ts:1:// @vitest-environment jsdom\ninterface/src/app.html:15:\t\t\t\t\tconst stored = localStorage.getItem('theme_settings');\ninterface/src/routes/charts/components/DateSelector.svelte:93:\t\t\t\ttype=\"date\"\ninterface/src/routes/charts/components/DateSelector.svelte:94:\t\t\t\tclass=\"input input-bordered input-sm w-full\"\ninterface/src/routes/charts/components/DateSelector.svelte:112:\t\t\t\ttype=\"date\"\ninterface/src/routes/charts/components/DateSelector.svelte:113:\t\t\t\tclass=\"input input-bordered input-sm w-full\"\ninterface/package.json:59:\t\t\"jsdom\": \"^27.4.0\",\n",
+      "elapsed_seconds": 0.421,
+      "timed_out": false,
+      "idle_timed_out": false,
+      "memory_limit_mb": 512,
+      "memory_limited": false,
+      "background_process_leak": false,
+      "peak_rss_mb": 4.39,
+      "output_policy": "stream",
+      "captured_output_chars": 6205,
+      "output_truncated": false,
+      "current_rss_mb": 4.39,
+      "stage_name": "form-and-test-config",
+      "stage_index": 3,
+      "stage_total": 3,
+      "stage_phase": "commands"
+    }
+  ],
+  "verification": [],
+  "stages": [
+    {
+      "stage_name": "preflight",
+      "stage_index": 1,
+      "stage_total": 3,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.251
+    },
+    {
+      "stage_name": "unused-symbol-references",
+      "stage_index": 2,
+      "stage_total": 3,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 1.12
+    },
+    {
+      "stage_name": "form-and-test-config",
+      "stage_index": 3,
+      "stage_total": 3,
+      "stage_phase": "commands",
+      "outcome": "passed",
+      "elapsed_seconds": 0.421
+    }
+  ],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.114
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.073
+  },
+  "finished_at": "2026-09-06T04:48:02.929637+00:00",
+  "task_digest": "a3d933329bf4c53433400e53cba31303737495b01cb680d6e214bafd1c425348",
+  "idle_timeout": 180,
+  "task_timeout": 600,
+  "memory_limit_mb": 512,
+  "attempt_id": "cc3413f22b242c39a5a01436",
+  "daemon_version": "4.18.4"
+}
