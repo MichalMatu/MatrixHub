@@ -1,0 +1,30 @@
+{
+  "id": "20260906-dependency-security-minimal-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "resources": [],
+  "command_timeout": 1800,
+  "idle_timeout": 300,
+  "task_timeout": 4800,
+  "memory_limit_mb": 3072,
+  "steps": [
+    {
+      "name": "preflight",
+      "command": "set -euo pipefail; git fetch --prune origin; test \"$(git rev-parse origin/develop)\" = \"f6f316308520cff744b8a02545a5dedb09b27dbc\"; test -z \"$(git status --porcelain)\"; cd interface; npm ci --ignore-scripts >/dev/null"
+    },
+    {
+      "name": "minimal-security-update",
+      "command": "set -euo pipefail; cd interface; npm uninstall --save-dev --ignore-scripts size-limit @size-limit/preset-app; npm uninstall --ignore-scripts glob; npm install --save-dev --ignore-scripts 'glob@^13.0.6'; npm install --save-exact --ignore-scripts svelte@5.57.0; npm install --save-dev --save-exact --ignore-scripts @inlang/paraglide-js@2.25.0 @sveltejs/kit@2.70.3 vite@7.3.6; npm install --save-dev --ignore-scripts vitest@4.1.11 @vitest/ui@4.1.11 @vitest/coverage-v8@4.1.11 dependency-cruiser@17.4.3 rollup@4.63.1; npm install --save-dev --ignore-scripts knip@5.82.1 prettier@3.8.1; npm pkg set 'overrides.cookie=0.7.2'; npm install --ignore-scripts; npm ci --ignore-scripts; cd ..; git diff --check; git diff --stat"
+    },
+    {
+      "name": "audit-and-size",
+      "command": "set -euo pipefail; cd interface; npm audit --json >/tmp/minimal-audit.json || true; npm audit --omit=dev --json >/tmp/minimal-prod-audit.json || true; python3 - <<'PY'\nimport json\nfor label,path in [('ALL','/tmp/minimal-audit.json'),('PROD','/tmp/minimal-prod-audit.json')]:\n d=json.load(open(path)); v=d.get('metadata',{}).get('vulnerabilities',{}); print(label,json.dumps(v,sort_keys=True));\n for name,item in sorted(d.get('vulnerabilities',{}).items()): print(label,name,item.get('severity'),item.get('range'),item.get('fixAvailable'))\nPY\nnpm run build >/tmp/minimal-build.log 2>&1; node ./scripts/check-build-size.mjs || true"
+    },
+    {
+      "name": "package-versions",
+      "command": "set -euo pipefail; cd interface; npm ls --depth=0 @inlang/paraglide-js @sveltejs/kit svelte vite vitest @vitest/ui @vitest/coverage-v8 dependency-cruiser rollup tailwindcss @tailwindcss/vite daisyui knip prettier glob || true"
+    }
+  ]
+}
