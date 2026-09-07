@@ -49,9 +49,9 @@ If Chat Bridge is active, the wake envelope must identify exactly `LA_AGENT=0333
 - For release snapshots and post-release branch synchronization, follow `github.md`; do not merge `main` back into `develop` merely to import a release snapshot.
 - One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
 - Every task must declare `resources` explicitly; missing, malformed, duplicated, oversized, or non-canonical declarations are terminal task-contract errors with no compatibility fallback.
-- Use `resources: []` for repository-local software work, including PlatformIO builds/tests, when no exclusive external device or host-global state is used. `memory_limit_mb` is an independent RSS watchdog and does not determine resource classification.
-- Use stable named resources such as `board:matrixhub-s3` for USB, serial, upload/flash, monitor, and hardware work so only tasks sharing that concrete resource serialize.
-- Use `resources: ["machine"]` only for genuine whole-host operations such as global Local Agent maintenance or host-global toolchain mutation. Resource contention is a wait state and must continue with `NEXT`, not `STOP`.
+- Every executable task in this repository uses `resources: []`, including PlatformIO builds/tests and USB, serial, upload/flash, monitor, and hardware work. `memory_limit_mb` remains an independent RSS watchdog.
+- Detect and verify the current device/port inside the task instead of reserving it as a scheduler resource.
+- Do not declare named resources or `machine` from this repository; host-global Local Agent maintenance belongs to the supervisor/administration path.
 - Repository workers must not perform supervisor-wide restart/self-update. The production Local Agent runtime lives on `MichalMatu/local-agent/main`; `agent_multirepo.py` remains the serial fallback.
 - Binding failures are safety evidence, not routing hints. Do not guess, rotate, or borrow another repository's binding to make a task execute.
 - A successful Local Agent result proves local execution/verification, not source publication. Commit/push according to this repository's Git rules as an explicit final gate.
