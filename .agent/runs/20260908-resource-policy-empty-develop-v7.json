@@ -1,0 +1,14 @@
+{
+  "event": "task_started",
+  "task_id": "20260908-resource-policy-empty-develop-v7",
+  "task_digest": "d78fcbdf05d21d0361da16a7177ac73ccd65086f0fcbebd2e31758ec5e81d06a",
+  "idle_timeout": 120,
+  "task_timeout": 900,
+  "memory_limit_mb": 512,
+  "started_at": "2026-09-07T22:50:45.289782+00:00",
+  "attempt_id": "62725904d57d36c9fa6c8186",
+  "daemon_version": "4.18.13",
+  "daemon_pid": 89291,
+  "updated_at": "2026-09-07T22:50:45.289950+00:00",
+  "pid": 89291
+}
