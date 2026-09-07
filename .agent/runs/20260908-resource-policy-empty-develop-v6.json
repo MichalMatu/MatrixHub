@@ -1,14 +1,13 @@
 {
-  "event": "task_started",
+  "event": "task_finished",
   "task_id": "20260908-resource-policy-empty-develop-v6",
   "task_digest": "8516e9c9b11f970988ffb7722278392e2dbe26c2280ab353b5190208325410db",
-  "idle_timeout": 120,
-  "task_timeout": 900,
-  "memory_limit_mb": 512,
-  "started_at": "2026-09-07T22:47:40.352009+00:00",
+  "status": "failed",
+  "failure_reason": "patch_failed",
+  "finished_at": "2026-09-07T22:47:42.463260+00:00",
   "attempt_id": "3b78711167270682989c8af3",
   "daemon_version": "4.18.13",
   "daemon_pid": 85611,
-  "updated_at": "2026-09-07T22:47:40.352070+00:00",
+  "updated_at": "2026-09-07T22:47:42.815850+00:00",
   "pid": 85611
 }
