@@ -1,0 +1,41 @@
+{
+  "id": "20260908-resource-policy-empty-develop-v5",
+  "status": "failed",
+  "mode": "commands",
+  "work_branch": "develop",
+  "allow_write": true,
+  "started_at": "2026-09-07T22:46:02.391210+00:00",
+  "command_timeout": 300,
+  "edits": {
+    "patch": {
+      "applied": false,
+      "reason": "git_apply_check_failed",
+      "check": {
+        "exit_code": 1,
+        "output": "error: patch failed: AGENTS.md:1\nerror: AGENTS.md: patch does not apply\n",
+        "elapsed_seconds": 0.062
+      }
+    }
+  },
+  "commands": [],
+  "verification": [],
+  "stages": [],
+  "git_status": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.116
+  },
+  "git_diff": {
+    "exit_code": 0,
+    "output": "",
+    "elapsed_seconds": 0.069
+  },
+  "failure_reason": "patch_failed",
+  "finished_at": "2026-09-07T22:46:04.245574+00:00",
+  "task_digest": "7d9b9a81174f7795236e1973b3541786cde9be893026f533b399ea83d818188c",
+  "idle_timeout": 120,
+  "task_timeout": 900,
+  "memory_limit_mb": 512,
+  "attempt_id": "98bbdd6abe087152f752bf72",
+  "daemon_version": "4.18.13"
+}
