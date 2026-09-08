@@ -48,6 +48,8 @@ If Chat Bridge is active, the wake envelope must identify exactly `LA_AGENT=0333
 - Set `work_branch` explicitly. Follow MatrixHub Git policy: normal development is on `develop`; `main` is the stable release line unless the user explicitly requests another branch.
 - For release snapshots and post-release branch synchronization, follow `github.md`; do not merge `main` back into `develop` merely to import a release snapshot.
 - One MatrixHub task executes at a time, but another registered repository may overlap when resource admission permits it.
+- When a MatrixHub task is active and healthy, do not queue a duplicate or poll it every 30 seconds. With Chat Bridge, use no sooner than about two minutes for an early liveness re-check and normally 5-10 minutes for multi-minute builds/tests unless exact evidence supports a nearer completion. Explicit `NEXT=30s` remains available for deliberate operator/emergency use.
+- If exact current run/status evidence proves that the active task cannot achieve its intended outcome, publish repository-scoped `cancel_task` for that exact task id, wait for cancellation/terminal result evidence, and only then queue replacement work. Do not cancel merely because healthy work is slower than expected.
 - Every task must declare `resources` explicitly; missing, malformed, duplicated, oversized, or non-canonical declarations are terminal task-contract errors with no compatibility fallback.
 - Every executable task in this repository uses `resources: []`, including PlatformIO builds/tests and USB, serial, upload/flash, monitor, and hardware work. `memory_limit_mb` remains an independent RSS watchdog.
 - Detect and verify the current device/port inside the task instead of reserving it as a scheduler resource.
