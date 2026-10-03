@@ -1,9 +1,9 @@
 {
   "version": 1,
   "daemon_version": "4.20.4",
-  "state": "idle",
-  "pid": 79318,
-  "updated_at": "2026-10-03T19:57:40.902170+00:00",
+  "state": "running",
+  "pid": 82447,
+  "updated_at": "2026-10-03T19:59:50.939029+00:00",
   "self_revision": "cfa0a2380784d6cb2e5ae79cb8d92a3b52158fe5",
   "poll_seconds": 15,
   "self_update_seconds": 60,
@@ -14,7 +14,7 @@
   "task_timeout_default": 1800,
   "task_timeout_max": 21600,
   "memory_limit_mb_default": 4096,
-  "current_task_id": null,
+  "current_task_id": "superchat-multirepo-routing-proof-matrixhub-20261003-v1",
   "current_attempt_id": null,
   "current_task_digest": null,
   "repository_id": "matrixhub",
@@ -23,7 +23,8 @@
   "default_branch": "main",
   "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
   "execution_model": "multi_repository_worker",
-  "worker_pid": 79318,
+  "worker_pid": 82447,
   "supervisor_pid": 64726,
+  "active_resources": [],
   "execution_variant": "parallel"
 }
