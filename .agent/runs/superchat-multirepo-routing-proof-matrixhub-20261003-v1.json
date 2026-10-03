@@ -1,14 +1,13 @@
 {
-  "event": "task_started",
+  "event": "task_finished",
   "task_id": "superchat-multirepo-routing-proof-matrixhub-20261003-v1",
   "task_digest": "1a155ca83e7e847baa90afbde7ce48c8e17d0cea8792a0acab460865b5f4de1d",
-  "idle_timeout": 60,
-  "task_timeout": 300,
-  "memory_limit_mb": 512,
-  "started_at": "2026-10-03T19:59:54.101824+00:00",
+  "status": "done",
+  "failure_reason": null,
+  "finished_at": "2026-10-03T19:59:56.120830+00:00",
   "attempt_id": "4b5e631878f4ffa1caed25fd",
   "daemon_version": "4.20.4",
   "daemon_pid": 82447,
-  "updated_at": "2026-10-03T19:59:54.102027+00:00",
+  "updated_at": "2026-10-03T19:59:56.479645+00:00",
   "pid": 82447
 }
