@@ -1,0 +1,13 @@
+{
+  "event": "task_finished",
+  "task_id": "la-mac-b1c-lane-smoke-matrixhub-20261016-v1",
+  "task_digest": "da9b0f2344c7754bbb7a2bc6475d17ba606874c497158cd75ca4b07f0c0361e3",
+  "status": "done",
+  "failure_reason": null,
+  "finished_at": "2026-10-16T16:37:55.687898+00:00",
+  "attempt_id": "a2613cdd47f98c6b213c8ffa",
+  "daemon_version": "4.20.6",
+  "daemon_pid": 34194,
+  "updated_at": "2026-10-16T16:37:55.976881+00:00",
+  "pid": 34194
+}

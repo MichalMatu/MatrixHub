@@ -1,0 +1,18 @@
+{
+  "id": "la-mac-b1c-lane-smoke-matrixhub-20261016-v1",
+  "dedupe_key": "la-mac-b1c-lane-smoke-matrixhub-20261016-v1",
+  "dedupe_revision": 1,
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "output_policy": "summary",
+  "command_timeout": 105,
+  "idle_timeout": 100,
+  "task_timeout": 300,
+  "memory_limit_mb": 460,
+  "commands": [
+    "set -euo pipefail\ntest \"$(uname -s)\" = Darwin\ngit rev-parse --is-inside-work-tree | grep -Fx true\nprintf 'MAC_B1C_LANE_E2E_OK repository=matrixhub\\n'\n"
+  ]
+}
