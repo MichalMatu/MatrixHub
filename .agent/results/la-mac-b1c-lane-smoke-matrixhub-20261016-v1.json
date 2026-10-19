@@ -1,0 +1,59 @@
+{
+  "allow_write": false,
+  "attempt_id": "a2613cdd47f98c6b213c8ffa",
+  "command_timeout": 105,
+  "commands": [
+    {
+      "background_process_leak": false,
+      "captured_output_chars": 46,
+      "command": "set -euo pipefail\ntest \"$(uname -s)\" = Darwin\ngit rev-parse --is-inside-work-tree | grep -Fx true\nprintf 'MAC_B1C_LANE_E2E_OK repository=matrixhub\\n'\n",
+      "elapsed_seconds": 0.128,
+      "exit_code": 0,
+      "idle_timed_out": false,
+      "memory_limit_mb": 460,
+      "memory_limited": false,
+      "output": "true\nMAC_B1C_LANE_E2E_OK repository=matrixhub\n",
+      "output_policy": "stream",
+      "output_truncated": false,
+      "peak_rss_mb": null,
+      "stage_index": 1,
+      "stage_name": "command-1",
+      "stage_phase": "commands",
+      "stage_total": 1,
+      "timed_out": false
+    }
+  ],
+  "daemon_version": "4.20.6",
+  "edits": {},
+  "finished_at": "2026-10-16T16:37:55.687898+00:00",
+  "git_diff": {
+    "elapsed_seconds": 0.071,
+    "exit_code": 0,
+    "output": ""
+  },
+  "git_status": {
+    "elapsed_seconds": 0.114,
+    "exit_code": 0,
+    "output": ""
+  },
+  "id": "la-mac-b1c-lane-smoke-matrixhub-20261016-v1",
+  "idle_timeout": 100,
+  "memory_limit_mb": 460,
+  "mode": "commands",
+  "stages": [
+    {
+      "elapsed_seconds": 0.128,
+      "outcome": "passed",
+      "stage_index": 1,
+      "stage_name": "command-1",
+      "stage_phase": "commands",
+      "stage_total": 1
+    }
+  ],
+  "started_at": "2026-10-16T16:37:54.041947+00:00",
+  "status": "done",
+  "task_digest": "da9b0f2344c7754bbb7a2bc6475d17ba606874c497158cd75ca4b07f0c0361e3",
+  "task_timeout": 300,
+  "verification": [],
+  "work_branch": "main"
+}

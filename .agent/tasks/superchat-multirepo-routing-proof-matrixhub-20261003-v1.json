@@ -1,0 +1,15 @@
+{
+  "id": "superchat-multirepo-routing-proof-matrixhub-20261003-v1",
+  "agent_binding": "033327ab-700d-43b4-9b3b-caff1acaa2c7",
+  "mode": "commands",
+  "work_branch": "main",
+  "allow_write": false,
+  "resources": [],
+  "command_timeout": 120,
+  "idle_timeout": 60,
+  "task_timeout": 300,
+  "memory_limit_mb": 512,
+  "commands": [
+    "set -euo pipefail; echo REPOSITORY_ID=matrixhub; echo ORIGIN=$(git remote get-url origin); echo BRANCH=$(git branch --show-current); echo HEAD=$(git rev-parse HEAD); test -z \"$(git status --porcelain=v1 --untracked-files=all)\"; case \"$(git remote get-url origin)\" in *MichalMatu/MatrixHub*) ;; *) echo WRONG_ORIGIN >&2; exit 2;; esac; echo ROUTING_PROOF=PASS"
+  ]
+}
