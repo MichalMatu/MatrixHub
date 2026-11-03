@@ -40,3 +40,4 @@ jobs:
             interface/test-results
             interface/playwright-report
           if-no-files-found: ignore
+          retention-days: 3
